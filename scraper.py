@@ -12,7 +12,7 @@ lead = {
     "nicho": "teste"
 }
 
-resultado = supabase.table("leads").insert(lead).execute()
+resultado = supabase.table("leds").insert(lead).execute()
 
 print("Lead inserido com sucesso!")
 print(resultado.data)
