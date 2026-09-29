@@ -6,40 +6,52 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+salvos = 0
+duplicados = 0
+erros = 0
+
 
 def lead_ja_existe(instagram):
-    resposta = (
-        supabase
-        .table("leds")
-        .select("id, instagram")
-        .eq("instagram", instagram)
-        .limit(1)
-        .execute()
-    )
+    try:
+        resposta = (
+            supabase
+            .table("leds")
+            .select("id, instagram")
+            .eq("instagram", instagram)
+            .limit(1)
+            .execute()
+        )
+        return len(resposta.data) > 0
 
-    return len(resposta.data) > 0
+    except Exception as e:
+        print(f"Erro ao verificar {instagram}: {e}")
+        return False
 
 
 def salvar_lead(lead):
+    global salvos, duplicados, erros
+
     instagram = lead.get("instagram")
 
     if not instagram:
         print("Lead ignorado: sem Instagram.")
+        erros += 1
         return
 
-    if lead_ja_existe(instagram):
-        print(f"Duplicado ignorado: {instagram}")
-        return
+    try:
+        if lead_ja_existe(instagram):
+            print(f"Duplicado ignorado: {instagram}")
+            duplicados += 1
+            return
 
-    resultado = (
-        supabase
-        .table("leds")
-        .insert(lead)
-        .execute()
-    )
+        supabase.table("leds").insert(lead).execute()
 
-    print(f"Lead salvo: {instagram}")
-    print(resultado.data)
+        print(f"Lead salvo: {instagram}")
+        salvos += 1
+
+    except Exception as e:
+        print(f"Erro ao salvar {instagram}: {e}")
+        erros += 1
 
 
 leads_encontrados = [
@@ -63,8 +75,13 @@ leads_encontrados = [
     }
 ]
 
-
 for lead in leads_encontrados:
     salvar_lead(lead)
 
+print("")
+print("===== RESUMO =====")
+print(f"Leads salvos: {salvos}")
+print(f"Duplicados ignorados: {duplicados}")
+print(f"Erros: {erros}")
+print("==================")
 print("Processamento concluido.")
