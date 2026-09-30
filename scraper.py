@@ -1,44 +1,53 @@
 import os
 import re
-import io
-import csv
 import time
 import random
-import zipfile
+import base64
+import hashlib
 import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests
+from bs4 import BeautifulSoup
 from ddgs import DDGS
 from supabase import create_client
 
 
 # ============================================================
 # MÁQUINA NACIONAL DE LEADS - NUTRIÇÃO
+# ============================================================
 #
-# BASE OFICIAL:
-# INEP - CENSO DA EDUCAÇÃO SUPERIOR 2024
+# DESCOBERTA DAS FACULDADES:
 #
-# FLUXO:
+# e-MEC
+#   ↓
+# Estado
+#   ↓
+# Município oficial
+#   ↓
+# Instituições oficiais naquele município
+#   ↓
+# Campus/endereço
+#   ↓
+# Cursos daquele campus
+#   ↓
+# Tem Nutrição?
+#   ↓
+# SIM → salva instituição no Supabase
 #
-# INEP/e-MEC
-#     ↓
-# Curso de Nutrição
-#     ↓
-# Instituição + Cidade + Estado
-#     ↓
-# Supabase
-#     ↓
-# Até 5 faculdades por execução
-#     ↓
-# Busca de pessoas/formandos
-#     ↓
-# Filtro rígido
-#     ↓
-# Salva lead imediatamente
-#     ↓
-# Checkpoint
+# CAPTAÇÃO:
+#
+# instituição_nutricao
+#   ↓
+# busca pública/indexada
+#   ↓
+# filtro pessoa real
+#   ↓
+# 2025 / 2026 / final do curso
+#   ↓
+# salva lead imediatamente
+#
 # ============================================================
 
 
@@ -56,26 +65,27 @@ supabase = create_client(
 
 
 # ============================================================
-# FONTE OFICIAL INEP
+# e-MEC
 # ============================================================
 
-INEP_ZIP_URL = (
-    "https://download.inep.gov.br/"
-    "microdados/"
-    "microdados_censo_da_educacao_superior_2024.zip"
+EMEC_BASE = "https://emec.mec.gov.br/emec"
+
+EMEC_CONSULTA_AVANCADA = (
+    f"{EMEC_BASE}/nova-index/"
+    "listar-consulta-avancada/list/1000"
 )
 
-INEP_FONTE_URL = (
-    "https://www.gov.br/inep/pt-br/"
-    "acesso-a-informacao/dados-abertos/"
-    "microdados/censo-da-educacao-superior"
+EMEC_TOKEN_IES = (
+    "d96957f455f6405d14c6542552b0f6eb"
 )
 
-ANO_BASE_INEP = "2024"
+EMEC_TOKEN_ENDERECO = (
+    "aa547dc9e0377b562e2354d29f06085f"
+)
 
 
 # ============================================================
-# ORDEM DOS ESTADOS
+# ESTADOS
 # ============================================================
 
 ESTADOS = [
@@ -113,17 +123,46 @@ ESTADOS = [
 # LIMITES
 # ============================================================
 
+# Quantos municípios oficiais do e-MEC serão inspecionados
+# em uma execução.
+#
+# Isso é diferente de pesquisar cada cidade no Google.
+# Aqui consultamos diretamente a estrutura oficial do MEC.
+MAX_MUNICIPIOS_EMEC_POR_EXECUCAO = 20
+
+# Até 5 faculdades terão seus leads pesquisados
+# em cada execução.
 MAX_FACULDADES_POR_EXECUCAO = 5
 
 MAX_RESULTADOS_LEADS = 20
 
-MAX_TENTATIVAS_BUSCA = 3
+MAX_TENTATIVAS_HTTP = 3
 MAX_TENTATIVAS_SUPABASE = 3
 
-PAUSA_MIN = 5.0
-PAUSA_MAX = 8.0
+PAUSA_EMEC_MIN = 1.5
+PAUSA_EMEC_MAX = 3.0
+
+PAUSA_BUSCA_MIN = 5.0
+PAUSA_BUSCA_MAX = 8.0
 
 PONTUACAO_MINIMA = 9
+
+
+# ============================================================
+# HTTP
+# ============================================================
+
+session = requests.Session()
+
+session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+})
 
 
 # ============================================================
@@ -131,14 +170,17 @@ PONTUACAO_MINIMA = 9
 # ============================================================
 
 estatisticas = {
-    "base_oficial_importada": 0,
-    "instituicoes_importadas": 0,
     "estados_visitados": 0,
+    "municipios_emec": 0,
+    "ies_emec_analisadas": 0,
+    "campus_analisados": 0,
+    "instituicoes_nutricao_encontradas": 0,
+    "instituicoes_novas": 0,
     "faculdades_processadas": 0,
-    "pesquisas_realizadas": 0,
+    "pesquisas_leads": 0,
     "resultados_analisados": 0,
     "perfis_unicos": 0,
-    "contas_institucionais": 0,
+    "institucionais": 0,
     "fora_nicho": 0,
     "qualificados": 0,
     "salvos": 0,
@@ -149,7 +191,7 @@ estatisticas = {
 
 
 # ============================================================
-# MEMÓRIA TEMPORÁRIA DA EXECUÇÃO
+# MEMÓRIA DA EXECUÇÃO
 # ============================================================
 
 evidencias_perfis = {}
@@ -201,26 +243,13 @@ def normalizar_texto(texto):
     return texto.strip()
 
 
-def normalizar_codigo(valor):
-
-    if valor is None:
-        return ""
-
-    valor = str(valor).strip()
-
-    if valor.endswith(".0"):
-        valor = valor[:-2]
-
-    return valor
-
-
 def normalizar_instagram(usuario):
 
     if not usuario:
         return None
 
     usuario = (
-        usuario
+        str(usuario)
         .strip()
         .lower()
         .lstrip("@")
@@ -229,156 +258,123 @@ def normalizar_instagram(usuario):
     return "@" + usuario
 
 
-def pausa():
+def b64(valor):
+
+    return base64.b64encode(
+        str(valor).encode("utf-8")
+    ).decode("utf-8")
+
+
+def pausa_emec():
 
     time.sleep(
         random.uniform(
-            PAUSA_MIN,
-            PAUSA_MAX
+            PAUSA_EMEC_MIN,
+            PAUSA_EMEC_MAX
+        )
+    )
+
+
+def pausa_busca():
+
+    time.sleep(
+        random.uniform(
+            PAUSA_BUSCA_MIN,
+            PAUSA_BUSCA_MAX
         )
     )
 
 
 # ============================================================
-# VERIFICAR SE BASE OFICIAL JÁ ESTÁ NO SUPABASE
+# HTTP COM RETRY
 # ============================================================
 
-def base_oficial_ja_carregada():
+def http_get(
+    url,
+    params=None
+):
 
-    try:
+    ultimo_erro = None
 
-        resposta = (
-            supabase
-            .table("instituicoes_nutricao")
-            .select("id")
-            .eq(
-                "origem",
-                "INEP_CENSO_SUPERIOR_2024"
-            )
-            .limit(1)
-            .execute()
-        )
-
-        return bool(
-            resposta.data
-        )
-
-    except Exception as erro:
-
-        print(
-            f"❌ Erro verificando base oficial: "
-            f"{erro}"
-        )
-
-        estatisticas["erros"] += 1
-
-        return False
-
-
-# ============================================================
-# DOWNLOAD OFICIAL DO INEP
-#
-# SOMENTE NA PRIMEIRA CARGA.
-# Depois as instituições ficam no Supabase.
-# ============================================================
-
-def baixar_microdados_inep():
-
-    print("")
-    print(
-        "================================================="
-    )
-    print(
-        "📥 BAIXANDO BASE OFICIAL DO INEP"
-    )
-    print(
-        "Censo da Educação Superior 2024"
-    )
-    print(
-        "================================================="
-    )
-
-    for tentativa in range(1, 4):
+    for tentativa in range(
+        1,
+        MAX_TENTATIVAS_HTTP + 1
+    ):
 
         try:
 
-            resposta = requests.get(
-                INEP_ZIP_URL,
-                stream=True,
-                timeout=(30, 300)
+            resposta = session.get(
+                url,
+                params=params,
+                timeout=40
             )
 
             resposta.raise_for_status()
 
-            conteudo = io.BytesIO()
-
-            total_bytes = 0
-
-            for bloco in resposta.iter_content(
-                chunk_size=1024 * 1024
-            ):
-
-                if not bloco:
-                    continue
-
-                conteudo.write(bloco)
-
-                total_bytes += len(bloco)
-
-                # Mostra progresso aproximadamente
-                # a cada 50 MB.
-                if (
-                    total_bytes
-                    % (50 * 1024 * 1024)
-                    < len(bloco)
-                ):
-
-                    mb = (
-                        total_bytes
-                        / 1024
-                        / 1024
-                    )
-
-                    print(
-                        f"   Baixados aproximadamente "
-                        f"{mb:.0f} MB..."
-                    )
-
-            conteudo.seek(0)
-
-            # Confere se realmente é ZIP.
-            if not zipfile.is_zipfile(
-                conteudo
-            ):
-
-                raise RuntimeError(
-                    "O arquivo recebido do INEP "
-                    "não é um ZIP válido."
-                )
-
-            print(
-                "✅ Download oficial concluído."
-            )
-
-            return conteudo
+            return resposta
 
         except Exception as erro:
 
+            ultimo_erro = str(erro)
+
             print(
-                f"⚠️ Falha no download "
-                f"{tentativa}/3: {erro}"
+                f"⚠️ e-MEC GET "
+                f"{tentativa}/"
+                f"{MAX_TENTATIVAS_HTTP}: "
+                f"{ultimo_erro}"
             )
 
-            if tentativa < 3:
+            if tentativa < MAX_TENTATIVAS_HTTP:
 
-                espera = 20 * tentativa
-
-                print(
-                    f"   Nova tentativa em "
-                    f"{espera}s..."
+                time.sleep(
+                    5 * tentativa
                 )
 
-                time.sleep(espera)
+    estatisticas["erros"] += 1
+
+    return None
+
+
+def http_post(
+    url,
+    data
+):
+
+    ultimo_erro = None
+
+    for tentativa in range(
+        1,
+        MAX_TENTATIVAS_HTTP + 1
+    ):
+
+        try:
+
+            resposta = session.post(
+                url,
+                data=data,
+                timeout=50
+            )
+
+            resposta.raise_for_status()
+
+            return resposta
+
+        except Exception as erro:
+
+            ultimo_erro = str(erro)
+
+            print(
+                f"⚠️ e-MEC POST "
+                f"{tentativa}/"
+                f"{MAX_TENTATIVAS_HTTP}: "
+                f"{ultimo_erro}"
+            )
+
+            if tentativa < MAX_TENTATIVAS_HTTP:
+
+                time.sleep(
+                    5 * tentativa
+                )
 
     estatisticas["erros"] += 1
 
@@ -386,606 +382,404 @@ def baixar_microdados_inep():
 
 
 # ============================================================
-# LOCALIZAR ARQUIVOS DENTRO DO ZIP
+# MUNICÍPIOS OFICIAIS DO e-MEC
 # ============================================================
 
-def localizar_arquivo_zip(
-    zip_ref,
-    trecho_nome
+def obter_municipios_emec(
+    uf
 ):
 
-    trecho_norm = (
-        trecho_nome
-        .upper()
+    hash_campo = hashlib.md5(
+        "sg_uf".encode("utf-8")
+    ).hexdigest()
+
+    url = (
+        f"{EMEC_BASE}/comum/json/"
+        f"selecionar-municipio/"
+        f"{hash_campo}/"
+        f"{b64(uf)}"
     )
 
-    for nome in zip_ref.namelist():
-
-        if (
-            trecho_norm
-            in nome.upper()
-        ):
-
-            return nome
-
-    return None
-
-
-# ============================================================
-# LER MAPA DE INSTITUIÇÕES OFICIAIS
-# ============================================================
-
-def carregar_mapa_ies(
-    zip_ref,
-    arquivo_ies
-):
-
-    print(
-        "📚 Lendo cadastro oficial de IES..."
+    resposta = http_get(
+        url
     )
 
-    mapa = {}
-
-    with zip_ref.open(
-        arquivo_ies
-    ) as arquivo_binario:
-
-        texto = io.TextIOWrapper(
-            arquivo_binario,
-            encoding="cp1252",
-            errors="replace",
-            newline=""
-        )
-
-        leitor = csv.DictReader(
-            texto,
-            delimiter=";"
-        )
-
-        for linha in leitor:
-
-            codigo = normalizar_codigo(
-                linha.get("CO_IES")
-            )
-
-            nome = (
-                linha.get("NO_IES")
-                or ""
-            ).strip()
-
-            sigla = (
-                linha.get("SG_IES")
-                or ""
-            ).strip()
-
-            if not codigo or not nome:
-                continue
-
-            mapa[codigo] = {
-                "nome": nome,
-                "sigla": sigla,
-            }
-
-    print(
-        f"✅ {len(mapa)} instituições "
-        f"identificadas no cadastro."
-    )
-
-    return mapa
-
-
-# ============================================================
-# CURSO É NUTRIÇÃO?
-# ============================================================
-
-def curso_e_nutricao(
-    linha
-):
-
-    nome_curso = normalizar_texto(
-        linha.get("NO_CURSO")
-    )
-
-    cine = normalizar_texto(
-        linha.get("NO_CINE_ROTULO")
-    )
-
-    # Curso diretamente chamado Nutrição.
-    if nome_curso == "nutricao":
-        return True
-
-    # Proteção para pequenas variações cadastrais.
-    if (
-        "nutricao" in nome_curso
-        and len(nome_curso) <= 40
-    ):
-        return True
-
-    # Segunda confirmação pela classificação CINE.
-    if (
-        "nutricao" in cine
-        and "nutricao" in nome_curso
-    ):
-        return True
-
-    return False
-
-
-# ============================================================
-# FORMATAR NOME OFICIAL DA IES
-# ============================================================
-
-def formatar_nome_ies(
-    nome,
-    sigla
-):
-
-    nome = (
-        nome or ""
-    ).strip()
-
-    sigla = (
-        sigla or ""
-    ).strip()
-
-    if not sigla:
-        return nome
-
-    if (
-        normalizar_texto(sigla)
-        in normalizar_texto(nome)
-    ):
-        return nome
-
-    return (
-        f"{nome} ({sigla})"
-    )
-
-
-# ============================================================
-# EXTRAIR FACULDADES DE NUTRIÇÃO DA BASE OFICIAL
-# ============================================================
-
-def extrair_instituicoes_nutricao(
-    zip_ref,
-    arquivo_cursos,
-    mapa_ies
-):
-
-    print("")
-    print(
-        "🥗 Filtrando somente cursos "
-        "de Nutrição..."
-    )
-
-    instituicoes = {}
-
-    total_linhas = 0
-    total_nutricao = 0
-
-    with zip_ref.open(
-        arquivo_cursos
-    ) as arquivo_binario:
-
-        texto = io.TextIOWrapper(
-            arquivo_binario,
-            encoding="cp1252",
-            errors="replace",
-            newline=""
-        )
-
-        leitor = csv.DictReader(
-            texto,
-            delimiter=";"
-        )
-
-        for linha in leitor:
-
-            total_linhas += 1
-
-            if not curso_e_nutricao(
-                linha
-            ):
-                continue
-
-            # Nesta primeira etapa nacional,
-            # usamos ofertas presenciais.
-            # Isso mantém município/campus preciso.
-            modalidade = normalizar_codigo(
-                linha.get(
-                    "TP_MODALIDADE_ENSINO"
-                )
-            )
-
-            if modalidade not in (
-                "",
-                "1"
-            ):
-                continue
-
-            uf = (
-                linha.get("SG_UF")
-                or ""
-            ).strip().upper()
-
-            cidade = (
-                linha.get("NO_MUNICIPIO")
-                or ""
-            ).strip()
-
-            codigo_ies = normalizar_codigo(
-                linha.get("CO_IES")
-            )
-
-            if (
-                not uf
-                or not cidade
-                or cidade == "."
-                or not codigo_ies
-            ):
-                continue
-
-            dados_ies = mapa_ies.get(
-                codigo_ies
-            )
-
-            if not dados_ies:
-                continue
-
-            nome_ies = formatar_nome_ies(
-                dados_ies["nome"],
-                dados_ies["sigla"]
-            )
-
-            if not nome_ies:
-                continue
-
-            total_nutricao += 1
-
-            chave = (
-                uf,
-                normalizar_texto(
-                    cidade
-                ),
-                normalizar_texto(
-                    nome_ies
-                ),
-            )
-
-            instituicoes[chave] = {
-                "estado": uf,
-                "cidade": cidade,
-                "instituicao": nome_ies,
-                "curso": "Nutrição",
-                "origem":
-                    "INEP_CENSO_SUPERIOR_2024",
-                "fonte_url":
-                    INEP_FONTE_URL,
-                "status":
-                    "pendente",
-                "ultima_verificacao":
-                    agora_iso(),
-                "fonte_validacao":
-                    "INEP/e-MEC",
-                "validada":
-                    True,
-                "tentativa_descoberta":
-                    0,
-            }
-
-            if (
-                total_linhas
-                % 100000
-                == 0
-            ):
-
-                print(
-                    f"   {total_linhas:,} "
-                    f"registros analisados..."
-                )
-
-    print("")
-    print(
-        f"✅ Ofertas de Nutrição analisadas: "
-        f"{total_nutricao}"
-    )
-
-    print(
-        f"✅ Instituições/cidades únicas: "
-        f"{len(instituicoes)}"
-    )
-
-    return list(
-        instituicoes.values()
-    )
-
-
-# ============================================================
-# SALVAR BASE OFICIAL EM LOTES
-# ============================================================
-
-def salvar_base_oficial(
-    registros
-):
-
-    print("")
-    print(
-        "💾 Salvando instituições oficiais "
-        "no Supabase..."
-    )
-
-    tamanho_lote = 100
-
-    total_salvo = 0
-
-    for inicio in range(
-        0,
-        len(registros),
-        tamanho_lote
-    ):
-
-        lote = registros[
-            inicio:
-            inicio + tamanho_lote
-        ]
-
-        sucesso = False
-
-        for tentativa in range(
-            1,
-            MAX_TENTATIVAS_SUPABASE + 1
-        ):
-
-            try:
-
-                (
-                    supabase
-                    .table(
-                        "instituicoes_nutricao"
-                    )
-                    .upsert(
-                        lote,
-                        on_conflict=(
-                            "estado,"
-                            "cidade,"
-                            "instituicao"
-                        )
-                    )
-                    .execute()
-                )
-
-                total_salvo += len(
-                    lote
-                )
-
-                sucesso = True
-
-                print(
-                    f"   ✅ {total_salvo}/"
-                    f"{len(registros)} "
-                    f"registros gravados"
-                )
-
-                break
-
-            except Exception as erro:
-
-                print(
-                    f"⚠️ Erro salvando lote "
-                    f"{tentativa}/"
-                    f"{MAX_TENTATIVAS_SUPABASE}: "
-                    f"{erro}"
-                )
-
-                if (
-                    tentativa
-                    < MAX_TENTATIVAS_SUPABASE
-                ):
-
-                    time.sleep(
-                        5 * tentativa
-                    )
-
-        if not sucesso:
-
-            estatisticas[
-                "erros"
-            ] += 1
-
-            return False
-
-    estatisticas[
-        "instituicoes_importadas"
-    ] = total_salvo
-
-    return True
-
-
-# ============================================================
-# PREPARAR BASE OFICIAL
-# ============================================================
-
-def preparar_base_oficial():
-
-    if base_oficial_ja_carregada():
-
-        print(
-            "✅ Base oficial do INEP "
-            "já está no Supabase."
-        )
-
-        print(
-            "   Não será baixada novamente."
-        )
-
-        return True
-
-    arquivo_zip_memoria = (
-        baixar_microdados_inep()
-    )
-
-    if not arquivo_zip_memoria:
-        return False
+    if not resposta:
+        return []
 
     try:
 
-        with zipfile.ZipFile(
-            arquivo_zip_memoria
-        ) as zip_ref:
-
-            arquivo_ies = (
-                localizar_arquivo_zip(
-                    zip_ref,
-                    "MICRODADOS_ED_SUP_IES_2024.CSV"
-                )
-            )
-
-            if not arquivo_ies:
-
-                arquivo_ies = (
-                    localizar_arquivo_zip(
-                        zip_ref,
-                        "CADASTRO_IES_2024.CSV"
-                    )
-                )
-
-            arquivo_cursos = (
-                localizar_arquivo_zip(
-                    zip_ref,
-                    "MICRODADOS_CADASTRO_CURSOS_2024.CSV"
-                )
-            )
-
-            if not arquivo_ies:
-
-                raise RuntimeError(
-                    "Arquivo oficial de IES "
-                    "não encontrado no pacote."
-                )
-
-            if not arquivo_cursos:
-
-                raise RuntimeError(
-                    "Arquivo oficial de cursos "
-                    "não encontrado no pacote."
-                )
-
-            mapa_ies = carregar_mapa_ies(
-                zip_ref,
-                arquivo_ies
-            )
-
-            registros = (
-                extrair_instituicoes_nutricao(
-                    zip_ref,
-                    arquivo_cursos,
-                    mapa_ies
-                )
-            )
-
-            if not registros:
-
-                raise RuntimeError(
-                    "Nenhuma instituição de "
-                    "Nutrição foi encontrada."
-                )
-
-            if not salvar_base_oficial(
-                registros
-            ):
-
-                return False
-
-            estatisticas[
-                "base_oficial_importada"
-            ] = 1
-
-            print("")
-            print(
-                "================================================="
-            )
-
-            print(
-                "✅ BASE OFICIAL CARREGADA"
-            )
-
-            print(
-                "A partir das próximas execuções "
-                "o download não será repetido."
-            )
-
-            print(
-                "================================================="
-            )
-
-            return True
+        dados = resposta.json()
 
     except Exception as erro:
 
         print(
-            f"❌ Erro preparando base "
-            f"oficial: {erro}"
-        )
-
-        estatisticas["erros"] += 1
-
-        return False
-
-
-# ============================================================
-# BUSCAR FACULDADES PENDENTES
-# ============================================================
-
-def buscar_faculdades_pendentes(
-    uf,
-    limite
-):
-
-    try:
-
-        resposta = (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .select("*")
-            .eq(
-                "estado",
-                uf
-            )
-            .eq(
-                "status",
-                "pendente"
-            )
-            .eq(
-                "validada",
-                True
-            )
-            .order("cidade")
-            .order("instituicao")
-            .limit(limite)
-            .execute()
-        )
-
-        return (
-            resposta.data
-            or []
-        )
-
-    except Exception as erro:
-
-        print(
-            f"❌ Erro carregando fila: "
-            f"{erro}"
+            f"❌ Resposta de municípios "
+            f"do e-MEC inválida: {erro}"
         )
 
         estatisticas["erros"] += 1
 
         return []
 
+    municipios = []
 
-def existem_pendentes_estado(
-    uf
+    for item in dados:
+
+        nome = (
+            item.get("ds_municipio")
+            or item.get("no_municipio")
+            or ""
+        ).strip()
+
+        codigo = (
+            item.get("co_municipio")
+            or ""
+        )
+
+        if not nome or not codigo:
+            continue
+
+        municipios.append({
+            "nome": nome,
+            "codigo": str(codigo),
+        })
+
+    municipios.sort(
+        key=lambda x:
+            normalizar_texto(
+                x["nome"]
+            )
+    )
+
+    return municipios
+
+
+# ============================================================
+# CONSULTAR INSTITUIÇÕES OFICIAIS
+# EM UM MUNICÍPIO
+# ============================================================
+
+def obter_instituicoes_municipio(
+    uf,
+    codigo_municipio
+):
+
+    payload = {
+        "data[CONSULTA_AVANCADA][hid_template]":
+            "listar-consulta-avancada-ies",
+
+        "data[CONSULTA_AVANCADA][hid_order]":
+            "ies.no_ies ASC",
+
+        "data[CONSULTA_AVANCADA][hid_no_cidade_avancada]":
+            "",
+
+        "data[CONSULTA_AVANCADA][hid_no_regiao_avancada]":
+            "",
+
+        "data[CONSULTA_AVANCADA][hid_no_pais_avancada]":
+            "",
+
+        "data[CONSULTA_AVANCADA][hid_co_pais_avancada]":
+            "",
+
+        "data[CONSULTA_AVANCADA][rad_buscar_por]":
+            "IES",
+
+        "data[CONSULTA_AVANCADA][txt_no_ies]":
+            "",
+
+        "data[CONSULTA_AVANCADA][txt_no_curso]":
+            "",
+
+        "data[CONSULTA_AVANCADA][txt_no_especializacao]":
+            "",
+
+        "data[CONSULTA_AVANCADA][sel_co_area]":
+            "",
+
+        "data[CONSULTA_AVANCADA][sel_sg_uf]":
+            uf,
+
+        "data[CONSULTA_AVANCADA][sel_co_municipio]":
+            codigo_municipio,
+
+        # Situação ativa da IES.
+        "data[CONSULTA_AVANCADA][sel_co_situacao_funcionamento_ies]":
+            "10035",
+
+        "captcha":
+            "",
+    }
+
+    resposta = http_post(
+        EMEC_CONSULTA_AVANCADA,
+        payload
+    )
+
+    if not resposta:
+        return None
+
+    soup = BeautifulSoup(
+        resposta.text,
+        "html.parser"
+    )
+
+    instituicoes = []
+
+    for linha in soup.find_all("tr"):
+
+        colunas = linha.find_all("td")
+
+        # A consulta de IES normalmente retorna
+        # 8 colunas.
+        if len(colunas) < 7:
+            continue
+
+        codigo = (
+            colunas[0]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        nome = (
+            colunas[1]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        situacao = (
+            colunas[6]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        codigo_limpo = re.sub(
+            r"\D",
+            "",
+            codigo
+        )
+
+        if not codigo_limpo:
+            continue
+
+        if not nome:
+            continue
+
+        instituicoes.append({
+            "codigo": codigo_limpo,
+            "nome": nome[:220],
+            "situacao": situacao,
+        })
+
+    return instituicoes
+
+
+# ============================================================
+# CAMPI / ENDEREÇOS DA IES
+# ============================================================
+
+def obter_enderecos_ies(
+    codigo_ies
+):
+
+    url = (
+        f"{EMEC_BASE}/consulta-ies/"
+        f"listar-endereco/"
+        f"{EMEC_TOKEN_IES}/"
+        f"{b64(codigo_ies)}/"
+        f"list/1000"
+    )
+
+    resposta = http_get(
+        url
+    )
+
+    if not resposta:
+        return None
+
+    soup = BeautifulSoup(
+        resposta.text,
+        "html.parser"
+    )
+
+    enderecos = []
+
+    for linha in soup.find_all("tr"):
+
+        colunas = linha.find_all("td")
+
+        if len(colunas) < 6:
+            continue
+
+        codigo_endereco = (
+            colunas[0]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        denominacao = (
+            colunas[1]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        municipio = (
+            colunas[4]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        uf = (
+            colunas[5]
+            .get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        codigo_limpo = re.sub(
+            r"\D",
+            "",
+            codigo_endereco
+        )
+
+        uf_limpa = re.sub(
+            r"[^A-Z]",
+            "",
+            uf.upper()
+        )
+
+        if not codigo_limpo:
+            continue
+
+        enderecos.append({
+            "codigo":
+                codigo_limpo,
+
+            "denominacao":
+                denominacao,
+
+            "municipio":
+                municipio,
+
+            "uf":
+                uf_limpa[-2:]
+                if len(uf_limpa) >= 2
+                else uf_limpa,
+        })
+
+    return enderecos
+
+
+# ============================================================
+# CURSOS DO CAMPUS
+# ============================================================
+
+def obter_cursos_campus(
+    codigo_ies,
+    codigo_endereco
+):
+
+    url = (
+        f"{EMEC_BASE}/consulta-ies/"
+        f"listar-curso-endereco/"
+        f"{EMEC_TOKEN_IES}/"
+        f"{b64(codigo_ies)}/"
+        f"{EMEC_TOKEN_ENDERECO}/"
+        f"{b64(codigo_endereco)}/"
+        f"list/1000"
+    )
+
+    resposta = http_get(
+        url
+    )
+
+    if not resposta:
+        return None
+
+    soup = BeautifulSoup(
+        resposta.text,
+        "html.parser"
+    )
+
+    cursos = []
+
+    for linha in soup.find_all("tr"):
+
+        colunas = linha.find_all("td")
+
+        if not colunas:
+            continue
+
+        texto_colunas = [
+            coluna.get_text(
+                " ",
+                strip=True
+            )
+            for coluna in colunas
+        ]
+
+        texto = " ".join(
+            texto_colunas
+        )
+
+        if texto.strip():
+            cursos.append(
+                texto
+            )
+
+    return cursos
+
+
+# ============================================================
+# CAMPUS TEM NUTRIÇÃO?
+# ============================================================
+
+def campus_tem_nutricao(
+    cursos
+):
+
+    if cursos is None:
+        return None
+
+    for curso in cursos:
+
+        texto = normalizar_texto(
+            curso
+        )
+
+        if re.search(
+            r"\bnutricao\b",
+            texto
+        ):
+
+            return True
+
+    return False
+
+
+# ============================================================
+# INSTITUIÇÃO JÁ EXISTE?
+# ============================================================
+
+def buscar_instituicao_existente(
+    uf,
+    cidade,
+    nome
 ):
 
     try:
@@ -995,40 +789,133 @@ def existem_pendentes_estado(
             .table(
                 "instituicoes_nutricao"
             )
-            .select("id")
+            .select(
+                "id,instituicao"
+            )
             .eq(
                 "estado",
                 uf
             )
             .eq(
-                "status",
-                "pendente"
+                "cidade",
+                cidade
             )
-            .eq(
-                "validada",
-                True
-            )
-            .limit(1)
             .execute()
         )
 
-        return bool(
+        registros = (
             resposta.data
+            or []
         )
 
-    except Exception:
+        nome_norm = normalizar_texto(
+            nome
+        )
 
-        return True
+        for registro in registros:
+
+            existente = normalizar_texto(
+                registro.get(
+                    "instituicao"
+                )
+            )
+
+            if existente == nome_norm:
+
+                return registro
+
+            if (
+                existente
+                and nome_norm
+                and (
+                    existente in nome_norm
+                    or nome_norm in existente
+                )
+                and min(
+                    len(existente),
+                    len(nome_norm)
+                ) >= 8
+            ):
+
+                return registro
+
+        return None
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Erro verificando "
+            f"instituição: {erro}"
+        )
+
+        return "ERRO"
 
 
 # ============================================================
-# ATUALIZAR FACULDADE
+# SALVAR FACULDADE DE NUTRIÇÃO
 # ============================================================
 
-def atualizar_faculdade(
-    faculdade_id,
-    status
+def salvar_instituicao_nutricao(
+    uf,
+    cidade,
+    nome,
+    codigo_ies
 ):
+
+    existente = (
+        buscar_instituicao_existente(
+            uf,
+            cidade,
+            nome
+        )
+    )
+
+    if existente == "ERRO":
+        return False
+
+    if existente:
+        return False
+
+    fonte = (
+        f"{EMEC_BASE}/consulta-ies/index/"
+        f"{EMEC_TOKEN_IES}/"
+        f"{b64(codigo_ies)}"
+    )
+
+    dados = {
+        "estado":
+            uf,
+
+        "cidade":
+            cidade,
+
+        "instituicao":
+            nome,
+
+        "curso":
+            "Nutrição",
+
+        "origem":
+            "e_MEC_oficial",
+
+        "fonte_url":
+            fonte,
+
+        "status":
+            "pendente",
+
+        "ultima_verificacao":
+            agora_iso(),
+
+        "fonte_validacao":
+            "e-MEC",
+
+        "validada":
+            True,
+
+        "tentativa_descoberta":
+            0,
+    }
 
     try:
 
@@ -1037,18 +924,33 @@ def atualizar_faculdade(
             .table(
                 "instituicoes_nutricao"
             )
-            .update({
-                "status":
-                    status,
-
-                "ultima_verificacao":
-                    agora_iso(),
-            })
-            .eq(
-                "id",
-                faculdade_id
-            )
+            .insert(dados)
             .execute()
+        )
+
+        estatisticas[
+            "instituicoes_novas"
+        ] += 1
+
+        estatisticas[
+            "instituicoes_nutricao_encontradas"
+        ] += 1
+
+        print(
+            f"      ✅ NUTRIÇÃO CONFIRMADA:"
+        )
+
+        print(
+            f"         {nome}"
+        )
+
+        print(
+            f"         {cidade}/{uf}"
+        )
+
+        print(
+            f"         Código e-MEC: "
+            f"{codigo_ies}"
         )
 
         return True
@@ -1056,8 +958,8 @@ def atualizar_faculdade(
     except Exception as erro:
 
         print(
-            f"⚠️ Erro atualizando "
-            f"faculdade: {erro}"
+            f"❌ Erro salvando instituição: "
+            f"{erro}"
         )
 
         estatisticas["erros"] += 1
@@ -1066,11 +968,11 @@ def atualizar_faculdade(
 
 
 # ============================================================
-# CHECKPOINT
+# CHECKPOINT DA DESCOBERTA e-MEC
 # ============================================================
 
-def buscar_checkpoint(
-    instituicao
+def obter_checkpoint_emec(
+    uf
 ):
 
     try:
@@ -1083,19 +985,11 @@ def buscar_checkpoint(
             .select("*")
             .eq(
                 "estado",
-                instituicao["estado"]
-            )
-            .eq(
-                "cidade",
-                instituicao["cidade"]
-            )
-            .eq(
-                "instituicao",
-                instituicao["instituicao"]
+                uf
             )
             .eq(
                 "etapa",
-                "busca_leads"
+                "descoberta_emec"
             )
             .limit(1)
             .execute()
@@ -1109,64 +1003,56 @@ def buscar_checkpoint(
     except Exception as erro:
 
         print(
-            f"⚠️ Erro lendo checkpoint: "
-            f"{erro}"
+            f"⚠️ Erro lendo checkpoint "
+            f"e-MEC: {erro}"
         )
 
         return None
 
 
-def salvar_checkpoint(
-    instituicao,
+def salvar_checkpoint_emec(
+    uf,
     status,
-    indice_pesquisa,
-    total_pesquisas,
-    consulta_atual=None,
-    leads_encontrados=0,
-    leads_salvos=0,
-    ultimo_erro=None
+    indice,
+    total,
+    municipio=None,
+    erro=None
 ):
 
-    atual = buscar_checkpoint(
-        instituicao
+    atual = obter_checkpoint_emec(
+        uf
     )
 
     dados = {
         "estado":
-            instituicao["estado"],
+            uf,
 
         "cidade":
-            instituicao["cidade"],
+            municipio,
 
         "instituicao":
-            instituicao["instituicao"],
+            None,
 
         "etapa":
-            "busca_leads",
+            "descoberta_emec",
 
         "status":
             status,
 
         "indice_pesquisa":
-            indice_pesquisa,
+            indice,
 
         "total_pesquisas":
-            total_pesquisas,
+            total,
 
         "consulta_atual":
-            consulta_atual,
+            municipio,
 
         "fonte_atual":
-            "instagram_web",
-
-        "leads_encontrados":
-            leads_encontrados,
-
-        "leads_salvos":
-            leads_salvos,
+            "e-MEC",
 
         "ultimo_erro":
-            ultimo_erro,
+            erro,
 
         "atualizado_em":
             agora_iso(),
@@ -1214,11 +1100,11 @@ def salvar_checkpoint(
 
         return True
 
-    except Exception as erro:
+    except Exception as erro_sql:
 
         print(
-            f"⚠️ Erro salvando "
-            f"checkpoint: {erro}"
+            f"⚠️ Erro gravando checkpoint "
+            f"e-MEC: {erro_sql}"
         )
 
         estatisticas["erros"] += 1
@@ -1227,23 +1113,579 @@ def salvar_checkpoint(
 
 
 # ============================================================
-# BUSCA WEB COM RETRY
+# DESCOBRIR FACULDADES DE NUTRIÇÃO NO e-MEC
 # ============================================================
 
-def pesquisar(
+def descobrir_faculdades_emec(
+    uf,
+    estado_nome
+):
+
+    print("")
+    print(
+        "================================================="
+    )
+
+    print(
+        f"🏛️ e-MEC OFICIAL - "
+        f"{estado_nome}/{uf}"
+    )
+
+    print(
+        "================================================="
+    )
+
+    municipios = obter_municipios_emec(
+        uf
+    )
+
+    if not municipios:
+
+        print(
+            f"❌ e-MEC não retornou "
+            f"municípios para {uf}."
+        )
+
+        return False
+
+    total = len(
+        municipios
+    )
+
+    checkpoint = obter_checkpoint_emec(
+        uf
+    )
+
+    inicio = 0
+
+    if checkpoint:
+
+        status = (
+            checkpoint.get("status")
+            or ""
+        )
+
+        indice = (
+            checkpoint.get(
+                "indice_pesquisa"
+            )
+            or 0
+        )
+
+        if status == "concluido":
+
+            print(
+                f"✅ Varredura oficial de "
+                f"{uf} já concluída."
+            )
+
+            return True
+
+        inicio = max(
+            0,
+            indice
+        )
+
+        if inicio >= total:
+
+            inicio = total
+
+        if inicio > 0:
+
+            print(
+                f"♻️ Retomando no município "
+                f"{inicio + 1}/{total}"
+            )
+
+    processados_execucao = 0
+
+    for posicao in range(
+        inicio,
+        total
+    ):
+
+        if (
+            processados_execucao
+            >= MAX_MUNICIPIOS_EMEC_POR_EXECUCAO
+        ):
+
+            print("")
+            print(
+                f"⏸️ Limite de "
+                f"{MAX_MUNICIPIOS_EMEC_POR_EXECUCAO} "
+                f"municípios oficiais atingido."
+            )
+
+            print(
+                "Na próxima execução "
+                "continua exatamente daqui."
+            )
+
+            return True
+
+        municipio = (
+            municipios[
+                posicao
+            ]
+        )
+
+        nome_municipio = (
+            municipio["nome"]
+        )
+
+        codigo_municipio = (
+            municipio["codigo"]
+        )
+
+        numero = posicao + 1
+
+        print("")
+        print(
+            f"📍 e-MEC "
+            f"{numero}/{total}: "
+            f"{nome_municipio}/{uf}"
+        )
+
+        salvar_checkpoint_emec(
+            uf=uf,
+            status="processando",
+            indice=posicao,
+            total=total,
+            municipio=nome_municipio
+        )
+
+        instituicoes = (
+            obter_instituicoes_municipio(
+                uf,
+                codigo_municipio
+            )
+        )
+
+        # Se houve falha real no e-MEC,
+        # NÃO avança o checkpoint.
+        if instituicoes is None:
+
+            salvar_checkpoint_emec(
+                uf=uf,
+                status="erro",
+                indice=posicao,
+                total=total,
+                municipio=nome_municipio,
+                erro=(
+                    "Falha consultando "
+                    "instituições no e-MEC"
+                )
+            )
+
+            print(
+                "⚠️ Não avançarei para não "
+                "perder esta cidade."
+            )
+
+            return False
+
+        print(
+            f"   IES oficiais encontradas: "
+            f"{len(instituicoes)}"
+        )
+
+        for ies in instituicoes:
+
+            estatisticas[
+                "ies_emec_analisadas"
+            ] += 1
+
+            codigo_ies = (
+                ies["codigo"]
+            )
+
+            nome_ies = (
+                ies["nome"]
+            )
+
+            enderecos = obter_enderecos_ies(
+                codigo_ies
+            )
+
+            if enderecos is None:
+                continue
+
+            for endereco in enderecos:
+
+                endereco_uf = (
+                    endereco.get("uf")
+                    or ""
+                )
+
+                endereco_cidade = (
+                    endereco.get("municipio")
+                    or ""
+                )
+
+                # Queremos especificamente
+                # o campus daquele município.
+                if (
+                    normalizar_texto(
+                        endereco_cidade
+                    )
+                    != normalizar_texto(
+                        nome_municipio
+                    )
+                ):
+                    continue
+
+                if (
+                    endereco_uf
+                    and endereco_uf != uf
+                ):
+                    continue
+
+                estatisticas[
+                    "campus_analisados"
+                ] += 1
+
+                cursos = (
+                    obter_cursos_campus(
+                        codigo_ies,
+                        endereco["codigo"]
+                    )
+                )
+
+                if cursos is None:
+                    continue
+
+                tem_nutricao = (
+                    campus_tem_nutricao(
+                        cursos
+                    )
+                )
+
+                if tem_nutricao:
+
+                    salvar_instituicao_nutricao(
+                        uf=uf,
+                        cidade=nome_municipio,
+                        nome=nome_ies,
+                        codigo_ies=codigo_ies
+                    )
+
+                    # Já confirmamos a IES
+                    # naquele município.
+                    break
+
+                pausa_emec()
+
+            pausa_emec()
+
+        estatisticas[
+            "municipios_emec"
+        ] += 1
+
+        processados_execucao += 1
+
+        # Só avança DEPOIS de concluir o município.
+        proximo_indice = (
+            posicao + 1
+        )
+
+        salvar_checkpoint_emec(
+            uf=uf,
+            status="processando",
+            indice=proximo_indice,
+            total=total,
+            municipio=nome_municipio
+        )
+
+        pausa_emec()
+
+    salvar_checkpoint_emec(
+        uf=uf,
+        status="concluido",
+        indice=total,
+        total=total,
+        municipio=None
+    )
+
+    print("")
+    print(
+        f"✅ Varredura oficial "
+        f"de {uf} concluída."
+    )
+
+    return True
+
+
+# ============================================================
+# FILA DE FACULDADES PARA BUSCAR LEADS
+# ============================================================
+
+def buscar_faculdades_pendentes(
+    uf,
+    limite
+):
+
+    try:
+
+        resposta = (
+            supabase
+            .table(
+                "instituicoes_nutricao"
+            )
+            .select("*")
+            .eq(
+                "estado",
+                uf
+            )
+            .eq(
+                "status",
+                "pendente"
+            )
+            .eq(
+                "validada",
+                True
+            )
+            .order("cidade")
+            .order("instituicao")
+            .limit(limite)
+            .execute()
+        )
+
+        return (
+            resposta.data
+            or []
+        )
+
+    except Exception as erro:
+
+        print(
+            f"❌ Erro lendo fila: "
+            f"{erro}"
+        )
+
+        estatisticas["erros"] += 1
+
+        return []
+
+
+def atualizar_status_faculdade(
+    faculdade_id,
+    status
+):
+
+    try:
+
+        (
+            supabase
+            .table(
+                "instituicoes_nutricao"
+            )
+            .update({
+                "status":
+                    status,
+
+                "ultima_verificacao":
+                    agora_iso(),
+            })
+            .eq(
+                "id",
+                faculdade_id
+            )
+            .execute()
+        )
+
+        return True
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Erro atualizando "
+            f"faculdade: {erro}"
+        )
+
+        estatisticas["erros"] += 1
+
+        return False
+
+
+# ============================================================
+# CHECKPOINT DOS LEADS
+# ============================================================
+
+def obter_checkpoint_leads(
+    instituicao
+):
+
+    try:
+
+        resposta = (
+            supabase
+            .table(
+                "controle_busca"
+            )
+            .select("*")
+            .eq(
+                "estado",
+                instituicao["estado"]
+            )
+            .eq(
+                "cidade",
+                instituicao["cidade"]
+            )
+            .eq(
+                "instituicao",
+                instituicao["instituicao"]
+            )
+            .eq(
+                "etapa",
+                "busca_leads"
+            )
+            .limit(1)
+            .execute()
+        )
+
+        if resposta.data:
+            return resposta.data[0]
+
+        return None
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Erro lendo checkpoint "
+            f"dos leads: {erro}"
+        )
+
+        return None
+
+
+def salvar_checkpoint_leads(
+    instituicao,
+    status,
+    indice,
+    total,
+    consulta=None,
+    encontrados=0,
+    salvos=0,
+    erro=None
+):
+
+    atual = obter_checkpoint_leads(
+        instituicao
+    )
+
+    dados = {
+        "estado":
+            instituicao["estado"],
+
+        "cidade":
+            instituicao["cidade"],
+
+        "instituicao":
+            instituicao["instituicao"],
+
+        "etapa":
+            "busca_leads",
+
+        "status":
+            status,
+
+        "indice_pesquisa":
+            indice,
+
+        "total_pesquisas":
+            total,
+
+        "consulta_atual":
+            consulta,
+
+        "fonte_atual":
+            "busca_web_indexada",
+
+        "leads_encontrados":
+            encontrados,
+
+        "leads_salvos":
+            salvos,
+
+        "ultimo_erro":
+            erro,
+
+        "atualizado_em":
+            agora_iso(),
+    }
+
+    if not atual:
+
+        dados[
+            "iniciado_em"
+        ] = agora_iso()
+
+    if status == "concluido":
+
+        dados[
+            "finalizado_em"
+        ] = agora_iso()
+
+    try:
+
+        if atual:
+
+            (
+                supabase
+                .table(
+                    "controle_busca"
+                )
+                .update(dados)
+                .eq(
+                    "id",
+                    atual["id"]
+                )
+                .execute()
+            )
+
+        else:
+
+            (
+                supabase
+                .table(
+                    "controle_busca"
+                )
+                .insert(dados)
+                .execute()
+            )
+
+        return True
+
+    except Exception as erro_sql:
+
+        print(
+            f"⚠️ Erro salvando checkpoint: "
+            f"{erro_sql}"
+        )
+
+        estatisticas["erros"] += 1
+
+        return False
+
+
+# ============================================================
+# BUSCA WEB DOS LEADS
+# ============================================================
+
+def pesquisar_leads(
     ddgs,
     consulta
 ):
 
     estatisticas[
-        "pesquisas_realizadas"
+        "pesquisas_leads"
     ] += 1
 
     ultimo_erro = None
 
     for tentativa in range(
         1,
-        MAX_TENTATIVAS_BUSCA + 1
+        4
     ):
 
         try:
@@ -1290,27 +1732,16 @@ def pesquisar(
                 )
 
             print(
-                f"⚠️ Falha na busca "
-                f"{tentativa}/"
-                f"{MAX_TENTATIVAS_BUSCA}"
+                f"⚠️ Busca "
+                f"{tentativa}/3: "
+                f"{ultimo_erro}"
             )
 
-            print(
-                f"   {ultimo_erro}"
-            )
+            if tentativa < 3:
 
-            if tentativa < MAX_TENTATIVAS_BUSCA:
-
-                espera = (
+                time.sleep(
                     15 * tentativa
                 )
-
-                print(
-                    f"   Aguardando "
-                    f"{espera}s..."
-                )
-
-                time.sleep(espera)
 
     estatisticas["erros"] += 1
 
@@ -1322,79 +1753,31 @@ def pesquisar(
 
 
 # ============================================================
-# NOME E SIGLA DA FACULDADE
-# ============================================================
-
-def separar_nome_sigla(
-    instituicao
-):
-
-    instituicao = (
-        instituicao
-        or ""
-    ).strip()
-
-    match = re.search(
-        r"\(([A-Za-z0-9.\-_]{2,20})\)\s*$",
-        instituicao
-    )
-
-    if match:
-
-        sigla = match.group(1)
-
-        nome = re.sub(
-            r"\s*\([A-Za-z0-9.\-_]{2,20}\)\s*$",
-            "",
-            instituicao
-        ).strip()
-
-        return (
-            nome,
-            sigla
-        )
-
-    return (
-        instituicao,
-        None
-    )
-
-
-# ============================================================
 # CONSULTAS DOS LEADS
 #
-# SOMENTE 8.
-# Reduz carga e mantém precisão.
+# Mantemos poucas consultas para reduzir bloqueios.
 # ============================================================
 
-def montar_consultas(
+def montar_consultas_leads(
     instituicao
 ):
 
-    nome_completo = (
-        instituicao["instituicao"]
+    nome = (
+        instituicao[
+            "instituicao"
+        ]
     )
 
     cidade = (
-        instituicao["cidade"]
-    )
-
-    nome, sigla = (
-        separar_nome_sigla(
-            nome_completo
-        )
-    )
-
-    referencia = (
-        sigla
-        if sigla
-        else nome
+        instituicao[
+            "cidade"
+        ]
     )
 
     exclusoes = (
         "-psicologia "
         "-maquiagem "
-        "-veterinária "
+        "-veterinaria "
         "-odontologia "
         "-atletica "
         "-comissao "
@@ -1406,78 +1789,72 @@ def montar_consultas(
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'("formanda" OR "formando" '
-            f'OR "concluinte") '
+            f'"formanda" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'("graduanda" OR "graduando") '
-            f'"2026" '
+            f'"formando" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'("7/8" OR "8/8") '
+            f'"concluinte" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'("último período" '
-            f'OR "último semestre") '
+            f'"7/8" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'"TCC" '
+            f'"8/8" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
-            f'"{referencia}" '
+            f'"{nome}" '
             f'"Nutrição" '
-            f'"formatura" '
-            f'"2026" '
-            f'{exclusoes}'
-        ),
-
-        (
-            f'site:instagram.com '
-            f'"{referencia}" '
-            f'"Nutrição" '
-            f'"formatura" '
-            f'"2025" '
+            f'"último período" '
             f'{exclusoes}'
         ),
 
         (
             f'site:instagram.com '
             f'"{cidade}" '
-            f'"{referencia}" '
             f'"nutricionista" '
-            f'("2025" OR "2026") '
+            f'"2026" '
+            f'{exclusoes}'
+        ),
+
+        (
+            f'site:instagram.com '
+            f'"{cidade}" '
+            f'"nutricionista" '
+            f'"2025" '
             f'{exclusoes}'
         ),
     ]
 
 
 # ============================================================
-# EXTRAIR INSTAGRAM
+# INSTAGRAM
 # ============================================================
 
 def extrair_instagram(
@@ -1531,7 +1908,7 @@ def extrair_instagram(
             return None
 
         if not re.match(
-            r"^[a-zA-Z0-9._]+$",
+            r"^[A-Za-z0-9._]+$",
             usuario
         ):
             return None
@@ -1546,7 +1923,7 @@ def extrair_instagram(
 
 
 # ============================================================
-# FILTROS
+# FILTRO DE PERFIS
 # ============================================================
 
 HANDLES_BLOQUEADOS = {
@@ -1565,42 +1942,23 @@ TERMOS_FORA_NICHO = [
     "veterinaria",
     "veterinario",
     "medicina veterinaria",
-    "pet shop",
     "odontologia",
     "dentista",
     "fonoaudiologia",
     "fisioterapia",
     "fotografia",
-    "fotografa",
-    "fotografo",
     "engenharia",
     "arquitetura",
     "kumon",
 ]
 
 
-TERMOS_INSTITUCIONAIS = [
-    "turma de nutricao",
-    "comissao de formatura",
-    "centro academico",
-    "diretorio academico",
-    "atletica",
-    "liga academica",
-    "projeto de extensao",
-    "evento academico",
-    "semana academica",
-    "universidade",
-    "faculdade",
-]
-
-
-PADROES_HANDLE_INSTITUCIONAL = [
+PADROES_INSTITUCIONAIS = [
     r"^@?nutricao[._-]?uf",
     r"^@?nutricao[._-]?uni",
     r"^@?nutricao[._-]?fac",
     r"^@?nutricao[._-]?fai",
     r"^@?nutricao[._-]?ies",
-    r"^@?nutricao[._-]?unes",
     r"^@?turma",
     r"^@?formatura",
     r"^@?comissao",
@@ -1628,19 +1986,14 @@ def conta_institucional(
     texto
 ):
 
-    if (
-        instagram
-        in HANDLES_BLOQUEADOS
-    ):
+    if instagram in HANDLES_BLOQUEADOS:
         return True
 
     handle = normalizar_texto(
         instagram
     )
 
-    for padrao in (
-        PADROES_HANDLE_INSTITUCIONAL
-    ):
+    for padrao in PADROES_INSTITUCIONAIS:
 
         if re.search(
             padrao,
@@ -1652,14 +2005,17 @@ def conta_institucional(
         texto
     )
 
-    institucional = any(
-        termo in texto_norm
-        for termo
-        in TERMOS_INSTITUCIONAIS
-    )
+    termos_institucionais = [
+        "turma de nutricao",
+        "comissao de formatura",
+        "centro academico",
+        "diretorio academico",
+        "atletica",
+        "universidade",
+        "faculdade",
+    ]
 
-    sinais_pessoa = [
-        "sou nutricionista",
+    sinais_pessoais = [
         "nutricionista",
         "graduanda",
         "graduando",
@@ -1670,19 +2026,19 @@ def conta_institucional(
         "academico de nutricao",
         "crn",
         "atendimento",
-        "consultas",
     ]
 
-    pessoa = any(
-        sinal in texto_norm
-        for sinal
-        in sinais_pessoa
+    institucional = any(
+        termo in texto_norm
+        for termo in termos_institucionais
     )
 
-    if (
-        institucional
-        and not pessoa
-    ):
+    pessoal = any(
+        termo in texto_norm
+        for termo in sinais_pessoais
+    )
+
+    if institucional and not pessoal:
         return True
 
     return False
@@ -1693,15 +2049,14 @@ def conta_institucional(
 # ============================================================
 
 def e_nutricao(
-    texto,
-    instagram
+    texto
 ):
 
     texto_norm = normalizar_texto(
         texto
     )
 
-    sinais_fortes = [
+    fortes = [
         "nutricionista",
         "estudante de nutricao",
         "graduanda em nutricao",
@@ -1715,11 +2070,9 @@ def e_nutricao(
     ]
 
     if any(
-        sinal in texto_norm
-        for sinal
-        in sinais_fortes
+        termo in texto_norm
+        for termo in fortes
     ):
-
         return True
 
     if "nutricao" in texto_norm:
@@ -1735,22 +2088,19 @@ def e_nutricao(
             "academico",
             "crn",
             "atendimento",
-            "consulta",
         ]
 
         if any(
             termo in texto_norm
-            for termo
-            in contexto
+            for termo in contexto
         ):
-
             return True
 
     return False
 
 
 # ============================================================
-# COORTE ALVO
+# COORTE
 # ============================================================
 
 def e_coorte_alvo(
@@ -1761,10 +2111,9 @@ def e_coorte_alvo(
         texto
     )
 
-    anos = (
+    ano_alvo = (
         "2025" in texto_norm
-        or
-        "2026" in texto_norm
+        or "2026" in texto_norm
     )
 
     conclusao = [
@@ -1772,13 +2121,12 @@ def e_coorte_alvo(
         "formou",
         "formada",
         "formado",
-        "colacao de grau",
         "colacao",
         "concluiu",
         "bacharel",
     ]
 
-    etapa_final = [
+    final_curso = [
         "formanda",
         "formando",
         "concluinte",
@@ -1789,32 +2137,25 @@ def e_coorte_alvo(
         "8/8",
         "7 de 8",
         "8 de 8",
-        "7 periodo",
-        "8 periodo",
-        "7o periodo",
-        "8o periodo",
         "tcc",
-        "trabalho de conclusao",
     ]
 
-    conclusao_ok = any(
+    concluiu = any(
         termo in texto_norm
-        for termo
-        in conclusao
+        for termo in conclusao
     )
 
-    final_ok = any(
+    esta_final = any(
         termo in texto_norm
-        for termo
-        in etapa_final
+        for termo in final_curso
     )
 
     return (
         (
-            anos
-            and conclusao_ok
+            ano_alvo
+            and concluiu
         )
-        or final_ok
+        or esta_final
     )
 
 
@@ -1859,7 +2200,6 @@ def calcular_pontuacao(
             "tcc",
         ]
     ):
-
         pontos += 5
 
     if "2026" in texto_norm:
@@ -1872,10 +2212,7 @@ def calcular_pontuacao(
         instituicao["cidade"]
     )
 
-    if (
-        cidade
-        and cidade in texto_norm
-    ):
+    if cidade and cidade in texto_norm:
         pontos += 2
 
     return pontos
@@ -1920,12 +2257,6 @@ def montar_evidencia(
             itens.append(
                 descricao
             )
-
-    if not itens:
-
-        return (
-            "evidência pública encontrada"
-        )
 
     return " | ".join(
         dict.fromkeys(
@@ -1972,10 +2303,7 @@ def verificar_duplicidade(
                 f"duplicidade: {erro}"
             )
 
-            if (
-                tentativa
-                < MAX_TENTATIVAS_SUPABASE
-            ):
+            if tentativa < MAX_TENTATIVAS_SUPABASE:
 
                 time.sleep(
                     4 * tentativa
@@ -1985,7 +2313,7 @@ def verificar_duplicidade(
 
 
 # ============================================================
-# SALVAR LEAD IMEDIATAMENTE
+# SALVAR LEAD
 # ============================================================
 
 def salvar_lead(
@@ -1996,10 +2324,7 @@ def salvar_lead(
         lead["instagram"]
     )
 
-    if (
-        instagram
-        in salvos_execucao
-    ):
+    if instagram in salvos_execucao:
         return False
 
     existente = verificar_duplicidade(
@@ -2024,12 +2349,6 @@ def salvar_lead(
         return False
 
     if existente is None:
-
-        print(
-            f"      ⚠️ Não foi possível "
-            f"confirmar duplicidade: "
-            f"{instagram}"
-        )
 
         return False
 
@@ -2069,9 +2388,7 @@ def salvar_lead(
                 f"{instagram}: {erro}"
             )
 
-            if tentativa < (
-                MAX_TENTATIVAS_SUPABASE
-            ):
+            if tentativa < MAX_TENTATIVAS_SUPABASE:
 
                 time.sleep(
                     4 * tentativa
@@ -2083,10 +2400,10 @@ def salvar_lead(
 
 
 # ============================================================
-# PROCESSAR RESULTADO
+# PROCESSAR RESULTADO DE LEAD
 # ============================================================
 
-def processar_resultado(
+def processar_resultado_lead(
     resultado,
     instituicao
 ):
@@ -2118,9 +2435,7 @@ def processar_resultado(
         "resultados_analisados"
     ] += 1
 
-    if instagram in (
-        bloqueados_execucao
-    ):
+    if instagram in bloqueados_execucao:
         return False
 
     texto_novo = (
@@ -2141,11 +2456,6 @@ def processar_resultado(
             "fora_nicho"
         ] += 1
 
-        print(
-            f"      ❌ Fora do nicho: "
-            f"{instagram}"
-        )
-
         return False
 
     if conta_institucional(
@@ -2158,18 +2468,11 @@ def processar_resultado(
         )
 
         estatisticas[
-            "contas_institucionais"
+            "institucionais"
         ] += 1
-
-        print(
-            f"      🏢 Institucional: "
-            f"{instagram}"
-        )
 
         return False
 
-    # A evidência fica vinculada à
-    # faculdade atual.
     chave = (
         instituicao["id"],
         instagram
@@ -2177,7 +2480,9 @@ def processar_resultado(
 
     if chave not in evidencias_perfis:
 
-        evidencias_perfis[chave] = {
+        evidencias_perfis[
+            chave
+        ] = {
             "textos": [],
             "titulo": titulo,
             "url": url,
@@ -2199,45 +2504,14 @@ def processar_resultado(
         ]["textos"]
     )
 
-    if conta_institucional(
-        instagram,
+    if not e_nutricao(
         texto_completo
     ):
-
-        bloqueados_execucao.add(
-            instagram
-        )
-
-        estatisticas[
-            "contas_institucionais"
-        ] += 1
-
-        return False
-
-    if not e_nutricao(
-        texto_completo,
-        instagram
-    ):
-
-        print(
-            f"      ⏳ Sem prova pessoal "
-            f"de Nutrição: "
-            f"{instagram}"
-        )
-
         return False
 
     if not e_coorte_alvo(
         texto_completo
     ):
-
-        print(
-            f"      ⏳ Nutrição confirmada, "
-            f"mas fora do filtro "
-            f"2025/2026/final: "
-            f"{instagram}"
-        )
-
         return False
 
     pontos = calcular_pontuacao(
@@ -2247,17 +2521,11 @@ def processar_resultado(
     )
 
     if pontos < PONTUACAO_MINIMA:
-
-        print(
-            f"      ⏳ Evidência fraca: "
-            f"{instagram} | "
-            f"{pontos}"
-        )
-
         return False
 
-    if instagram not in (
-        qualificados_execucao
+    if (
+        instagram
+        not in qualificados_execucao
     ):
 
         qualificados_execucao.add(
@@ -2292,8 +2560,7 @@ def processar_resultado(
     )
 
     print(
-        f"         Evidência: "
-        f"{evidencia}"
+        f"         {evidencia}"
     )
 
     lead = {
@@ -2310,7 +2577,7 @@ def processar_resultado(
             "nutricionista",
 
         "origem":
-            "INEP_Instagram_web",
+            "eMEC_busca_web",
 
         "status":
             "novo",
@@ -2371,7 +2638,7 @@ def processar_resultado(
 
 
 # ============================================================
-# PROCESSAR UMA FACULDADE
+# PROCESSAR FACULDADE
 # ============================================================
 
 def processar_faculdade(
@@ -2385,7 +2652,7 @@ def processar_faculdade(
     )
 
     print(
-        "🏫 FACULDADE OFICIAL"
+        "🏫 FACULDADE CONFIRMADA PELO e-MEC"
     )
 
     print(
@@ -2398,19 +2665,15 @@ def processar_faculdade(
     )
 
     print(
-        "📚 Fonte: INEP/e-MEC"
-    )
-
-    print(
         "================================================="
     )
 
-    atualizar_faculdade(
+    atualizar_status_faculdade(
         instituicao["id"],
         "processando"
     )
 
-    consultas = montar_consultas(
+    consultas = montar_consultas_leads(
         instituicao
     )
 
@@ -2418,11 +2681,11 @@ def processar_faculdade(
         consultas
     )
 
-    checkpoint = buscar_checkpoint(
+    checkpoint = obter_checkpoint_leads(
         instituicao
     )
 
-    inicio = 1
+    inicio = 0
 
     if checkpoint:
 
@@ -2435,78 +2698,71 @@ def processar_faculdade(
             checkpoint.get(
                 "indice_pesquisa"
             )
-            or 1
+            or 0
         )
 
         if (
-            status in (
+            status in [
                 "processando",
                 "erro",
                 "pendente"
-            )
-            and indice > 0
+            ]
         ):
 
-            inicio = min(
-                indice,
-                total
+            inicio = max(
+                0,
+                indice
             )
 
-            print(
-                f"♻️ Retomando na "
-                f"pesquisa "
-                f"{inicio}/{total}"
-            )
+            if inicio >= total:
+                inicio = total - 1
+
+            if inicio > 0:
+
+                print(
+                    f"♻️ Retomando pesquisa "
+                    f"{inicio + 1}/{total}"
+                )
 
     salvos_antes = (
         estatisticas["salvos"]
     )
 
-    encontrados_local = 0
+    encontrados = 0
 
-    for numero in range(
+    for posicao in range(
         inicio,
-        total + 1
+        total
     ):
+
+        numero = posicao + 1
 
         consulta = (
             consultas[
-                numero - 1
+                posicao
             ]
         )
 
-        print("")
         print(
             f"   🔍 Pesquisa "
             f"{numero}/{total}"
         )
 
-        salvar_checkpoint(
-            instituicao=
-                instituicao,
-
-            status=
-                "processando",
-
-            indice_pesquisa=
-                numero,
-
-            total_pesquisas=
-                total,
-
-            consulta_atual=
-                consulta,
-
-            leads_encontrados=
-                encontrados_local,
-
-            leads_salvos=
+        salvar_checkpoint_leads(
+            instituicao=instituicao,
+            status="processando",
+            indice=posicao,
+            total=total,
+            consulta=consulta,
+            encontrados=encontrados,
+            salvos=(
                 estatisticas["salvos"]
                 - salvos_antes
+            )
         )
 
         resultados, ok, erro = (
-            pesquisar(
+            pesquisar_leads(
                 ddgs,
                 consulta
             )
@@ -2514,111 +2770,69 @@ def processar_faculdade(
 
         if not ok:
 
-            salvar_checkpoint(
-                instituicao=
-                    instituicao,
-
-                status=
-                    "erro",
-
-                indice_pesquisa=
-                    numero,
-
-                total_pesquisas=
-                    total,
-
-                consulta_atual=
-                    consulta,
-
-                leads_encontrados=
-                    encontrados_local,
-
-                leads_salvos=
+            salvar_checkpoint_leads(
+                instituicao=instituicao,
+                status="erro",
+                indice=posicao,
+                total=total,
+                consulta=consulta,
+                encontrados=encontrados,
+                salvos=(
                     estatisticas["salvos"]
-                    - salvos_antes,
-
-                ultimo_erro=
-                    erro
+                    - salvos_antes
+                ),
+                erro=erro
             )
 
-            atualizar_faculdade(
+            atualizar_status_faculdade(
                 instituicao["id"],
                 "pendente"
-            )
-
-            print(
-                "   ⚠️ Faculdade ficou "
-                "pendente para retomar."
             )
 
             return False
 
         for resultado in resultados:
 
-            encontrados_local += 1
+            encontrados += 1
 
-            processar_resultado(
+            processar_resultado_lead(
                 resultado,
                 instituicao
             )
 
-        # Pesquisa terminou.
-        # Salva a próxima posição.
-        salvar_checkpoint(
-            instituicao=
-                instituicao,
-
-            status=
-                "processando",
-
-            indice_pesquisa=
-                numero + 1,
-
-            total_pesquisas=
-                total,
-
-            consulta_atual=
-                consulta,
-
-            leads_encontrados=
-                encontrados_local,
-
-            leads_salvos=
+        salvar_checkpoint_leads(
+            instituicao=instituicao,
+            status="processando",
+            indice=(
+                posicao + 1
+            ),
+            total=total,
+            consulta=consulta,
+            encontrados=encontrados,
+            salvos=(
                 estatisticas["salvos"]
                 - salvos_antes
+            )
         )
 
-        pausa()
+        pausa_busca()
 
     salvos_local = (
         estatisticas["salvos"]
         - salvos_antes
     )
 
-    salvar_checkpoint(
-        instituicao=
-            instituicao,
-
-        status=
-            "concluido",
-
-        indice_pesquisa=
-            total,
-
-        total_pesquisas=
-            total,
-
-        consulta_atual=
-            "concluido",
-
-        leads_encontrados=
-            encontrados_local,
-
-        leads_salvos=
-            salvos_local
+    salvar_checkpoint_leads(
+        instituicao=instituicao,
+        status="concluido",
+        indice=total,
+        total=total,
+        consulta="concluido",
+        encontrados=encontrados,
+        salvos=salvos_local
     )
 
-    atualizar_faculdade(
+    atualizar_status_faculdade(
         instituicao["id"],
         "concluido"
     )
@@ -2627,13 +2841,9 @@ def processar_faculdade(
         "faculdades_processadas"
     ] += 1
 
-    print("")
     print(
-        "✅ FACULDADE CONCLUÍDA"
-    )
-
-    print(
-        f"   Leads salvos: "
+        f"✅ FACULDADE CONCLUÍDA "
+        f"| Leads salvos: "
         f"{salvos_local}"
     )
 
@@ -2641,7 +2851,7 @@ def processar_faculdade(
 
 
 # ============================================================
-# RECUPERAR FACULDADE QUE TRAVOU
+# RECUPERAR FACULDADE INTERROMPIDA
 # ============================================================
 
 def recuperar_interrompidas():
@@ -2684,15 +2894,6 @@ def recuperar_interrompidas():
                 .execute()
             )
 
-        if registros:
-
-            print(
-                f"♻️ {len(registros)} "
-                f"faculdade(s) "
-                f"interrompida(s) "
-                f"retornaram à fila."
-            )
-
     except Exception as erro:
 
         print(
@@ -2707,43 +2908,16 @@ def recuperar_interrompidas():
 
 def executar():
 
-    # --------------------------------------------------------
-    # 1. BASE OFICIAL
-    # --------------------------------------------------------
-
-    if not preparar_base_oficial():
-
-        print("")
-        print(
-            "❌ Não foi possível preparar "
-            "a base oficial."
-        )
-
-        print(
-            "A execução foi encerrada "
-            "sem pesquisar leads."
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # 2. RECUPERA INTERRUPÇÕES
-    # --------------------------------------------------------
-
     recuperar_interrompidas()
 
-    processadas = 0
-
-    # --------------------------------------------------------
-    # 3. ESTADO POR ESTADO
-    # --------------------------------------------------------
+    faculdades_processadas_execucao = 0
 
     with DDGS() as ddgs:
 
         for uf, estado_nome in ESTADOS:
 
             if (
-                processadas
+                faculdades_processadas_execucao
                 >= MAX_FACULDADES_POR_EXECUCAO
             ):
                 break
@@ -2766,9 +2940,14 @@ def executar():
                 "#################################################"
             )
 
+            # ------------------------------------------------
+            # PRIMEIRO:
+            # usa faculdades já descobertas.
+            # ------------------------------------------------
+
             restante = (
                 MAX_FACULDADES_POR_EXECUCAO
-                - processadas
+                - faculdades_processadas_execucao
             )
 
             faculdades = (
@@ -2778,10 +2957,38 @@ def executar():
                 )
             )
 
+            # ------------------------------------------------
+            # SE A FILA NÃO TEM FACULDADES SUFICIENTES:
+            # abastece diretamente pelo e-MEC.
+            # ------------------------------------------------
+
+            if len(faculdades) < restante:
+
+                descobrir_faculdades_emec(
+                    uf,
+                    estado_nome
+                )
+
+                restante = (
+                    MAX_FACULDADES_POR_EXECUCAO
+                    - faculdades_processadas_execucao
+                )
+
+                faculdades = (
+                    buscar_faculdades_pendentes(
+                        uf,
+                        restante
+                    )
+                )
+
+            # ------------------------------------------------
+            # PESQUISA OS LEADS
+            # ------------------------------------------------
+
             for faculdade in faculdades:
 
                 if (
-                    processadas
+                    faculdades_processadas_execucao
                     >= MAX_FACULDADES_POR_EXECUCAO
                 ):
                     break
@@ -2791,29 +2998,34 @@ def executar():
                     faculdade
                 )
 
-                processadas += 1
+                faculdades_processadas_execucao += 1
 
-            if existem_pendentes_estado(
+            # Mantemos foco no estado até completar
+            # sua varredura oficial.
+            checkpoint = obter_checkpoint_emec(
                 uf
-            ):
+            )
+
+            emec_finalizado = (
+                checkpoint
+                and checkpoint.get("status")
+                == "concluido"
+            )
+
+            if not emec_finalizado:
 
                 print("")
                 print(
-                    f"⏸️ {uf} ainda possui "
-                    f"faculdades pendentes."
+                    f"⏸️ A varredura oficial "
+                    f"de {uf} ainda não acabou."
                 )
 
                 print(
                     "A próxima execução "
-                    "continuará neste estado."
+                    "continua neste estado."
                 )
 
                 break
-
-            print("")
-            print(
-                f"✅ {uf} concluído."
-            )
 
 
 # ============================================================
@@ -2838,15 +3050,15 @@ print(
 )
 
 print(
-    "Base de faculdades:"
+    "Descoberta: e-MEC oficial online"
 )
 
 print(
-    "INEP / Censo da Educação Superior 2024"
+    "Sem download manual."
 )
 
 print(
-    "Dados cadastrais originados do e-MEC."
+    "Sem Google para descobrir faculdade."
 )
 
 print(
@@ -2858,20 +3070,16 @@ print(
 )
 
 print(
-    "Base oficial > Estado > Faculdade "
-    "> Pessoa > Lead"
+    "e-MEC > Estado > Município > "
+    "Faculdade > Campus > Nutrição"
 )
 
 print(
-    "Máximo: 5 faculdades por execução."
+    "Depois:"
 )
 
 print(
-    "Lead aprovado é salvo imediatamente."
-)
-
-print(
-    "Checkpoint após cada pesquisa."
+    "Faculdade > Lead > Supabase"
 )
 
 print(
@@ -2900,28 +3108,43 @@ print(
 )
 
 print(
-    f"Base oficial importada nesta execução: "
-    f"{estatisticas['base_oficial_importada']}"
-)
-
-print(
-    f"Instituições/cidades importadas: "
-    f"{estatisticas['instituicoes_importadas']}"
-)
-
-print(
     f"Estados visitados: "
     f"{estatisticas['estados_visitados']}"
 )
 
 print(
-    f"Faculdades processadas: "
+    f"Municípios oficiais analisados: "
+    f"{estatisticas['municipios_emec']}"
+)
+
+print(
+    f"IES oficiais analisadas: "
+    f"{estatisticas['ies_emec_analisadas']}"
+)
+
+print(
+    f"Campi analisados: "
+    f"{estatisticas['campus_analisados']}"
+)
+
+print(
+    f"Faculdades com Nutrição encontradas: "
+    f"{estatisticas['instituicoes_nutricao_encontradas']}"
+)
+
+print(
+    f"Novas faculdades salvas: "
+    f"{estatisticas['instituicoes_novas']}"
+)
+
+print(
+    f"Faculdades pesquisadas para leads: "
     f"{estatisticas['faculdades_processadas']}"
 )
 
 print(
-    f"Pesquisas realizadas: "
-    f"{estatisticas['pesquisas_realizadas']}"
+    f"Pesquisas de leads: "
+    f"{estatisticas['pesquisas_leads']}"
 )
 
 print(
@@ -2935,8 +3158,8 @@ print(
 )
 
 print(
-    f"Contas institucionais rejeitadas: "
-    f"{estatisticas['contas_institucionais']}"
+    f"Institucionais rejeitados: "
+    f"{estatisticas['institucionais']}"
 )
 
 print(
@@ -2950,7 +3173,7 @@ print(
 )
 
 print(
-    f"Leads salvos no Supabase: "
+    f"Leads salvos: "
     f"{estatisticas['salvos']}"
 )
 
@@ -2978,6 +3201,11 @@ print(
 )
 
 print(
+    "Todo progresso permanece no Supabase."
+)
+
+print(
     "================================================="
+)
 )
 
