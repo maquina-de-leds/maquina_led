@@ -1,4 +1,4 @@
-import os
+import osimport os
 import re
 import time
 import random
@@ -6,36 +6,11 @@ import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from ddgs import DDGS
 from supabase import create_client
 
-
-# ============================================================
-# MÁQUINA DE LEADS - NUTRIÇÃO
-# 1 FACULDADE POR EXECUÇÃO
-# SOMENTE 2025 / 2026
-#
-# REGRA PRINCIPAL:
-#
-# Faculdade atual
-#      ↓
-# busca direcionada
-#      ↓
-# achou pessoa de Nutrição?
-#      ↓
-# SALVA IMEDIATAMENTE
-#      ↓
-# continua procurando
-#      ↓
-# terminou faculdade
-#      ↓
-# próxima execução = próxima faculdade
-# ============================================================
-
-
-# ============================================================
-# SUPABASE
-# ============================================================
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
@@ -47,150 +22,76 @@ supabase = create_client(
 
 
 # ============================================================
-# FACULDADES JÁ VALIDADAS
+# FACULDADES
 # ============================================================
 
 FACULDADES = [
 
-    # SÃO PAULO
     {
         "nome": "Universidade Presbiteriana Mackenzie",
         "sigla": "Mackenzie",
         "cidade": "São Paulo",
         "estado": "SP",
+        "dominio": "mackenzie.br",
+
+        "fontes_oficiais": [
+
+            {
+                "tipo": "lista_tcc",
+
+                "url":
+                    "https://www.mackenzie.br/"
+                    "universidade/unidades-academicas/"
+                    "ccbs/tcc-e-pesquisa/mostra-de-tcc",
+
+                "ano": 2026,
+
+                "fase": "TCC 2026.1",
+            }
+
+        ],
     },
+
 
     {
         "nome": "Universidade Paulista",
         "sigla": "UNIP",
         "cidade": "São Paulo",
         "estado": "SP",
+        "dominio": "unip.br",
+        "fontes_oficiais": [],
     },
+
 
     {
         "nome": "PUC-Campinas",
         "sigla": "PUC Campinas",
         "cidade": "Campinas",
         "estado": "SP",
+        "dominio": "puc-campinas.edu.br",
+        "fontes_oficiais": [],
     },
+
 
     {
         "nome": "Universidade Anhembi Morumbi",
         "sigla": "Anhembi Morumbi",
         "cidade": "São Paulo",
         "estado": "SP",
+        "dominio": "anhembi.br",
+        "fontes_oficiais": [],
     },
+
 
     {
         "nome": "Universidade Nove de Julho",
         "sigla": "UNINOVE",
         "cidade": "São Paulo",
         "estado": "SP",
+        "dominio": "uninove.br",
+        "fontes_oficiais": [],
     },
 
-    {
-        "nome": "Faculdade Santa Marcelina",
-        "sigla": "Santa Marcelina",
-        "cidade": "São Paulo",
-        "estado": "SP",
-    },
-
-    {
-        "nome": "Centro Universitário São Camilo",
-        "sigla": "São Camilo",
-        "cidade": "São Paulo",
-        "estado": "SP",
-    },
-
-    {
-        "nome": "Universidade de Sorocaba",
-        "sigla": "UNISO",
-        "cidade": "Sorocaba",
-        "estado": "SP",
-    },
-
-    {
-        "nome": "Universidade de Ribeirão Preto",
-        "sigla": "UNAERP",
-        "cidade": "Ribeirão Preto",
-        "estado": "SP",
-    },
-
-    {
-        "nome": "Universidade de São Paulo",
-        "sigla": "USP",
-        "cidade": "São Paulo",
-        "estado": "SP",
-    },
-
-
-    # MINAS GERAIS
-    {
-        "nome": "Universidade Federal de Viçosa",
-        "sigla": "UFV",
-        "cidade": "Viçosa",
-        "estado": "MG",
-    },
-
-    {
-        "nome": "Pontifícia Universidade Católica de Minas Gerais",
-        "sigla": "PUC Minas",
-        "cidade": "Belo Horizonte",
-        "estado": "MG",
-    },
-
-
-    # RIO DE JANEIRO
-    {
-        "nome": "Universidade Federal do Rio de Janeiro",
-        "sigla": "UFRJ",
-        "cidade": "Rio de Janeiro",
-        "estado": "RJ",
-    },
-
-    {
-        "nome": "Universidade Federal do Estado do Rio de Janeiro",
-        "sigla": "UNIRIO",
-        "cidade": "Rio de Janeiro",
-        "estado": "RJ",
-    },
-
-    {
-        "nome": "Universidade do Estado do Rio de Janeiro",
-        "sigla": "UERJ",
-        "cidade": "Rio de Janeiro",
-        "estado": "RJ",
-    },
-
-    {
-        "nome": "Universidade Estácio de Sá",
-        "sigla": "Estácio",
-        "cidade": "Rio de Janeiro",
-        "estado": "RJ",
-    },
-
-
-    # BAHIA
-    {
-        "nome": "Universidade Salvador",
-        "sigla": "UNIFACS",
-        "cidade": "Salvador",
-        "estado": "BA",
-    },
-
-    {
-        "nome": "Centro Universitário Jorge Amado",
-        "sigla": "UNIJORGE",
-        "cidade": "Salvador",
-        "estado": "BA",
-    },
-
-    {
-        "nome": "Universidade Federal da Bahia",
-        "sigla": "UFBA",
-        "cidade": "Salvador",
-        "estado": "BA",
-    },
 ]
 
 
@@ -199,33 +100,37 @@ FACULDADES = [
 # ============================================================
 
 MAX_RESULTADOS = 20
+
 MAX_TENTATIVAS = 2
 
 PAUSA_MIN = 5
 PAUSA_MAX = 8
 
-ETAPA_CHECKPOINT = "captacao_faculdades_2025_2026"
+ETAPA_CHECKPOINT = (
+    "captacao_faculdades_2025_2026"
+)
 
-
-# ============================================================
-# ESTATÍSTICAS
-# ============================================================
 
 stats = {
+
+    "fontes_oficiais": 0,
+
+    "nomes_oficiais": 0,
+
     "buscas": 0,
+
     "resultados": 0,
-    "candidatos": 0,
+
     "validos": 0,
+
     "salvos": 0,
+
     "duplicados": 0,
-    "rejeitados_nome": 0,
-    "rejeitados_nutricao": 0,
-    "institucionais": 0,
+
+    "rejeitados": 0,
+
     "erros": 0,
 }
-
-
-vistos_execucao = set()
 
 
 # ============================================================
@@ -233,6 +138,7 @@ vistos_execucao = set()
 # ============================================================
 
 def agora():
+
     return datetime.now(
         timezone.utc
     ).isoformat()
@@ -265,6 +171,18 @@ def normalizar(texto):
     return texto.strip()
 
 
+def nome_formatado(nome):
+
+    palavras = nome.strip().split()
+
+    return " ".join(
+        p.capitalize()
+        if len(p) > 2
+        else p.lower()
+        for p in palavras
+    )
+
+
 def pausa():
 
     time.sleep(
@@ -272,6 +190,298 @@ def pausa():
             PAUSA_MIN,
             PAUSA_MAX
         )
+    )
+
+
+# ============================================================
+# NOME PARECE PESSOA?
+# ============================================================
+
+def nome_parece_pessoa(nome):
+
+    if not nome:
+
+        return False
+
+    if len(nome) < 5:
+
+        return False
+
+    if len(nome) > 90:
+
+        return False
+
+    palavras = nome.split()
+
+    if len(palavras) < 2:
+
+        return False
+
+    if len(palavras) > 8:
+
+        return False
+
+    proibidos = [
+
+        "universidade",
+
+        "faculdade",
+
+        "centro universitario",
+
+        "curso",
+
+        "nutricao",
+
+        "turma",
+
+        "formatura",
+
+        "comissao",
+
+        "atletica",
+
+        "instituto",
+
+        "escola",
+
+        "limited",
+
+        "company",
+
+        "ltda",
+    ]
+
+    n = normalizar(nome)
+
+    if any(
+        termo in n
+        for termo in proibidos
+    ):
+
+        return False
+
+    estranhos = re.sub(
+        r"[A-Za-zÀ-ÿ'´`\-\s.]",
+        "",
+        nome
+    )
+
+    if len(estranhos) > 2:
+
+        return False
+
+    return True
+
+
+# ============================================================
+# SOCIAL
+# ============================================================
+
+def perfil_social(url):
+
+    if not url:
+
+        return None, None
+
+    try:
+
+        parsed = urlparse(url)
+
+        host = (
+            parsed.netloc
+            .lower()
+            .replace(
+                "www.",
+                ""
+            )
+        )
+
+        # LinkedIn pessoa brasileira
+        if (
+            "linkedin.com"
+            in host
+            and "/in/"
+            in parsed.path
+        ):
+
+            if (
+                host.startswith(
+                    "br.linkedin.com"
+                )
+                or host
+                == "linkedin.com"
+            ):
+
+                return (
+                    "linkedin",
+                    url
+                )
+
+            return (
+                None,
+                None
+            )
+
+        # Instagram
+        if "instagram.com" in host:
+
+            partes = [
+                p
+                for p in parsed.path.split("/")
+                if p
+            ]
+
+            if not partes:
+
+                return (
+                    None,
+                    None
+                )
+
+            usuario = (
+                partes[0]
+                .lower()
+            )
+
+            bloqueados = {
+
+                "p",
+
+                "reel",
+
+                "reels",
+
+                "stories",
+
+                "explore",
+
+                "accounts",
+
+                "direct",
+
+                "tv",
+            }
+
+            if usuario in bloqueados:
+
+                return (
+                    None,
+                    None
+                )
+
+            if re.match(
+                r"^[a-zA-Z0-9._]+$",
+                usuario
+            ):
+
+                return (
+                    "instagram",
+                    "@"
+                    + usuario
+                )
+
+    except Exception:
+
+        pass
+
+    return (
+        None,
+        None
+    )
+
+
+# ============================================================
+# EXTRAIR NOME DE RESULTADO WEB
+# ============================================================
+
+def extrair_nome_titulo(titulo):
+
+    if not titulo:
+
+        return ""
+
+    nome = re.sub(
+        r"\s*[|–—-]\s*LinkedIn.*$",
+        "",
+        titulo,
+        flags=re.I
+    )
+
+    nome = re.sub(
+        r"\s*\(@[^)]+\).*$",
+        "",
+        nome
+    )
+
+    nome = re.sub(
+        r"\s*[|–—•].*$",
+        "",
+        nome
+    )
+
+    nome = re.sub(
+        r"\s+",
+        " ",
+        nome
+    )
+
+    return nome.strip()
+
+
+# ============================================================
+# CONFIRMA INSTITUIÇÃO
+# ============================================================
+
+def consulta_tem_instituicao(
+    texto,
+    faculdade
+):
+
+    t = normalizar(
+        texto
+    )
+
+    nome = normalizar(
+        faculdade["nome"]
+    )
+
+    sigla = normalizar(
+        faculdade["sigla"]
+    )
+
+    cidade = normalizar(
+        faculdade["cidade"]
+    )
+
+    if nome in t:
+
+        return True
+
+    if (
+        sigla in t
+        and cidade in t
+    ):
+
+        return True
+
+    return False
+
+
+# ============================================================
+# CONFIRMA NUTRIÇÃO
+# ============================================================
+
+def tem_nutricao(texto):
+
+    t = normalizar(
+        texto
+    )
+
+    return (
+        "nutricao" in t
+        or
+        "nutricionista" in t
     )
 
 
@@ -285,7 +495,9 @@ def buscar_checkpoint():
 
         resposta = (
             supabase
-            .table("controle_busca")
+            .table(
+                "controle_busca"
+            )
             .select("*")
             .eq(
                 "etapa",
@@ -296,24 +508,22 @@ def buscar_checkpoint():
         )
 
         if resposta.data:
+
             return resposta.data[0]
 
         return None
 
-    except Exception as erro:
-
-        print(
-            f"⚠️ Erro lendo checkpoint: {erro}"
-        )
+    except Exception:
 
         return None
 
 
-def obter_indice_faculdade():
+def obter_indice():
 
     checkpoint = buscar_checkpoint()
 
     if not checkpoint:
+
         return 0
 
     indice = checkpoint.get(
@@ -321,9 +531,12 @@ def obter_indice_faculdade():
     )
 
     if indice is None:
+
         return 0
 
-    return int(indice)
+    return int(
+        indice
+    )
 
 
 def salvar_checkpoint(
@@ -335,6 +548,7 @@ def salvar_checkpoint(
     atual = buscar_checkpoint()
 
     dados = {
+
         "estado":
             faculdade["estado"],
 
@@ -360,14 +574,11 @@ def salvar_checkpoint(
             faculdade["nome"],
 
         "fonte_atual":
-            "busca_web_publica",
+            "fonte_academica_mais_web",
 
         "atualizado_em":
             agora(),
     }
-
-    if not atual:
-        dados["iniciado_em"] = agora()
 
     try:
 
@@ -375,7 +586,9 @@ def salvar_checkpoint(
 
             (
                 supabase
-                .table("controle_busca")
+                .table(
+                    "controle_busca"
+                )
                 .update(dados)
                 .eq(
                     "id",
@@ -386,9 +599,15 @@ def salvar_checkpoint(
 
         else:
 
+            dados[
+                "iniciado_em"
+            ] = agora()
+
             (
                 supabase
-                .table("controle_busca")
+                .table(
+                    "controle_busca"
+                )
                 .insert(dados)
                 .execute()
             )
@@ -398,7 +617,8 @@ def salvar_checkpoint(
     except Exception as erro:
 
         print(
-            f"⚠️ Erro salvando checkpoint: {erro}"
+            f"⚠️ Erro checkpoint: "
+            f"{erro}"
         )
 
         stats["erros"] += 1
@@ -407,594 +627,14 @@ def salvar_checkpoint(
 
 
 # ============================================================
-# BUSCA
-# ============================================================
-
-def pesquisar(
-    ddgs,
-    consulta
-):
-
-    stats["buscas"] += 1
-
-    print("")
-    print(
-        f"🔎 {consulta}"
-    )
-
-    for tentativa in range(
-        1,
-        MAX_TENTATIVAS + 1
-    ):
-
-        try:
-
-            resultados = list(
-                ddgs.text(
-                    consulta,
-                    max_results=MAX_RESULTADOS
-                )
-            )
-
-            return resultados
-
-        except Exception as erro:
-
-            mensagem = str(erro)
-
-            if "No results found" in mensagem:
-
-                return []
-
-            print(
-                f"⚠️ Tentativa "
-                f"{tentativa}/"
-                f"{MAX_TENTATIVAS}: "
-                f"{mensagem}"
-            )
-
-            if tentativa < MAX_TENTATIVAS:
-
-                time.sleep(12)
-
-    stats["erros"] += 1
-
-    return []
-
-
-# ============================================================
-# CONSULTAS
-#
-# AGORA TODAS JÁ LEVAM:
-# - faculdade
-# - Nutrição
-# - 2025 OU 2026
-#
-# Portanto faculdade e ano fazem parte
-# da evidência da própria consulta.
-# ============================================================
-
-def montar_consultas(
-    faculdade
-):
-
-    sigla = faculdade["sigla"]
-
-    return [
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": None,
-        },
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"Nutrição" '
-                f'"2025"'
-            ),
-            "ano": 2025,
-            "fase": None,
-        },
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"formanda" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": "formando",
-        },
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"formando" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": "formando",
-        },
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"TCC" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": "TCC",
-        },
-
-        {
-            "consulta": (
-                f'site:linkedin.com/in '
-                f'"{sigla}" '
-                f'"último período" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": "último período",
-        },
-
-        {
-            "consulta": (
-                f'site:instagram.com '
-                f'"{sigla}" '
-                f'"Nutrição" '
-                f'"2026"'
-            ),
-            "ano": 2026,
-            "fase": None,
-        },
-
-        {
-            "consulta": (
-                f'site:instagram.com '
-                f'"{sigla}" '
-                f'"Nutrição" '
-                f'"2025"'
-            ),
-            "ano": 2025,
-            "fase": None,
-        },
-    ]
-
-
-# ============================================================
-# IDENTIFICAR REDE
-# ============================================================
-
-def identificar_rede(
-    url
-):
-
-    if not url:
-        return None, None
-
-    try:
-
-        parsed = urlparse(url)
-
-        dominio = (
-            parsed.netloc
-            .lower()
-            .replace("www.", "")
-        )
-
-        # LINKEDIN DE PESSOA
-        if (
-            "linkedin.com"
-            in dominio
-            and "/in/"
-            in parsed.path
-        ):
-
-            return (
-                "linkedin",
-                url
-            )
-
-        # INSTAGRAM
-        if "instagram.com" in dominio:
-
-            partes = [
-                parte
-                for parte
-                in parsed.path.split("/")
-                if parte
-            ]
-
-            if not partes:
-
-                return None, None
-
-            usuario = partes[0].lower()
-
-            bloqueados = {
-                "p",
-                "reel",
-                "reels",
-                "stories",
-                "explore",
-                "accounts",
-                "direct",
-                "tv",
-            }
-
-            if usuario in bloqueados:
-
-                return None, None
-
-            if re.match(
-                r"^[a-zA-Z0-9._]+$",
-                usuario
-            ):
-
-                return (
-                    "instagram",
-                    "@"
-                    + usuario
-                )
-
-    except Exception:
-
-        pass
-
-    return None, None
-
-
-# ============================================================
-# EXTRAIR NOME
-# ============================================================
-
-def extrair_nome(
-    titulo,
-    tipo
-):
-
-    if not titulo:
-        return ""
-
-    nome = titulo.strip()
-
-    if tipo == "linkedin":
-
-        nome = re.sub(
-            r"\s*[\|\-–—]\s*LinkedIn.*$",
-            "",
-            nome,
-            flags=re.I
-        )
-
-        nome = re.sub(
-            r"\s*[\|\-–—].*$",
-            "",
-            nome
-        )
-
-    elif tipo == "instagram":
-
-        # Exemplo:
-        # Maria Silva (@maria.nutri) • Instagram
-        nome = re.sub(
-            r"\s*\(@[^)]+\).*$",
-            "",
-            nome
-        )
-
-        nome = re.sub(
-            r"\s*[\|\-–—•].*$",
-            "",
-            nome
-        )
-
-    nome = re.sub(
-        r"\s+",
-        " ",
-        nome
-    )
-
-    return nome.strip()
-
-
-# ============================================================
-# NOME PARECE PESSOA?
-# ============================================================
-
-def nome_parece_pessoa(
-    nome
-):
-
-    if not nome:
-
-        return False
-
-    if len(nome) < 4:
-
-        return False
-
-    if len(nome) > 80:
-
-        return False
-
-    palavras = nome.split()
-
-    if len(palavras) < 2:
-
-        return False
-
-    texto = normalizar(nome)
-
-    proibidos = [
-        "universidade",
-        "faculdade",
-        "centro universitario",
-        "curso de nutricao",
-        "nutricao mackenzie",
-        "limited",
-        "ltda",
-        "company",
-        "empresa",
-        "turma",
-        "formatura",
-        "comissao",
-        "atletica",
-        "instituto",
-        "escola",
-        "departamento",
-    ]
-
-    if any(
-        termo in texto
-        for termo in proibidos
-    ):
-
-        return False
-
-    # Bloqueia títulos estranhos/idiomas aleatórios
-    caracteres_invalidos = re.sub(
-        r"[A-Za-zÀ-ÿ'´`\-\s.]",
-        "",
-        nome
-    )
-
-    if len(caracteres_invalidos) > 2:
-
-        return False
-
-    return True
-
-
-# ============================================================
-# NUTRIÇÃO
-# ============================================================
-
-def tem_sinal_nutricao(
-    texto,
-    nome,
-    instagram
-):
-
-    t = normalizar(texto)
-    n = normalizar(nome)
-    i = normalizar(instagram)
-
-    sinais_fortes = [
-        "nutricao",
-        "nutricionista",
-        "nutrition",
-        "graduanda em nutricao",
-        "graduando em nutricao",
-        "estudante de nutricao",
-        "formanda em nutricao",
-        "formando em nutricao",
-        "bacharel em nutricao",
-        "nutri ",
-        " nutri",
-    ]
-
-    if any(
-        sinal in t
-        for sinal in sinais_fortes
-    ):
-        return True
-
-    if "nutri" in n:
-        return True
-
-    if instagram and "nutri" in i:
-        return True
-
-    return False
-
-
-# ============================================================
-# PERFIL INSTITUCIONAL
-# ============================================================
-
-def perfil_institucional(
-    nome,
-    instagram
-):
-
-    nome_norm = normalizar(nome)
-    insta_norm = normalizar(instagram)
-
-    termos_nome = [
-        "universidade",
-        "faculdade",
-        "curso de nutricao",
-        "nutricao mackenzie",
-        "turma",
-        "formatura",
-        "comissao",
-        "atletica",
-        "centro academico",
-        "liga academica",
-        "departamento",
-    ]
-
-    if any(
-        termo in nome_norm
-        for termo in termos_nome
-    ):
-        return True
-
-    termos_handle = [
-        "nutricao_",
-        "nutricao.",
-        "turmanutri",
-        "formaturan",
-        "atletica",
-        "comissao",
-        "centroacademico",
-    ]
-
-    if instagram:
-
-        if any(
-            termo in insta_norm
-            for termo in termos_handle
-        ):
-            return True
-
-    return False
-
-
-# ============================================================
-# IDENTIFICAR FASE PELO RESULTADO
-# ============================================================
-
-def identificar_fase_resultado(
-    texto,
-    fase_consulta
-):
-
-    t = normalizar(texto)
-
-    regras = [
-
-        (
-            [
-                "recem-formada",
-                "recem formada",
-                "recem-formado",
-                "recem formado",
-            ],
-            "recém-formado"
-        ),
-
-        (
-            [
-                "formanda",
-                "formando",
-            ],
-            "formando"
-        ),
-
-        (
-            [
-                "ultimo periodo",
-                "ultimo semestre",
-                "ultimo ano",
-            ],
-            "último período"
-        ),
-
-        (
-            [
-                "9 periodo",
-                "9o periodo",
-                "9º periodo",
-            ],
-            "9º período"
-        ),
-
-        (
-            [
-                "8 periodo",
-                "8o periodo",
-                "8º periodo",
-                "8/8",
-                "8 de 8",
-            ],
-            "8º período"
-        ),
-
-        (
-            [
-                "7 periodo",
-                "7o periodo",
-                "7º periodo",
-                "7/8",
-                "7 de 8",
-            ],
-            "7º período"
-        ),
-
-        (
-            [
-                "tcc",
-                "trabalho de conclusao",
-            ],
-            "TCC"
-        ),
-
-        (
-            [
-                "estagio obrigatorio",
-                "estagio curricular",
-            ],
-            "estágio final"
-        ),
-
-        (
-            [
-                "formatura",
-                "colacao",
-                "conclusao",
-            ],
-            "conclusão"
-        ),
-    ]
-
-    for termos, descricao in regras:
-
-        if any(
-            termo in t
-            for termo in termos
-        ):
-
-            return descricao
-
-    return fase_consulta
-
-
-# ============================================================
 # DUPLICIDADE
 # ============================================================
 
-def existe_no_supabase(
+def existe(
     nome,
-    linkedin,
-    instagram,
-    faculdade
+    faculdade,
+    linkedin=None,
+    instagram=None
 ):
 
     try:
@@ -1014,6 +654,7 @@ def existe_no_supabase(
             )
 
             if resposta.data:
+
                 return True
 
         if instagram:
@@ -1031,6 +672,7 @@ def existe_no_supabase(
             )
 
             if resposta.data:
+
                 return True
 
         resposta = (
@@ -1049,24 +691,22 @@ def existe_no_supabase(
             .execute()
         )
 
-        if resposta.data:
-            return True
-
-        return False
+        return bool(
+            resposta.data
+        )
 
     except Exception as erro:
 
         print(
-            f"⚠️ Erro verificando duplicidade: "
+            f"⚠️ Erro duplicidade: "
             f"{erro}"
         )
 
-        # dúvida = não salva
         return None
 
 
 # ============================================================
-# SALVAR IMEDIATAMENTE
+# SALVAR LEAD
 # ============================================================
 
 def salvar_lead(
@@ -1074,45 +714,39 @@ def salvar_lead(
     faculdade,
     ano,
     fase,
-    linkedin,
-    instagram,
     fonte_url,
-    consulta
+    fonte_validacao,
+    linkedin=None,
+    instagram=None,
+    origem="fonte_academica_oficial"
 ):
 
-    existente = existe_no_supabase(
+    duplicado = existe(
         nome,
+        faculdade,
         linkedin,
-        instagram,
-        faculdade
+        instagram
     )
 
-    if existente is True:
+    if duplicado is True:
 
-        stats["duplicados"] += 1
+        stats[
+            "duplicados"
+        ] += 1
 
         print(
-            f"♻️ Duplicado ignorado: {nome}"
+            f"♻️ Duplicado: "
+            f"{nome}"
         )
 
         return False
 
-    if existente is None:
+    if duplicado is None:
+
         return False
-
-    evidencia = (
-        f"Nutrição | "
-        f"{faculdade['sigla']} | "
-        f"{ano}"
-    )
-
-    if fase:
-
-        evidencia += (
-            f" | {fase}"
-        )
 
     dados = {
+
         "nome":
             nome[:150],
 
@@ -1129,7 +763,7 @@ def salvar_lead(
             "nutricionista",
 
         "origem":
-            "captacao_web_publica",
+            origem,
 
         "origem_lead":
             "busca_principal",
@@ -1180,13 +814,18 @@ def salvar_lead(
             10,
 
         "evidencia":
-            evidencia,
+            (
+                f"Nutrição | "
+                f"{faculdade['sigla']} | "
+                f"{ano} | "
+                f"{fase}"
+            ),
 
         "fonte_url":
             fonte_url,
 
         "fonte_validacao":
-            consulta,
+            fonte_validacao,
     }
 
     try:
@@ -1198,71 +837,453 @@ def salvar_lead(
             .execute()
         )
 
-        stats["salvos"] += 1
-
-        print("")
-        print(
-            "✅ LEAD SALVO NA HORA"
-        )
+        stats[
+            "salvos"
+        ] += 1
 
         print(
-            f"   Nome: {nome}"
+            f"✅ SALVO: "
+            f"{nome} | "
+            f"{ano} | "
+            f"{fase}"
         )
-
-        print(
-            f"   Faculdade: "
-            f"{faculdade['sigla']}"
-        )
-
-        print(
-            f"   Ano: {ano}"
-        )
-
-        if fase:
-
-            print(
-                f"   Fase: {fase}"
-            )
-
-        if linkedin:
-
-            print(
-                f"   LinkedIn: {linkedin}"
-            )
-
-        if instagram:
-
-            print(
-                f"   Instagram: {instagram}"
-            )
-
-        print("")
 
         return True
 
     except Exception as erro:
 
         print(
-            f"❌ Erro salvando {nome}: "
+            f"❌ Erro salvando "
+            f"{nome}: "
             f"{erro}"
         )
 
-        stats["erros"] += 1
+        stats[
+            "erros"
+        ] += 1
 
         return False
 
 
 # ============================================================
-# PROCESSAR RESULTADO
+# FONTE OFICIAL MACKENZIE
 # ============================================================
 
-def processar_resultado(
-    resultado,
-    faculdade,
-    contexto_busca
+def extrair_tcc_mackenzie(
+    url
 ):
 
-    stats["resultados"] += 1
+    resposta = requests.get(
+
+        url,
+
+        timeout=40,
+
+        headers={
+            "User-Agent":
+                "Mozilla/5.0"
+        }
+    )
+
+    resposta.raise_for_status()
+
+    soup = BeautifulSoup(
+        resposta.text,
+        "html.parser"
+    )
+
+    linhas = [
+
+        linha.strip()
+
+        for linha
+        in soup.get_text(
+            "\n"
+        ).splitlines()
+
+        if linha.strip()
+    ]
+
+    nomes = []
+
+    dentro = False
+
+    for linha in linhas:
+
+        if (
+            normalizar(linha)
+            == "nutricao 2026.1"
+        ):
+
+            dentro = True
+
+            continue
+
+        if (
+            dentro
+            and normalizar(
+                linha
+            ).startswith(
+                "cursos de graduacao"
+            )
+        ):
+
+            break
+
+        if not dentro:
+
+            continue
+
+        match = re.match(
+            r"^(\d{1,2})\s*-\s*(.+)$",
+            linha
+        )
+
+        if not match:
+
+            continue
+
+        bruto = (
+            match
+            .group(2)
+            .strip()
+        )
+
+        # trabalhos em dupla
+        partes = re.split(
+            r"\s+e\s+",
+            bruto,
+            flags=re.I
+        )
+
+        for parte in partes:
+
+            parte = re.sub(
+                r"\s+",
+                " ",
+                parte
+            ).strip(
+                " -"
+            )
+
+            if nome_parece_pessoa(
+                parte
+            ):
+
+                nomes.append(
+                    nome_formatado(
+                        parte
+                    )
+                )
+
+    # remove duplicados preservando ordem
+    return list(
+        dict.fromkeys(
+            nomes
+        )
+    )
+
+
+# ============================================================
+# PROCESSAR FONTES OFICIAIS
+# ============================================================
+
+def processar_fontes_oficiais(
+    faculdade
+):
+
+    for fonte in faculdade.get(
+        "fontes_oficiais",
+        []
+    ):
+
+        try:
+
+            print("")
+            print(
+                f"📚 Fonte oficial: "
+                f"{fonte['tipo']}"
+            )
+
+            if (
+                fonte["tipo"]
+                == "lista_tcc"
+            ):
+
+                nomes = (
+                    extrair_tcc_mackenzie(
+                        fonte["url"]
+                    )
+                )
+
+                stats[
+                    "fontes_oficiais"
+                ] += 1
+
+                stats[
+                    "nomes_oficiais"
+                ] += len(
+                    nomes
+                )
+
+                print(
+                    f"👥 Nomes encontrados "
+                    f"na fonte oficial: "
+                    f"{len(nomes)}"
+                )
+
+                for nome in nomes:
+
+                    salvar_lead(
+
+                        nome=nome,
+
+                        faculdade=
+                            faculdade,
+
+                        ano=
+                            fonte["ano"],
+
+                        fase=
+                            fonte["fase"],
+
+                        fonte_url=
+                            fonte["url"],
+
+                        fonte_validacao=
+                            "site oficial da faculdade",
+
+                        origem=
+                            "fonte_academica_oficial"
+                    )
+
+        except Exception as erro:
+
+            print(
+                f"⚠️ Falha na fonte "
+                f"oficial: {erro}"
+            )
+
+            stats[
+                "erros"
+            ] += 1
+
+
+# ============================================================
+# PESQUISA WEB COMPLEMENTAR
+# ============================================================
+
+def pesquisar(
+    ddgs,
+    consulta
+):
+
+    stats[
+        "buscas"
+    ] += 1
+
+    print("")
+    print(
+        f"🔎 {consulta}"
+    )
+
+    for tentativa in range(
+        1,
+        MAX_TENTATIVAS + 1
+    ):
+
+        try:
+
+            return list(
+                ddgs.text(
+                    consulta,
+                    max_results=
+                        MAX_RESULTADOS
+                )
+            )
+
+        except Exception as erro:
+
+            mensagem = str(
+                erro
+            )
+
+            if (
+                "No results found"
+                in mensagem
+            ):
+
+                return []
+
+            print(
+                f"⚠️ Busca "
+                f"{tentativa}/"
+                f"{MAX_TENTATIVAS}: "
+                f"{mensagem}"
+            )
+
+            if tentativa < (
+                MAX_TENTATIVAS
+            ):
+
+                time.sleep(
+                    12
+                )
+
+    stats[
+        "erros"
+    ] += 1
+
+    return []
+
+
+# ============================================================
+# BLOCOS DE BUSCA
+# ============================================================
+
+def consultas_complementares(
+    faculdade
+):
+
+    nome = (
+        faculdade["nome"]
+    )
+
+    return [
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"7º semestre" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "7º semestre",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"7º período" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "7º período",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"8º semestre" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "8º semestre",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"8º período" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "8º período",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"TCC" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "TCC",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"estágio obrigatório" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "estágio obrigatório",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"formanda" '
+                f'2026',
+
+            "ano": 2026,
+
+            "fase":
+                "formando",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"formatura" '
+                f'2025',
+
+            "ano": 2025,
+
+            "fase":
+                "formado em 2025",
+        },
+
+        {
+            "q":
+                f'"{nome}" '
+                f'"Nutrição" '
+                f'"recém-formada" '
+                f'2025',
+
+            "ano": 2025,
+
+            "fase":
+                "recém-formado",
+        },
+
+    ]
+
+
+# ============================================================
+# PROCESSAR RESULTADO COMPLEMENTAR
+# ============================================================
+
+def processar_resultado_web(
+    resultado,
+    faculdade,
+    contexto
+):
+
+    stats[
+        "resultados"
+    ] += 1
 
     titulo = (
         resultado.get("title")
@@ -1280,16 +1301,45 @@ def processar_resultado(
         or ""
     )
 
-    tipo, rede = identificar_rede(
+    tipo, rede = perfil_social(
         url
     )
 
-    if tipo is None:
+    # só usamos perfil público de pessoa
+    if not tipo:
+
         return False
 
-    nome = extrair_nome(
-        titulo,
-        tipo
+    texto = (
+        f"{titulo} "
+        f"{corpo}"
+    )
+
+    # precisa provar Nutrição
+    if not tem_nutricao(
+        texto
+    ):
+
+        stats[
+            "rejeitados"
+        ] += 1
+
+        return False
+
+    # precisa provar a faculdade
+    if not consulta_tem_instituicao(
+        texto,
+        faculdade
+    ):
+
+        stats[
+            "rejeitados"
+        ] += 1
+
+        return False
+
+    nome = extrair_nome_titulo(
+        titulo
     )
 
     if not nome_parece_pessoa(
@@ -1297,161 +1347,51 @@ def processar_resultado(
     ):
 
         stats[
-            "rejeitados_nome"
+            "rejeitados"
         ] += 1
 
         return False
 
-    instagram = None
-    linkedin = None
-
-    if tipo == "linkedin":
-        linkedin = rede
-
-    elif tipo == "instagram":
-        instagram = rede
-
-    if perfil_institucional(
-        nome,
-        instagram
-    ):
-
-        stats[
-            "institucionais"
-        ] += 1
-
-        return False
-
-    texto_resultado = (
-        f"{titulo} "
-        f"{corpo}"
+    linkedin = (
+        rede
+        if tipo == "linkedin"
+        else None
     )
 
-    # --------------------------------------------------------
-    # ÚNICA VALIDAÇÃO FORTE NO RESULTADO:
-    # TEM QUE EXISTIR SINAL DE NUTRIÇÃO.
-    #
-    # Faculdade e ano já vieram da consulta.
-    # --------------------------------------------------------
-
-    if not tem_sinal_nutricao(
-        texto_resultado,
-        nome,
-        instagram
-    ):
-
-        stats[
-            "rejeitados_nutricao"
-        ] += 1
-
-        return False
-
-    chave = (
-        normalizar(nome)
-        + "|"
-        + faculdade["sigla"]
+    instagram = (
+        rede
+        if tipo == "instagram"
+        else None
     )
 
-    if chave in vistos_execucao:
-        return False
-
-    vistos_execucao.add(
-        chave
-    )
-
-    ano = contexto_busca["ano"]
-
-    fase = identificar_fase_resultado(
-        texto_resultado,
-        contexto_busca["fase"]
-    )
-
-    stats["candidatos"] += 1
-    stats["validos"] += 1
-
-    # --------------------------------------------------------
-    # SALVA IMEDIATAMENTE
-    # --------------------------------------------------------
+    stats[
+        "validos"
+    ] += 1
 
     return salvar_lead(
+
         nome=nome,
+
         faculdade=faculdade,
-        ano=ano,
-        fase=fase,
-        linkedin=linkedin,
-        instagram=instagram,
+
+        ano=contexto["ano"],
+
+        fase=contexto["fase"],
+
         fonte_url=url,
-        consulta=contexto_busca[
-            "consulta"
-        ]
+
+        fonte_validacao=
+            contexto["q"],
+
+        linkedin=
+            linkedin,
+
+        instagram=
+            instagram,
+
+        origem=
+            "busca_web_complementar"
     )
-
-
-# ============================================================
-# EXECUTAR UMA FACULDADE
-# ============================================================
-
-def executar_faculdade(
-    ddgs,
-    faculdade
-):
-
-    print("")
-    print(
-        "================================================="
-    )
-
-    print(
-        f"🏫 {faculdade['nome']}"
-    )
-
-    print(
-        f"📍 {faculdade['cidade']}/"
-        f"{faculdade['estado']}"
-    )
-
-    print(
-        "🎯 SOMENTE 2025 / 2026"
-    )
-
-    print(
-        "💾 Achou lead = salva imediatamente"
-    )
-
-    print(
-        "================================================="
-    )
-
-    consultas = montar_consultas(
-        faculdade
-    )
-
-    for numero, contexto in enumerate(
-        consultas,
-        start=1
-    ):
-
-        print("")
-        print(
-            f"Pesquisa "
-            f"{numero}/"
-            f"{len(consultas)}"
-        )
-
-        resultados = pesquisar(
-            ddgs,
-            contexto["consulta"]
-        )
-
-        for resultado in resultados:
-
-            processar_resultado(
-                resultado,
-                faculdade,
-                contexto
-            )
-
-        pausa()
 
 
 # ============================================================
@@ -1460,43 +1400,63 @@ def executar_faculdade(
 
 def executar():
 
-    indice = obter_indice_faculdade()
+    indice = obter_indice()
 
-    if indice >= len(FACULDADES):
+    if indice >= len(
+        FACULDADES
+    ):
 
-        print("")
         print(
-            "✅ TODAS AS FACULDADES "
-            "FORAM PROCESSADAS."
+            "✅ Lista concluída."
         )
 
         return
 
-    faculdade = FACULDADES[
-        indice
-    ]
+    faculdade = (
+        FACULDADES[
+            indice
+        ]
+    )
 
     print("")
     print(
-        "================================================="
+        "=" * 60
     )
 
     print(
-        "MÁQUINA DE LEADS"
+        f"🏫 "
+        f"{faculdade['nome']} "
+        f"| "
+        f"{faculdade['cidade']}/"
+        f"{faculdade['estado']}"
     )
 
     print(
-        "NUTRIÇÃO - 2025 / 2026"
+        "1) fonte acadêmica oficial"
     )
 
     print(
-        "================================================="
+        "2) 7º/8º semestre"
     )
 
     print(
-        f"Faculdade "
-        f"{indice + 1}/"
-        f"{len(FACULDADES)}"
+        "3) TCC"
+    )
+
+    print(
+        "4) estágio"
+    )
+
+    print(
+        "5) formatura 2025/2026"
+    )
+
+    print(
+        "💾 Achou lead = salva na hora"
+    )
+
+    print(
+        "=" * 60
     )
 
     salvar_checkpoint(
@@ -1505,131 +1465,102 @@ def executar():
         "processando"
     )
 
+    # --------------------------------------------------------
+    # PRIMEIRO:
+    # FONTES ACADÊMICAS OFICIAIS
+    # --------------------------------------------------------
+
+    processar_fontes_oficiais(
+        faculdade
+    )
+
+    # --------------------------------------------------------
+    # DEPOIS:
+    # BUSCAS COMPLEMENTARES
+    # --------------------------------------------------------
+
     with DDGS() as ddgs:
 
-        executar_faculdade(
-            ddgs,
-            faculdade
-        )
+        for contexto in (
+            consultas_complementares(
+                faculdade
+            )
+        ):
 
-    proximo_indice = (
+            resultados = pesquisar(
+                ddgs,
+                contexto["q"]
+            )
+
+            for resultado in resultados:
+
+                processar_resultado_web(
+                    resultado,
+                    faculdade,
+                    contexto
+                )
+
+            pausa()
+
+    # --------------------------------------------------------
+    # TERMINOU A FACULDADE
+    # --------------------------------------------------------
+
+    proximo = (
         indice + 1
     )
 
     salvar_checkpoint(
-        proximo_indice,
+        proximo,
         faculdade,
         "pendente"
     )
 
     print("")
     print(
-        "================================================="
-    )
-
-    print(
         "✅ FACULDADE CONCLUÍDA"
     )
 
-    if proximo_indice < len(
+    if proximo < len(
         FACULDADES
     ):
 
-        proxima = FACULDADES[
-            proximo_indice
-        ]
-
         print(
             f"Próxima: "
-            f"{proxima['nome']}"
+            f"{FACULDADES[proximo]['nome']}"
         )
-
-    else:
-
-        print(
-            "Todas as faculdades "
-            "foram concluídas."
-        )
-
-    print(
-        "================================================="
-    )
 
 
 # ============================================================
 # INÍCIO
 # ============================================================
 
-executar()
+if __name__ == "__main__":
 
+    executar()
 
-# ============================================================
-# RESUMO
-# ============================================================
+    print("")
+    print(
+        "=" * 60
+    )
 
-print("")
-print(
-    "================================================="
-)
+    print(
+        "RESUMO"
+    )
 
-print(
-    "RESUMO DA EXECUÇÃO"
-)
+    print(
+        "=" * 60
+    )
 
-print(
-    "================================================="
-)
+    for chave, valor in (
+        stats.items()
+    ):
 
-print(
-    f"Buscas realizadas: "
-    f"{stats['buscas']}"
-)
+        print(
+            f"{chave}: "
+            f"{valor}"
+        )
 
-print(
-    f"Resultados analisados: "
-    f"{stats['resultados']}"
-)
-
-print(
-    f"Candidatos de pessoa: "
-    f"{stats['candidatos']}"
-)
-
-print(
-    f"Leads válidos: "
-    f"{stats['validos']}"
-)
-
-print(
-    f"Leads salvos: "
-    f"{stats['salvos']}"
-)
-
-print(
-    f"Duplicados: "
-    f"{stats['duplicados']}"
-)
-
-print(
-    f"Rejeitados por nome: "
-    f"{stats['rejeitados_nome']}"
-)
-
-print(
-    f"Rejeitados sem sinal de Nutrição: "
-    f"{stats['rejeitados_nutricao']}"
-)
-
-print(
-    f"Institucionais rejeitados: "
-    f"{stats['institucionais']}"
-)
-
-print(
-    f"Erros: "
-    f"{stats['erros']}"
-)
-
-print(
-    "================================================="
-)
+    print(
+        "=" * 60
+    )
