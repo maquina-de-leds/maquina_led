@@ -31,6 +31,9 @@ def normalizar_instagram(instagram):
 
 def extrair_usuario_instagram(url):
     try:
+        if not url:
+            return None
+
         parsed = urlparse(url)
 
         if "instagram.com" not in parsed.netloc.lower():
@@ -140,7 +143,6 @@ def buscar_leads():
                 for resultado in resultados:
                     url = resultado.get("href") or resultado.get("url")
                     titulo = resultado.get("title", "")
-                    descricao = resultado.get("body", "")
 
                     instagram = extrair_usuario_instagram(url)
 
@@ -162,7 +164,18 @@ def buscar_leads():
                         "nicho": "nutricionista",
                         "origem": "busca_web",
                         "status": "novo",
-                        "app_baixado": False
+
+                        "app_baixado": False,
+                        "nao_contatar": False,
+                        "qualificado": False,
+                        "cliente": False,
+
+                        "tentativas_contato": 0,
+
+                        "data_primeiro_contato": None,
+                        "data_ultimo_contato": None,
+                        "proxima_acao": None,
+                        "funil_destino": None
                     }
 
             except Exception as e:
