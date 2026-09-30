@@ -13,35 +13,7 @@ from supabase import create_client
 
 # ============================================================
 # MÁQUINA NACIONAL DE LEADS - NUTRIÇÃO
-# ============================================================
-#
-# NOVA ARQUITETURA
-#
-# BRASIL
-#   ↓
-# ESTADO
-#   ↓
-# DESCOBRE INSTITUIÇÕES COM CURSO DE NUTRIÇÃO
-#   ↓
-# IDENTIFICA A CIDADE
-#   ↓
-# VALIDA A INSTITUIÇÃO
-#   ↓
-# PESQUISA CANDIDATOS
-#   ↓
-# QUALIFICA
-#   ↓
-# SALVA O LEAD IMEDIATAMENTE
-#   ↓
-# ATUALIZA CHECKPOINT
-#   ↓
-# PRÓXIMA FACULDADE
-#
-# ============================================================
-
-
-# ============================================================
-# SUPABASE
+# VERSÃO COM FILTRO MAIS RÍGIDO
 # ============================================================
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -94,14 +66,14 @@ ESTADOS = [
 
 MAX_FACULDADES_POR_EXECUCAO = 5
 
-MAX_RESULTADOS_DESCOBERTA = 40
-
+MAX_RESULTADOS_DESCOBERTA = 35
 MAX_RESULTADOS_LEADS = 25
 
 MAX_TENTATIVAS_BUSCA = 3
+MAX_TENTATIVAS_SUPABASE = 3
 
-PAUSA_MIN = 3.0
-PAUSA_MAX = 5.0
+PAUSA_MIN = 4.0
+PAUSA_MAX = 7.0
 
 PONTUACAO_MINIMA = 9
 
@@ -115,12 +87,14 @@ estatisticas = {
     "pesquisas_realizadas": 0,
     "instituicoes_descobertas": 0,
     "instituicoes_validadas": 0,
+    "instituicoes_revisar": 0,
     "instituicoes_processadas": 0,
     "resultados_analisados": 0,
     "perfis_unicos": 0,
     "qualificados": 0,
     "salvos": 0,
     "duplicados": 0,
+    "institucionais": 0,
     "rejeitados": 0,
     "sem_resultado": 0,
     "erros": 0,
@@ -135,11 +109,15 @@ evidencias_perfis = {}
 
 salvos_execucao = set()
 
+qualificados_execucao = set()
+
+bloqueados_execucao = set()
+
 cache_municipios = {}
 
 
 # ============================================================
-# DATA / HORA
+# UTILIDADES
 # ============================================================
 
 def agora_iso():
@@ -147,10 +125,6 @@ def agora_iso():
         timezone.utc
     ).isoformat()
 
-
-# ============================================================
-# NORMALIZAÇÃO
-# ============================================================
 
 def normalizar_texto(texto):
 
@@ -209,7 +183,7 @@ def pausa():
 
 
 # ============================================================
-# PESQUISA WEB
+# BUSCA WEB
 # ============================================================
 
 def pesquisar(
@@ -272,7 +246,7 @@ def pesquisar(
                 )
 
             print(
-                f"⚠️ Erro de pesquisa "
+                f"⚠️ Falha na busca "
                 f"{tentativa}/"
                 f"{MAX_TENTATIVAS_BUSCA}"
             )
@@ -281,13 +255,10 @@ def pesquisar(
                 f"   {ultimo_erro}"
             )
 
-            if (
-                tentativa
-                < MAX_TENTATIVAS_BUSCA
-            ):
+            if tentativa < MAX_TENTATIVAS_BUSCA:
 
                 espera = (
-                    8 * tentativa
+                    10 * tentativa
                 )
 
                 print(
@@ -313,16 +284,12 @@ def pesquisar(
 # ============================================================
 # MUNICÍPIOS DO IBGE
 #
-# IMPORTANTE:
-# NÃO usamos mais município por município para pesquisar.
-#
-# O IBGE aqui serve APENAS para reconhecer a cidade
-# dentro de um resultado encontrado no estado.
+# Serve somente para IDENTIFICAR a cidade
+# encontrada no resultado.
+# Não fazemos busca cidade por cidade.
 # ============================================================
 
-def carregar_municipios(
-    uf
-):
+def carregar_municipios(uf):
 
     if uf in cache_municipios:
         return cache_municipios[uf]
@@ -348,18 +315,11 @@ def carregar_municipios(
 
         for item in dados:
 
-            nome = item.get(
-                "nome"
-            )
+            nome = item.get("nome")
 
             if nome:
+                municipios.append(nome)
 
-                municipios.append(
-                    nome
-                )
-
-        # Nomes maiores primeiro.
-        # Isso reduz falsos encaixes.
         municipios.sort(
             key=len,
             reverse=True
@@ -379,18 +339,12 @@ def carregar_municipios(
             f"{erro}"
         )
 
-        estatisticas[
-            "erros"
-        ] += 1
+        estatisticas["erros"] += 1
 
         return []
 
 
-# ============================================================
-# IDENTIFICAR CIDADE NO TEXTO
-# ============================================================
-
-def detectar_cidade(
+def detectar_cidade_em_texto(
     texto,
     municipios
 ):
@@ -409,9 +363,7 @@ def detectar_cidade(
 
         padrao = (
             r"(?<!\w)"
-            + re.escape(
-                municipio_norm
-            )
+            + re.escape(municipio_norm)
             + r"(?!\w)"
         )
 
@@ -419,19 +371,40 @@ def detectar_cidade(
             padrao,
             texto_norm
         ):
-
             return municipio
 
     return None
 
 
+def detectar_cidade_resultado(
+    titulo,
+    corpo,
+    municipios
+):
+
+    # Primeiro tenta título.
+    cidade = detectar_cidade_em_texto(
+        titulo,
+        municipios
+    )
+
+    if cidade:
+        return cidade
+
+    # Depois descrição.
+    cidade = detectar_cidade_em_texto(
+        corpo,
+        municipios
+    )
+
+    return cidade
+
+
 # ============================================================
-# CLASSIFICAÇÃO DE FONTE
+# FONTES
 # ============================================================
 
-def classificar_fonte(
-    url
-):
+def classificar_fonte(url):
 
     url_norm = (
         url or ""
@@ -442,9 +415,7 @@ def classificar_fonte(
     try:
 
         dominio = (
-            urlparse(
-                url
-            )
+            urlparse(url)
             .netloc
             .lower()
         )
@@ -452,22 +423,14 @@ def classificar_fonte(
     except Exception:
         pass
 
-    if (
-        "emec.mec.gov.br"
-        in url_norm
-        or "emec"
-        in dominio
-    ):
+    if "emec.mec.gov.br" in url_norm:
 
         return (
             "e_mec",
             True
         )
 
-    if (
-        "gov.br"
-        in dominio
-    ):
+    if "gov.br" in dominio:
 
         return (
             "fonte_oficial",
@@ -475,11 +438,8 @@ def classificar_fonte(
         )
 
     if (
-        dominio.endswith(
-            ".edu.br"
-        )
-        or ".edu.br"
-        in dominio
+        ".edu.br" in dominio
+        or dominio.endswith("edu.br")
     ):
 
         return (
@@ -494,7 +454,46 @@ def classificar_fonte(
 
 
 # ============================================================
-# INSTITUIÇÃO - SINAIS
+# DOMÍNIOS QUE NÃO SERVEM PARA DESCOBRIR FACULDADE
+# ============================================================
+
+DOMINIOS_RUINS_INSTITUICAO = [
+    "instagram.com",
+    "facebook.com",
+    "linkedin.com",
+    "youtube.com",
+    "tiktok.com",
+    "rocketreach.co",
+    "zoominfo.com",
+    "signalhire.com",
+    "apollo.io",
+    "contactout.com",
+    "lusha.com",
+]
+
+
+def dominio_ruim_instituicao(url):
+
+    try:
+
+        dominio = (
+            urlparse(url)
+            .netloc
+            .lower()
+        )
+
+        return any(
+            ruim in dominio
+            for ruim in DOMINIOS_RUINS_INSTITUICAO
+        )
+
+    except Exception:
+
+        return True
+
+
+# ============================================================
+# INSTITUIÇÕES
 # ============================================================
 
 PALAVRAS_INSTITUICAO = [
@@ -504,7 +503,6 @@ PALAVRAS_INSTITUICAO = [
     "centro universitário",
     "instituto federal",
     "instituto de ensino",
-    "university",
     "ceunsp",
     "uniso",
     "unip",
@@ -516,41 +514,72 @@ PALAVRAS_INSTITUICAO = [
     "estácio",
     "cruzeiro do sul",
     "uniesp",
-    "fatec",
     "unifesp",
     "usp",
     "unesp",
 ]
 
 
-TERMOS_CURSO = [
-    "curso de nutricao",
-    "graduacao em nutricao",
-    "bacharelado em nutricao",
-    "nutricao bacharelado",
-    "graduacao nutricao",
+NOMES_GENERICOS_INSTITUICAO = [
+    "faculdade de nutricao em",
+    "faculdade de nutrição em",
+    "curso de nutricao em",
+    "curso de nutrição em",
+    "graduacao em nutricao em",
+    "graduação em nutrição em",
+    "nutricao em sao paulo",
+    "nutrição em são paulo",
+    "email & phone number",
+    "email and phone number",
+    "phone number",
+    "contato telefone",
+    "salario",
+    "salary",
+    "vagas",
+    "empregos",
 ]
 
 
-# ============================================================
-# RESULTADO PARECE INSTITUIÇÃO COM NUTRIÇÃO?
-# ============================================================
+def nome_instituicao_suspeito(nome):
 
-def resultado_parece_instituicao(
-    texto
-):
+    nome_norm = normalizar_texto(
+        nome
+    )
+
+    if not nome_norm:
+        return True
+
+    if len(nome_norm) < 4:
+        return True
+
+    if any(
+        normalizar_texto(termo)
+        in nome_norm
+        for termo
+        in NOMES_GENERICOS_INSTITUICAO
+    ):
+        return True
+
+    # Não queremos título que seja claramente pessoa.
+    if (
+        "email" in nome_norm
+        and "phone" in nome_norm
+    ):
+        return True
+
+    return False
+
+
+def resultado_parece_instituicao(texto):
 
     texto_norm = normalizar_texto(
         texto
     )
 
-    if (
-        "nutricao"
-        not in texto_norm
-    ):
+    if "nutricao" not in texto_norm:
         return False
 
-    sinais_ensino = [
+    sinais = [
         "universidade",
         "faculdade",
         "centro universitario",
@@ -562,17 +591,11 @@ def resultado_parece_instituicao(
 
     return any(
         sinal in texto_norm
-        for sinal in sinais_ensino
+        for sinal in sinais
     )
 
 
-# ============================================================
-# EXTRAIR NOME DA INSTITUIÇÃO
-# ============================================================
-
-def extrair_nome_instituicao(
-    titulo
-):
+def extrair_nome_instituicao(titulo):
 
     if not titulo:
         return None
@@ -588,84 +611,67 @@ def extrair_nome_instituicao(
         titulo
     )
 
-    # Primeiro procura uma parte que tenha
-    # claramente nome de instituição.
-    for parte in partes:
-
-        parte_norm = (
-            normalizar_texto(
-                parte
-            )
-        )
-
-        if any(
-            normalizar_texto(
-                palavra
-            )
-            in parte_norm
-            for palavra
-            in PALAVRAS_INSTITUICAO
-        ):
-
-            nome = (
-                parte
-                .strip()
-                [:180]
-            )
-
-            if nome:
-                return nome
-
-    # Segunda tentativa:
-    # elimina pedaços claramente de curso.
-    partes_validas = []
+    candidatos = []
 
     for parte in partes:
+
+        parte = parte.strip()
 
         parte_norm = normalizar_texto(
             parte
         )
 
-        if (
-            "nutricao"
+        if any(
+            normalizar_texto(palavra)
             in parte_norm
-            and len(partes) > 1
+            for palavra
+            in PALAVRAS_INSTITUICAO
         ):
-            continue
 
-        if (
-            "vestibular"
-            in parte_norm
-        ):
-            continue
-
-        if (
-            "graduacao"
-            in parte_norm
-        ):
-            continue
-
-        if len(
-            parte.strip()
-        ) >= 4:
-
-            partes_validas.append(
-                parte.strip()
+            candidatos.append(
+                parte
             )
 
-    if partes_validas:
+    # Preferência por uma parte que pareça
+    # realmente nome de instituição.
+    for candidato in candidatos:
 
-        return (
-            partes_validas[-1]
-            [:180]
+        if not nome_instituicao_suspeito(
+            candidato
+        ):
+
+            return candidato[:180]
+
+    # Tentativa complementar
+    for parte in reversed(partes):
+
+        parte = parte.strip()
+
+        if len(parte) < 4:
+            continue
+
+        if nome_instituicao_suspeito(
+            parte
+        ):
+            continue
+
+        parte_norm = normalizar_texto(
+            parte
         )
+
+        if "nutricao" in parte_norm:
+            continue
+
+        if "graduacao" in parte_norm:
+            continue
+
+        if "vestibular" in parte_norm:
+            continue
+
+        return parte[:180]
 
     return None
 
-
-# ============================================================
-# COMPARAÇÃO DE NOMES
-# ============================================================
 
 def nome_instituicao_equivalente(
     nome1,
@@ -691,19 +697,17 @@ def nome_instituicao_equivalente(
         or n2 in n1
     ):
 
-        menor = min(
+        if min(
             len(n1),
             len(n2)
-        )
-
-        if menor >= 6:
+        ) >= 7:
             return True
 
     return False
 
 
 # ============================================================
-# VERIFICAR INSTITUIÇÃO EXISTENTE
+# BUSCAR INSTITUIÇÃO EXISTENTE
 # ============================================================
 
 def buscar_instituicao_existente(
@@ -716,9 +720,7 @@ def buscar_instituicao_existente(
 
         resposta = (
             supabase
-            .table(
-                "instituicoes_nutricao"
-            )
+            .table("instituicoes_nutricao")
             .select(
                 "id,instituicao,"
                 "validada,status"
@@ -741,13 +743,9 @@ def buscar_instituicao_existente(
 
         for registro in registros:
 
-            if (
-                nome_instituicao_equivalente(
-                    registro.get(
-                        "instituicao"
-                    ),
-                    instituicao
-                )
+            if nome_instituicao_equivalente(
+                registro.get("instituicao"),
+                instituicao
             ):
 
                 return registro
@@ -766,7 +764,7 @@ def buscar_instituicao_existente(
 
 
 # ============================================================
-# SALVAR INSTITUIÇÃO IMEDIATAMENTE
+# SALVAR INSTITUIÇÃO
 # ============================================================
 
 def salvar_instituicao(
@@ -777,6 +775,18 @@ def salvar_instituicao(
     fonte_url,
     validada
 ):
+
+    if nome_instituicao_suspeito(
+        instituicao
+    ):
+
+        print(
+            f"   ❌ Nome de instituição "
+            f"suspeito ignorado: "
+            f"{instituicao}"
+        )
+
+        return False
 
     existente = (
         buscar_instituicao_existente(
@@ -791,8 +801,6 @@ def salvar_instituicao(
 
     if existente:
 
-        # Se já existia mas agora encontramos
-        # uma fonte melhor, atualiza validação.
         if (
             validada
             and not existente.get(
@@ -810,10 +818,13 @@ def salvar_instituicao(
                     .update({
                         "validada":
                             True,
+
                         "fonte_validacao":
                             origem,
+
                         "fonte_url":
                             fonte_url,
+
                         "ultima_verificacao":
                             agora_iso(),
                     })
@@ -855,9 +866,7 @@ def salvar_instituicao(
             agora_iso(),
 
         "fonte_validacao":
-            origem
-            if validada
-            else None,
+            origem if validada else None,
 
         "validada":
             validada,
@@ -873,9 +882,7 @@ def salvar_instituicao(
             .table(
                 "instituicoes_nutricao"
             )
-            .insert(
-                dados
-            )
+            .insert(dados)
             .execute()
         )
 
@@ -900,18 +907,6 @@ def salvar_instituicao(
             f"      Fonte: {origem}"
         )
 
-        if validada:
-
-            print(
-                "      ✅ Fonte forte"
-            )
-
-        else:
-
-            print(
-                "      ⏳ Precisa validação"
-            )
-
         return True
 
     except Exception as erro:
@@ -929,7 +924,7 @@ def salvar_instituicao(
 
 
 # ============================================================
-# CHECKPOINT GENÉRICO
+# CHECKPOINT
 # ============================================================
 
 def buscar_checkpoint(
@@ -943,9 +938,7 @@ def buscar_checkpoint(
 
         consulta = (
             supabase
-            .table(
-                "controle_busca"
-            )
+            .table("controle_busca")
             .select("*")
             .eq(
                 "estado",
@@ -1102,12 +1095,8 @@ def salvar_checkpoint(
 
             (
                 supabase
-                .table(
-                    "controle_busca"
-                )
-                .update(
-                    dados
-                )
+                .table("controle_busca")
+                .update(dados)
                 .eq(
                     "id",
                     atual["id"]
@@ -1119,12 +1108,8 @@ def salvar_checkpoint(
 
             (
                 supabase
-                .table(
-                    "controle_busca"
-                )
-                .insert(
-                    dados
-                )
+                .table("controle_busca")
+                .insert(dados)
                 .execute()
             )
 
@@ -1137,15 +1122,13 @@ def salvar_checkpoint(
             f"checkpoint: {erro}"
         )
 
-        estatisticas[
-            "erros"
-        ] += 1
+        estatisticas["erros"] += 1
 
         return False
 
 
 # ============================================================
-# CONSULTAS DE DESCOBERTA POR ESTADO
+# DESCOBERTA DE INSTITUIÇÕES
 # ============================================================
 
 def montar_consultas_descoberta(
@@ -1205,10 +1188,6 @@ def montar_consultas_descoberta(
     ]
 
 
-# ============================================================
-# DESCOBERTA DE INSTITUIÇÕES POR ESTADO
-# ============================================================
-
 def descobrir_instituicoes_estado(
     ddgs,
     uf,
@@ -1222,22 +1201,16 @@ def descobrir_instituicoes_estado(
     if not municipios:
         return False
 
-    consultas = (
-        montar_consultas_descoberta(
-            uf,
-            estado_nome
-        )
+    consultas = montar_consultas_descoberta(
+        uf,
+        estado_nome
     )
 
-    total = len(
-        consultas
-    )
+    total = len(consultas)
 
-    checkpoint = (
-        buscar_checkpoint(
-            estado=uf,
-            etapa="descoberta_instituicoes"
-        )
+    checkpoint = buscar_checkpoint(
+        estado=uf,
+        etapa="descoberta_instituicoes"
     )
 
     inicio = 1
@@ -1245,9 +1218,7 @@ def descobrir_instituicoes_estado(
     if checkpoint:
 
         if (
-            checkpoint.get(
-                "status"
-            )
+            checkpoint.get("status")
             == "concluido"
         ):
 
@@ -1270,12 +1241,6 @@ def descobrir_instituicoes_estado(
             indice
         )
 
-        print(
-            f"♻️ Retomando descoberta "
-            f"de {uf} na pesquisa "
-            f"{inicio}/{total}"
-        )
-
     print("")
     print(
         "================================================="
@@ -1295,11 +1260,9 @@ def descobrir_instituicoes_estado(
         total + 1
     ):
 
-        consulta = (
-            consultas[
-                numero - 1
-            ]
-        )
+        consulta = consultas[
+            numero - 1
+        ]
 
         print("")
         print(
@@ -1317,12 +1280,10 @@ def descobrir_instituicoes_estado(
             fonte_atual="web"
         )
 
-        resultados, ok, erro = (
-            pesquisar(
-                ddgs,
-                consulta,
-                MAX_RESULTADOS_DESCOBERTA
-            )
+        resultados, ok, erro = pesquisar(
+            ddgs,
+            consulta,
+            MAX_RESULTADOS_DESCOBERTA
         )
 
         if not ok:
@@ -1338,37 +1299,30 @@ def descobrir_instituicoes_estado(
                 ultimo_erro=erro
             )
 
-            print(
-                "❌ Descoberta interrompida."
-            )
-
             return False
 
         for resultado in resultados:
 
             titulo = (
-                resultado.get(
-                    "title"
-                )
+                resultado.get("title")
                 or ""
             )
 
             corpo = (
-                resultado.get(
-                    "body"
-                )
+                resultado.get("body")
                 or ""
             )
 
             url = (
-                resultado.get(
-                    "href"
-                )
-                or resultado.get(
-                    "url"
-                )
+                resultado.get("href")
+                or resultado.get("url")
                 or ""
             )
+
+            if dominio_ruim_instituicao(
+                url
+            ):
+                continue
 
             texto = (
                 f"{titulo} "
@@ -1376,34 +1330,34 @@ def descobrir_instituicoes_estado(
                 f"{url}"
             )
 
-            if not (
-                resultado_parece_instituicao(
-                    texto
-                )
+            if not resultado_parece_instituicao(
+                texto
             ):
                 continue
 
-            cidade = detectar_cidade(
-                texto,
+            cidade = detectar_cidade_resultado(
+                titulo,
+                corpo,
                 municipios
             )
 
             if not cidade:
                 continue
 
-            instituicao = (
-                extrair_nome_instituicao(
-                    titulo
-                )
+            instituicao = extrair_nome_instituicao(
+                titulo
             )
 
             if not instituicao:
                 continue
 
-            origem, forte = (
-                classificar_fonte(
-                    url
-                )
+            if nome_instituicao_suspeito(
+                instituicao
+            ):
+                continue
+
+            origem, forte = classificar_fonte(
+                url
             )
 
             salvar_instituicao(
@@ -1415,7 +1369,6 @@ def descobrir_instituicoes_estado(
                 validada=forte
             )
 
-        # Próxima consulta
         salvar_checkpoint(
             estado=uf,
             etapa="descoberta_instituicoes",
@@ -1441,15 +1394,15 @@ def descobrir_instituicoes_estado(
 
     print("")
     print(
-        f"✅ Descoberta de instituições "
-        f"de {uf} concluída."
+        f"✅ Descoberta de "
+        f"{uf} concluída."
     )
 
     return True
 
 
 # ============================================================
-# PEGAR INSTITUIÇÕES PENDENTES
+# FILA DE FACULDADES
 # ============================================================
 
 def buscar_instituicoes_pendentes(
@@ -1473,12 +1426,8 @@ def buscar_instituicoes_pendentes(
                 "status",
                 "pendente"
             )
-            .order(
-                "cidade"
-            )
-            .limit(
-                limite
-            )
+            .order("cidade")
+            .limit(limite)
             .execute()
         )
 
@@ -1491,20 +1440,14 @@ def buscar_instituicoes_pendentes(
 
         print(
             f"❌ Erro buscando "
-            f"instituições pendentes: "
+            f"faculdades pendentes: "
             f"{erro}"
         )
 
-        estatisticas[
-            "erros"
-        ] += 1
+        estatisticas["erros"] += 1
 
         return []
 
-
-# ============================================================
-# ALTERAR STATUS DA INSTITUIÇÃO
-# ============================================================
 
 def atualizar_instituicao(
     instituicao_id,
@@ -1522,9 +1465,7 @@ def atualizar_instituicao(
             .table(
                 "instituicoes_nutricao"
             )
-            .update(
-                dados
-            )
+            .update(dados)
             .eq(
                 "id",
                 instituicao_id
@@ -1545,19 +1486,13 @@ def atualizar_instituicao(
 
 
 # ============================================================
-# VALIDAÇÃO DA INSTITUIÇÃO
+# VALIDAR FACULDADE
 # ============================================================
 
 def validar_instituicao(
     ddgs,
     instituicao
 ):
-
-    if instituicao.get(
-        "validada"
-    ):
-
-        return True
 
     nome = instituicao[
         "instituicao"
@@ -1567,13 +1502,43 @@ def validar_instituicao(
         "cidade"
     ]
 
-    uf = instituicao[
-        "estado"
-    ]
+    # Mesmo que uma instituição antiga esteja
+    # validada, nomes claramente ruins são rejeitados.
+    if nome_instituicao_suspeito(
+        nome
+    ):
+
+        print(
+            f"   ❌ Instituição suspeita: "
+            f"{nome}"
+        )
+
+        atualizar_instituicao(
+            instituicao["id"],
+            {
+                "status":
+                    "revisar",
+
+                "validada":
+                    False,
+            }
+        )
+
+        estatisticas[
+            "instituicoes_revisar"
+        ] += 1
+
+        return False
+
+    if instituicao.get(
+        "validada"
+    ):
+
+        return True
 
     print("")
     print(
-        f"   🔎 Validando instituição:"
+        "   🔎 Validando instituição:"
     )
 
     print(
@@ -1609,12 +1574,10 @@ def validar_instituicao(
 
     for consulta in consultas:
 
-        resultados, ok, erro = (
-            pesquisar(
-                ddgs,
-                consulta,
-                15
-            )
+        resultados, ok, erro = pesquisar(
+            ddgs,
+            consulta,
+            15
         )
 
         if not ok:
@@ -1623,28 +1586,25 @@ def validar_instituicao(
         for resultado in resultados:
 
             titulo = (
-                resultado.get(
-                    "title"
-                )
+                resultado.get("title")
                 or ""
             )
 
             corpo = (
-                resultado.get(
-                    "body"
-                )
+                resultado.get("body")
                 or ""
             )
 
             url = (
-                resultado.get(
-                    "href"
-                )
-                or resultado.get(
-                    "url"
-                )
+                resultado.get("href")
+                or resultado.get("url")
                 or ""
             )
+
+            if dominio_ruim_instituicao(
+                url
+            ):
+                continue
 
             texto = normalizar_texto(
                 f"{titulo} "
@@ -1652,37 +1612,34 @@ def validar_instituicao(
                 f"{url}"
             )
 
-            if (
-                "nutricao"
-                not in texto
-            ):
+            if "nutricao" not in texto:
                 continue
 
-            origem, forte = (
-                classificar_fonte(
-                    url
-                )
+            origem, forte = classificar_fonte(
+                url
             )
 
-            nome_norm = (
-                normalizar_texto(
-                    nome
-                )
+            nome_norm = normalizar_texto(
+                nome
             )
 
-            cidade_norm = (
-                normalizar_texto(
-                    cidade
-                )
+            cidade_norm = normalizar_texto(
+                cidade
             )
+
+            palavras_nome = [
+                palavra
+                for palavra
+                in nome_norm.split()
+                if len(palavra) >= 5
+            ]
 
             confirma_nome = (
                 nome_norm in texto
                 or any(
                     palavra in texto
-                    for palavra in
-                    nome_norm.split()
-                    if len(palavra) >= 5
+                    for palavra
+                    in palavras_nome
                 )
             )
 
@@ -1726,11 +1683,6 @@ def validar_instituicao(
 
         pausa()
 
-    print(
-        "      ⚠️ Não foi possível "
-        "validar com segurança."
-    )
-
     atualizar_instituicao(
         instituicao["id"],
         {
@@ -1742,6 +1694,15 @@ def validar_instituicao(
         }
     )
 
+    estatisticas[
+        "instituicoes_revisar"
+    ] += 1
+
+    print(
+        "      ⚠️ Instituição enviada "
+        "para revisão."
+    )
+
     return False
 
 
@@ -1749,28 +1710,21 @@ def validar_instituicao(
 # INSTAGRAM
 # ============================================================
 
-def extrair_instagram(
-    url
-):
+def extrair_instagram(url):
 
     if not url:
         return None
 
     try:
 
-        parsed = urlparse(
-            url
-        )
+        parsed = urlparse(url)
 
         dominio = (
             parsed.netloc
             .lower()
         )
 
-        if (
-            "instagram.com"
-            not in dominio
-        ):
+        if "instagram.com" not in dominio:
             return None
 
         partes = [
@@ -1808,10 +1762,8 @@ def extrair_instagram(
         ):
             return None
 
-        return (
-            normalizar_instagram(
-                usuario
-            )
+        return normalizar_instagram(
+            usuario
         )
 
     except Exception:
@@ -1820,18 +1772,23 @@ def extrair_instagram(
 
 
 # ============================================================
-# EXCLUSÕES
+# FILTRO DE CONTAS
 # ============================================================
 
-TERMOS_EXCLUSAO = [
+HANDLES_BLOQUEADOS = {
+    "@popular",
+    "@tcc_nutricao",
+    "@nutricaocomportamental",
+}
+
+
+TERMOS_FORA_NICHO = [
     "psicologia",
     "psicologa",
     "psicologo",
     "maquiagem",
     "maquiadora",
     "makeup",
-    "meme",
-    "memes",
     "veterinaria",
     "veterinario",
     "medicina veterinaria",
@@ -1851,103 +1808,152 @@ TERMOS_EXCLUSAO = [
 ]
 
 
-TERMOS_CONTA_INSTITUCIONAL = [
-    "universidade",
-    "faculdade",
-    "centro universitario",
-    "vestibular",
-    "colegio",
-    "instituto",
+TERMOS_INSTITUCIONAIS = [
     "turma de nutricao",
-    "atletica",
-    "diretorio academico",
+    "turma nutricao",
+    "comissao de formatura",
+    "comissao formatura",
     "centro academico",
+    "diretorio academico",
+    "atletica",
+    "liga academica",
+    "projeto de extensao",
+    "evento academico",
+    "semana academica",
+    "congresso",
+    "faculdade",
+    "universidade",
+    "centro universitario",
+    "instituto de ensino",
 ]
 
 
-def e_excluido(
+PADROES_HANDLE_INSTITUCIONAL = [
+    "formatura",
+    "formandos",
+    "formandas",
+    "comissao",
+    "atletica",
+    "centroacademico",
+    "centro_academico",
+    "diretorio",
+    "turmanutri",
+    "turma_nutri",
+    "nutriturma",
+    "evento",
+    "congresso",
+    "faculdade",
+    "universidade",
+    "vestibular",
+]
+
+
+def fora_do_nicho(
     texto
-):
-
-    texto_norm = (
-        normalizar_texto(
-            texto
-        )
-    )
-
-    if any(
-        termo in texto_norm
-        for termo
-        in TERMOS_EXCLUSAO
-    ):
-        return True
-
-    return False
-
-
-# ============================================================
-# É CONTA PESSOAL?
-# ============================================================
-
-def parece_conta_pessoal(
-    texto,
-    instagram
 ):
 
     texto_norm = normalizar_texto(
         texto
     )
 
-    instagram_norm = (
-        normalizar_texto(
-            instagram
-        )
-    )
-
-    institucional = any(
+    return any(
         termo in texto_norm
-        for termo
-        in TERMOS_CONTA_INSTITUCIONAL
+        for termo in TERMOS_FORA_NICHO
     )
 
-    if institucional:
 
-        sinais_pessoa = [
-            "nutricionista",
-            "graduanda",
-            "graduando",
-            "formanda",
-            "formando",
-            "crn",
-            "atendimento",
-            "consultas",
-        ]
+def tem_sinal_pessoal(
+    texto
+):
 
-        if not any(
-            sinal in texto_norm
-            for sinal
-            in sinais_pessoa
-        ):
+    texto_norm = normalizar_texto(
+        texto
+    )
 
-            return False
-
-    # Handles que parecem puramente institucionais.
-    handles_ruins = [
-        "faculdade",
-        "universidade",
-        "vestibular",
-        "colegio",
-        "atletica",
+    sinais = [
+        "nutricionista",
+        "graduanda em nutricao",
+        "graduando em nutricao",
+        "estudante de nutricao",
+        "academica de nutricao",
+        "academico de nutricao",
+        "formanda em nutricao",
+        "formando em nutricao",
+        "crn",
+        "me chamo",
+        "sou nutricionista",
+        "sou estudante",
+        "atendimento online",
+        "atendimento presencial",
+        "agenda aberta",
+        "consultas",
     ]
+
+    return any(
+        sinal in texto_norm
+        for sinal in sinais
+    )
+
+
+def handle_institucional(
+    instagram,
+    texto
+):
+
+    instagram_norm = normalizar_texto(
+        instagram
+    )
+
+    texto_norm = normalizar_texto(
+        texto
+    )
+
+    if instagram in HANDLES_BLOQUEADOS:
+        return True
 
     if any(
         termo in instagram_norm
         for termo
-        in handles_ruins
+        in PADROES_HANDLE_INSTITUCIONAL
     ):
-        return False
+        return True
 
-    return True
+    # Contas no formato nutricao + universidade/faculdade.
+    padroes_curso_institucional = [
+        r"^@?nutricao[._-]?uf",
+        r"^@?nutricao[._-]?uni",
+        r"^@?nutricao[._-]?fac",
+        r"^@?nutricao[._-]?fai",
+        r"^@?nutricao[._-]?ies",
+        r"^@?nutricao[._-]?unes",
+        r"^@?nutricao[._-]?unif",
+        r"^@?nutricao[._-]?centro",
+        r"^@?nutricao[._-]?curso",
+    ]
+
+    for padrao in padroes_curso_institucional:
+
+        if re.search(
+            padrao,
+            instagram_norm
+        ):
+            return True
+
+    institucional_texto = any(
+        termo in texto_norm
+        for termo
+        in TERMOS_INSTITUCIONAIS
+    )
+
+    if (
+        institucional_texto
+        and not tem_sinal_pessoal(
+            texto
+        )
+    ):
+        return True
+
+    return False
 
 
 # ============================================================
@@ -1959,25 +1965,23 @@ def e_nutricao(
     instagram
 ):
 
-    texto_norm = (
-        normalizar_texto(
-            texto
-        )
+    texto_norm = normalizar_texto(
+        texto
     )
 
-    instagram_norm = (
-        normalizar_texto(
-            instagram
-        )
+    instagram_norm = normalizar_texto(
+        instagram
     )
 
-    fortes = [
+    sinais_fortes = [
         "nutricionista",
+        "graduanda em nutricao",
+        "graduando em nutricao",
         "estudante de nutricao",
         "academica de nutricao",
         "academico de nutricao",
-        "graduanda em nutricao",
-        "graduando em nutricao",
+        "formanda em nutricao",
+        "formando em nutricao",
         "bacharel em nutricao",
         "crn",
     ]
@@ -1985,15 +1989,14 @@ def e_nutricao(
     if any(
         sinal in texto_norm
         for sinal
-        in fortes
+        in sinais_fortes
     ):
 
         return True
 
-    if (
-        "nutricao"
-        in texto_norm
-    ):
+    # Nutrição sozinha não basta.
+    # Precisa contexto pessoal.
+    if "nutricao" in texto_norm:
 
         contexto_pessoal = [
             "formanda",
@@ -2005,6 +2008,7 @@ def e_nutricao(
             "academico",
             "atendimento",
             "consulta",
+            "agenda aberta",
             "crn",
         ]
 
@@ -2015,29 +2019,20 @@ def e_nutricao(
         ):
             return True
 
-    padroes_handle = [
-        ".nutri",
-        "nutri.",
-        "_nutri",
-        "nutri_",
-        "nutricionista",
-    ]
-
-    if any(
-        padrao in instagram_norm
-        for padrao
-        in padroes_handle
-    ):
+    # Handle com "nutri" ajuda,
+    # mas não aprova sozinho.
+    if "nutri" in instagram_norm:
 
         contexto = [
             "formanda",
             "formando",
             "graduanda",
             "graduando",
+            "estudante",
             "crn",
+            "nutricionista",
             "atendimento",
             "consulta",
-            "nutricao",
         ]
 
         if any(
@@ -2045,37 +2040,32 @@ def e_nutricao(
             for termo
             in contexto
         ):
-
             return True
 
     return False
 
 
 # ============================================================
-# COORTE 2025 / 2026 / FINAL DO CURSO
+# COORTE ALVO
 # ============================================================
 
 def e_coorte_alvo(
     texto
 ):
 
-    texto_norm = (
-        normalizar_texto(
-            texto
-        )
+    texto_norm = normalizar_texto(
+        texto
     )
 
     tem_2025 = (
-        "2025"
-        in texto_norm
+        "2025" in texto_norm
     )
 
     tem_2026 = (
-        "2026"
-        in texto_norm
+        "2026" in texto_norm
     )
 
-    conclusao = [
+    termos_conclusao = [
         "formatura",
         "formou",
         "formada",
@@ -2087,7 +2077,7 @@ def e_coorte_alvo(
         "bacharel",
     ]
 
-    final_curso = [
+    termos_final = [
         "formanda",
         "formando",
         "concluinte",
@@ -2109,30 +2099,28 @@ def e_coorte_alvo(
     tem_conclusao = any(
         termo in texto_norm
         for termo
-        in conclusao
+        in termos_conclusao
     )
 
     tem_final = any(
         termo in texto_norm
         for termo
-        in final_curso
+        in termos_final
     )
 
     formado_recente = (
-        tem_conclusao
-        and (
+        (
             tem_2025
             or tem_2026
         )
+        and tem_conclusao
     )
 
-    estudante_final = (
-        tem_final
-    )
+    aluno_final = tem_final
 
     return (
         formado_recente
-        or estudante_final
+        or aluno_final
     )
 
 
@@ -2147,42 +2135,26 @@ def calcular_pontuacao(
     instituicao
 ):
 
-    texto_norm = (
-        normalizar_texto(
-            texto
-        )
+    texto_norm = normalizar_texto(
+        texto
     )
 
-    instagram_norm = (
-        normalizar_texto(
-            instagram
-        )
+    instagram_norm = normalizar_texto(
+        instagram
     )
 
     pontos = 0
 
-    if (
-        "nutricionista"
-        in texto_norm
-    ):
+    if "nutricionista" in texto_norm:
         pontos += 4
 
-    if (
-        "nutricao"
-        in texto_norm
-    ):
+    if "nutricao" in texto_norm:
         pontos += 3
 
-    if (
-        "crn"
-        in texto_norm
-    ):
+    if "crn" in texto_norm:
         pontos += 3
 
-    if (
-        "nutri"
-        in instagram_norm
-    ):
+    if "nutri" in instagram_norm:
         pontos += 2
 
     sinais_final = [
@@ -2201,25 +2173,16 @@ def calcular_pontuacao(
         for termo
         in sinais_final
     ):
-
         pontos += 5
 
-    if (
-        "2026"
-        in texto_norm
-    ):
+    if "2026" in texto_norm:
         pontos += 4
 
-    if (
-        "2025"
-        in texto_norm
-    ):
+    if "2025" in texto_norm:
         pontos += 3
 
-    cidade_norm = (
-        normalizar_texto(
-            cidade
-        )
+    cidade_norm = normalizar_texto(
+        cidade
     )
 
     if (
@@ -2229,10 +2192,8 @@ def calcular_pontuacao(
     ):
         pontos += 2
 
-    instituicao_norm = (
-        normalizar_texto(
-            instituicao
-        )
+    instituicao_norm = normalizar_texto(
+        instituicao
     )
 
     if (
@@ -2242,10 +2203,10 @@ def calcular_pontuacao(
     ):
         pontos += 2
 
-    comerciais = [
+    termos_comerciais = [
         "agenda aberta",
-        "atendimentos",
         "consultas",
+        "atendimentos",
         "atendimento online",
         "atendimento presencial",
     ]
@@ -2253,7 +2214,7 @@ def calcular_pontuacao(
     if any(
         termo in texto_norm
         for termo
-        in comerciais
+        in termos_comerciais
     ):
         pontos += 1
 
@@ -2268,15 +2229,13 @@ def montar_evidencia(
     texto
 ):
 
-    texto_norm = (
-        normalizar_texto(
-            texto
-        )
+    texto_norm = normalizar_texto(
+        texto
     )
 
     itens = []
 
-    verificacoes = [
+    mapa = [
         (
             "nutricionista",
             "nutricionista"
@@ -2310,10 +2269,6 @@ def montar_evidencia(
             "concluinte"
         ),
         (
-            "tcc",
-            "TCC"
-        ),
-        (
             "ultimo periodo",
             "último período"
         ),
@@ -2330,6 +2285,10 @@ def montar_evidencia(
             "7/8"
         ),
         (
+            "tcc",
+            "TCC"
+        ),
+        (
             "formatura",
             "formatura"
         ),
@@ -2339,7 +2298,7 @@ def montar_evidencia(
         ),
     ]
 
-    for termo, descricao in verificacoes:
+    for termo, descricao in mapa:
 
         if termo in texto_norm:
 
@@ -2362,7 +2321,7 @@ def montar_evidencia(
 
 
 # ============================================================
-# DUPLICIDADE DO LEAD
+# DUPLICIDADE
 # ============================================================
 
 def verificar_lead_existente(
@@ -2371,16 +2330,14 @@ def verificar_lead_existente(
 
     for tentativa in range(
         1,
-        4
+        MAX_TENTATIVAS_SUPABASE + 1
     ):
 
         try:
 
             resposta = (
                 supabase
-                .table(
-                    "leds"
-                )
+                .table("leds")
                 .select("id")
                 .eq(
                     "instagram",
@@ -2398,24 +2355,27 @@ def verificar_lead_existente(
 
             print(
                 f"⚠️ Erro verificando "
+                f"duplicidade "
                 f"{instagram} "
-                f"({tentativa}/3): "
+                f"({tentativa}/"
+                f"{MAX_TENTATIVAS_SUPABASE}): "
                 f"{erro}"
             )
 
-            if tentativa < 3:
+            if (
+                tentativa
+                < MAX_TENTATIVAS_SUPABASE
+            ):
 
                 time.sleep(
-                    3 * tentativa
+                    4 * tentativa
                 )
 
-    # None:
-    # Não arrisca inserir duplicado.
     return None
 
 
 # ============================================================
-# NOME DO CANDIDATO
+# NOME
 # ============================================================
 
 def limpar_nome(
@@ -2442,10 +2402,7 @@ def limpar_nome(
 
     return (
         instagram
-        .replace(
-            "@",
-            ""
-        )
+        .replace("@", "")
         [:150]
     )
 
@@ -2458,22 +2415,15 @@ def salvar_lead(
     lead
 ):
 
-    instagram = (
-        lead[
-            "instagram"
-        ]
-    )
+    instagram = lead[
+        "instagram"
+    ]
 
-    if (
-        instagram
-        in salvos_execucao
-    ):
+    if instagram in salvos_execucao:
         return False
 
-    existente = (
-        verificar_lead_existente(
-            instagram
-        )
+    existente = verificar_lead_existente(
+        instagram
     )
 
     if existente is True:
@@ -2501,56 +2451,74 @@ def salvar_lead(
         )
 
         print(
-            "         Não consegui "
+            "         Não foi possível "
             "confirmar duplicidade."
         )
 
         return False
 
-    try:
+    for tentativa in range(
+        1,
+        MAX_TENTATIVAS_SUPABASE + 1
+    ):
 
-        (
-            supabase
-            .table(
-                "leds"
+        try:
+
+            (
+                supabase
+                .table("leds")
+                .insert(lead)
+                .execute()
             )
-            .insert(
-                lead
+
+            salvos_execucao.add(
+                instagram
             )
-            .execute()
-        )
 
-        salvos_execucao.add(
-            instagram
-        )
+            estatisticas[
+                "salvos"
+            ] += 1
 
-        estatisticas[
-            "salvos"
-        ] += 1
+            print(
+                f"      ✅ SALVO NO SUPABASE: "
+                f"{instagram}"
+            )
 
-        print(
-            f"      ✅ SALVO NO SUPABASE: "
-            f"{instagram}"
-        )
+            return True
 
-        return True
+        except Exception as erro:
 
-    except Exception as erro:
+            print(
+                f"      ⚠️ Tentativa "
+                f"{tentativa}/"
+                f"{MAX_TENTATIVAS_SUPABASE} "
+                f"ao salvar {instagram}: "
+                f"{erro}"
+            )
 
-        print(
-            f"      ❌ ERRO AO SALVAR "
-            f"{instagram}: {erro}"
-        )
+            if (
+                tentativa
+                < MAX_TENTATIVAS_SUPABASE
+            ):
 
-        estatisticas[
-            "erros"
-        ] += 1
+                time.sleep(
+                    4 * tentativa
+                )
 
-        return False
+    estatisticas[
+        "erros"
+    ] += 1
+
+    print(
+        f"      ❌ NÃO CONSEGUI SALVAR: "
+        f"{instagram}"
+    )
+
+    return False
 
 
 # ============================================================
-# PROCESSAR RESULTADO DE LEAD
+# PROCESSAR RESULTADO
 # ============================================================
 
 def processar_resultado_lead(
@@ -2559,33 +2527,23 @@ def processar_resultado_lead(
 ):
 
     titulo = (
-        resultado.get(
-            "title"
-        )
+        resultado.get("title")
         or ""
     )
 
     corpo = (
-        resultado.get(
-            "body"
-        )
+        resultado.get("body")
         or ""
     )
 
     url = (
-        resultado.get(
-            "href"
-        )
-        or resultado.get(
-            "url"
-        )
+        resultado.get("href")
+        or resultado.get("url")
         or ""
     )
 
-    instagram = (
-        extrair_instagram(
-            url
-        )
+    instagram = extrair_instagram(
+        url
     )
 
     if not instagram:
@@ -2601,9 +2559,55 @@ def processar_resultado_lead(
         f"{url}"
     )
 
-    # -----------------------------------------
-    # Acumula evidências do mesmo perfil
-    # -----------------------------------------
+    # ----------------------------------------------
+    # BLOQUEIOS
+    # ----------------------------------------------
+
+    if instagram in bloqueados_execucao:
+        return False
+
+    if fora_do_nicho(
+        texto_novo
+    ):
+
+        bloqueados_execucao.add(
+            instagram
+        )
+
+        estatisticas[
+            "rejeitados"
+        ] += 1
+
+        print(
+            f"      ❌ Fora do nicho: "
+            f"{instagram}"
+        )
+
+        return False
+
+    if handle_institucional(
+        instagram,
+        texto_novo
+    ):
+
+        bloqueados_execucao.add(
+            instagram
+        )
+
+        estatisticas[
+            "institucionais"
+        ] += 1
+
+        print(
+            f"      🏢 Conta institucional: "
+            f"{instagram}"
+        )
+
+        return False
+
+    # ----------------------------------------------
+    # ACUMULAR EVIDÊNCIAS
+    # ----------------------------------------------
 
     if (
         instagram
@@ -2634,44 +2638,32 @@ def processar_resultado_lead(
         ]["textos"]
     )
 
-    # -----------------------------------------
-    # Exclusões
-    # -----------------------------------------
-
-    if e_excluido(
+    # Se depois de acumular evidência
+    # ficar claramente institucional,
+    # rejeita.
+    if handle_institucional(
+        instagram,
         texto_completo
     ):
 
-        print(
-            f"      ❌ Fora do nicho: "
-            f"{instagram}"
+        bloqueados_execucao.add(
+            instagram
         )
 
         estatisticas[
-            "rejeitados"
+            "institucionais"
         ] += 1
 
-        return False
-
-    if not parece_conta_pessoal(
-        texto_completo,
-        instagram
-    ):
-
         print(
-            f"      ❌ Conta institucional: "
+            f"      🏢 Conta institucional: "
             f"{instagram}"
         )
 
-        estatisticas[
-            "rejeitados"
-        ] += 1
-
         return False
 
-    # -----------------------------------------
-    # Nutrição obrigatória
-    # -----------------------------------------
+    # ----------------------------------------------
+    # NUTRIÇÃO
+    # ----------------------------------------------
 
     if not e_nutricao(
         texto_completo,
@@ -2679,50 +2671,42 @@ def processar_resultado_lead(
     ):
 
         print(
-            f"      ⏳ Sem prova suficiente "
-            f"de Nutrição: {instagram}"
+            f"      ⏳ Sem prova pessoal "
+            f"de Nutrição: "
+            f"{instagram}"
         )
 
         return False
 
-    # -----------------------------------------
-    # Coorte obrigatória
-    # -----------------------------------------
+    # ----------------------------------------------
+    # COORTE
+    # ----------------------------------------------
 
     if not e_coorte_alvo(
         texto_completo
     ):
 
         print(
-            f"      ⏳ Nutrição encontrada, "
-            f"mas sem prova de "
-            f"2025/2026 ou final de curso: "
+            f"      ⏳ Nutrição confirmada, "
+            f"mas sem prova de 2025/2026 "
+            f"ou final de curso: "
             f"{instagram}"
         )
 
         return False
 
-    # -----------------------------------------
-    # Pontuação
-    # -----------------------------------------
+    # ----------------------------------------------
+    # PONTUAÇÃO
+    # ----------------------------------------------
 
-    pontos = (
-        calcular_pontuacao(
-            texto_completo,
-            instagram,
-            instituicao[
-                "cidade"
-            ],
-            instituicao[
-                "instituicao"
-            ]
-        )
+    pontos = calcular_pontuacao(
+        texto_completo,
+        instagram,
+        instituicao["cidade"],
+        instituicao["instituicao"]
     )
 
-    if (
-        pontos
-        < PONTUACAO_MINIMA
-    ):
+    if pontos < PONTUACAO_MINIMA:
 
         print(
             f"      ⏳ Evidência fraca: "
@@ -2732,19 +2716,38 @@ def processar_resultado_lead(
 
         return False
 
-    # -----------------------------------------
-    # QUALIFICADO
-    # -----------------------------------------
+    # Evita contar/mostrar o mesmo perfil
+    # como qualificado várias vezes.
+    if (
+        instagram
+        in qualificados_execucao
+    ):
 
-    evidencia = (
-        montar_evidencia(
-            texto_completo
+        # Caso ainda não tenha sido salvo,
+        # tenta salvar novamente.
+        if (
+            instagram
+            not in salvos_execucao
+        ):
+
+            pass
+
+        else:
+            return False
+
+    else:
+
+        qualificados_execucao.add(
+            instagram
         )
-    )
 
-    estatisticas[
-        "qualificados"
-    ] += 1
+        estatisticas[
+            "qualificados"
+        ] += 1
+
+    evidencia = montar_evidencia(
+        texto_completo
+    )
 
     print("")
     print(
@@ -2763,7 +2766,6 @@ def processar_resultado_lead(
     )
 
     lead = {
-
         "nome":
             limpar_nome(
                 evidencias_perfis[
@@ -2815,19 +2817,13 @@ def processar_resultado_lead(
             None,
 
         "cidade":
-            instituicao[
-                "cidade"
-            ],
+            instituicao["cidade"],
 
         "estado":
-            instituicao[
-                "estado"
-            ],
+            instituicao["estado"],
 
         "instituicao":
-            instituicao[
-                "instituicao"
-            ],
+            instituicao["instituicao"],
 
         "pontuacao":
             pontos,
@@ -2847,7 +2843,7 @@ def processar_resultado_lead(
 
 
 # ============================================================
-# CONSULTAS DE LEADS POR FACULDADE
+# CONSULTAS DE LEADS
 # ============================================================
 
 def montar_consultas_leads(
@@ -2873,7 +2869,10 @@ def montar_consultas_leads(
         "-veterinária "
         "-odontologia "
         "-memes "
-        "-kumon"
+        "-kumon "
+        "-atletica "
+        "-formatura "
+        "-comissao"
     )
 
     return [
@@ -2906,8 +2905,8 @@ def montar_consultas_leads(
             f'site:instagram.com '
             f'"{nome}" '
             f'"Nutrição" '
+            f'"graduanda" '
             f'"2026" '
-            f'"formatura" '
             f'{exclusoes}'
         ),
 
@@ -2915,8 +2914,8 @@ def montar_consultas_leads(
             f'site:instagram.com '
             f'"{nome}" '
             f'"Nutrição" '
-            f'"2025" '
-            f'"formatura" '
+            f'"graduando" '
+            f'"2026" '
             f'{exclusoes}'
         ),
 
@@ -2978,7 +2977,14 @@ def montar_consultas_leads(
             f'{exclusoes}'
         ),
 
-        # Busca complementar da cidade
+        (
+            f'site:instagram.com '
+            f'"{cidade}" '
+            f'"{uf}" '
+            f'"nutricionista" '
+            f'"formanda" '
+            f'{exclusoes}'
+        ),
 
         (
             f'site:instagram.com '
@@ -2995,14 +3001,6 @@ def montar_consultas_leads(
             f'"{uf}" '
             f'"nutricionista" '
             f'"2025" '
-            f'{exclusoes}'
-        ),
-
-        (
-            f'site:instagram.com '
-            f'"{cidade}" '
-            f'"Nutrição" '
-            f'"formanda" '
             f'{exclusoes}'
         ),
     ]
@@ -3035,7 +3033,7 @@ def processar_faculdade(
     )
 
     print(
-        f"🏫 FACULDADE"
+        "🏫 FACULDADE"
     )
 
     print(
@@ -3050,49 +3048,32 @@ def processar_faculdade(
         "================================================="
     )
 
-    # -----------------------------------------
-    # Validação
-    # -----------------------------------------
-
     if not validar_instituicao(
         ddgs,
         instituicao
     ):
 
-        print(
-            "⚠️ Faculdade enviada "
-            "para revisão."
-        )
-
         return False
 
     atualizar_instituicao(
-        instituicao[
-            "id"
-        ],
+        instituicao["id"],
         {
             "status":
                 "processando"
         }
     )
 
-    consultas = (
-        montar_consultas_leads(
-            instituicao
-        )
+    consultas = montar_consultas_leads(
+        instituicao
     )
 
-    total = len(
-        consultas
-    )
+    total = len(consultas)
 
-    checkpoint = (
-        buscar_checkpoint(
-            estado=uf,
-            cidade=cidade,
-            instituicao=nome,
-            etapa="busca_leads"
-        )
+    checkpoint = buscar_checkpoint(
+        estado=uf,
+        cidade=cidade,
+        instituicao=nome,
+        etapa="busca_leads"
     )
 
     inicio = 1
@@ -3100,16 +3081,12 @@ def processar_faculdade(
     if checkpoint:
 
         if (
-            checkpoint.get(
-                "status"
-            )
+            checkpoint.get("status")
             == "concluido"
         ):
 
             atualizar_instituicao(
-                instituicao[
-                    "id"
-                ],
+                instituicao["id"],
                 {
                     "status":
                         "concluido"
@@ -3135,11 +3112,9 @@ def processar_faculdade(
             f"{inicio}/{total}"
         )
 
-    salvos_antes = (
-        estatisticas[
-            "salvos"
-        ]
-    )
+    salvos_antes = estatisticas[
+        "salvos"
+    ]
 
     encontrados_local = 0
 
@@ -3148,11 +3123,9 @@ def processar_faculdade(
         total + 1
     ):
 
-        consulta = (
-            consultas[
-                numero - 1
-            ]
-        )
+        consulta = consultas[
+            numero - 1
+        ]
 
         print("")
         print(
@@ -3177,19 +3150,13 @@ def processar_faculdade(
                 - salvos_antes
         )
 
-        resultados, ok, erro = (
-            pesquisar(
-                ddgs,
-                consulta,
-                MAX_RESULTADOS_LEADS
-            )
+        resultados, ok, erro = pesquisar(
+            ddgs,
+            consulta,
+            MAX_RESULTADOS_LEADS
         )
 
         if not ok:
-
-            print(
-                "   ❌ Pesquisa falhou."
-            )
 
             salvar_checkpoint(
                 estado=uf,
@@ -3210,9 +3177,7 @@ def processar_faculdade(
             )
 
             atualizar_instituicao(
-                instituicao[
-                    "id"
-                ],
+                instituicao["id"],
                 {
                     "status":
                         "pendente"
@@ -3230,12 +3195,7 @@ def processar_faculdade(
                 instituicao
             )
 
-        # -------------------------------------
-        # CHECKPOINT APÓS CONCLUIR ESTA BUSCA
-        #
-        # Guarda a PRÓXIMA busca.
-        # -------------------------------------
-
+        # Checkpoint aponta para a PRÓXIMA pesquisa.
         salvar_checkpoint(
             estado=uf,
             cidade=cidade,
@@ -3256,14 +3216,8 @@ def processar_faculdade(
 
         pausa()
 
-    # -----------------------------------------
-    # CONCLUÍDA
-    # -----------------------------------------
-
     salvos_local = (
-        estatisticas[
-            "salvos"
-        ]
+        estatisticas["salvos"]
         - salvos_antes
     )
 
@@ -3284,12 +3238,11 @@ def processar_faculdade(
     )
 
     atualizar_instituicao(
-        instituicao[
-            "id"
-        ],
+        instituicao["id"],
         {
             "status":
                 "concluido",
+
             "validada":
                 True,
         }
@@ -3313,7 +3266,7 @@ def processar_faculdade(
 
 
 # ============================================================
-# RECUPERAR FACULDADES INTERROMPIDAS
+# RECUPERAR PROCESSAMENTOS INTERROMPIDOS
 # ============================================================
 
 def recuperar_interrompidas():
@@ -3353,9 +3306,7 @@ def recuperar_interrompidas():
                 })
                 .eq(
                     "id",
-                    registro[
-                        "id"
-                    ]
+                    registro["id"]
                 )
                 .execute()
             )
@@ -3377,34 +3328,26 @@ def recuperar_interrompidas():
 
 
 # ============================================================
-# VERIFICAR SE A DESCOBERTA DO ESTADO TERMINOU
+# ESTADO
 # ============================================================
 
 def estado_descoberta_concluida(
     uf
 ):
 
-    checkpoint = (
-        buscar_checkpoint(
-            estado=uf,
-            etapa="descoberta_instituicoes"
-        )
+    checkpoint = buscar_checkpoint(
+        estado=uf,
+        etapa="descoberta_instituicoes"
     )
 
     if not checkpoint:
         return False
 
     return (
-        checkpoint.get(
-            "status"
-        )
+        checkpoint.get("status")
         == "concluido"
     )
 
-
-# ============================================================
-# EXISTEM FACULDADES PENDENTES?
-# ============================================================
 
 def existem_pendentes(
     uf
@@ -3440,7 +3383,7 @@ def existem_pendentes(
 
 
 # ============================================================
-# EXECUÇÃO PRINCIPAL
+# EXECUÇÃO
 # ============================================================
 
 def executar():
@@ -3457,7 +3400,6 @@ def executar():
                 faculdades_tentadas
                 >= MAX_FACULDADES_POR_EXECUCAO
             ):
-
                 break
 
             estatisticas[
@@ -3478,55 +3420,42 @@ def executar():
                 "#################################################"
             )
 
-            # =============================================
-            # 1. DESCOBERTA DAS FACULDADES DO ESTADO
-            # =============================================
+            # ----------------------------------------------
+            # Descoberta
+            # ----------------------------------------------
 
             if not estado_descoberta_concluida(
                 uf
             ):
 
-                sucesso = (
-                    descobrir_instituicoes_estado(
-                        ddgs,
-                        uf,
-                        estado_nome
-                    )
+                sucesso = descobrir_instituicoes_estado(
+                    ddgs,
+                    uf,
+                    estado_nome
                 )
 
                 if not sucesso:
 
                     print(
-                        f"⚠️ A descoberta de "
-                        f"{uf} não terminou."
-                    )
-
-                    print(
-                        "A próxima execução "
-                        "retoma deste ponto."
+                        f"⚠️ Descoberta de "
+                        f"{uf} interrompida."
                     )
 
                     break
 
-            # =============================================
-            # 2. FILA DE FACULDADES
-            # =============================================
+            # ----------------------------------------------
+            # Processamento das faculdades
+            # ----------------------------------------------
 
             restante = (
                 MAX_FACULDADES_POR_EXECUCAO
                 - faculdades_tentadas
             )
 
-            pendentes = (
-                buscar_instituicoes_pendentes(
-                    uf,
-                    restante
-                )
+            pendentes = buscar_instituicoes_pendentes(
+                uf,
+                restante
             )
-
-            # =============================================
-            # 3. PROCESSA UMA A UMA
-            # =============================================
 
             for instituicao in pendentes:
 
@@ -3534,7 +3463,6 @@ def executar():
                     faculdades_tentadas
                     >= MAX_FACULDADES_POR_EXECUCAO
                 ):
-
                     break
 
                 faculdades_tentadas += 1
@@ -3543,11 +3471,6 @@ def executar():
                     ddgs,
                     instituicao
                 )
-
-            # =============================================
-            # 4. SE AINDA HÁ FACULDADES EM SP, NÃO PASSA
-            # PARA MG AINDA.
-            # =============================================
 
             if existem_pendentes(
                 uf
@@ -3561,7 +3484,7 @@ def executar():
 
                 print(
                     "Na próxima execução "
-                    "continuaremos neste estado."
+                    "continuaremos nele."
                 )
 
                 break
@@ -3595,27 +3518,23 @@ print(
 )
 
 print(
-    "Nova arquitetura:"
-)
-
-print(
     "Estado > Faculdade > Cidade > Lead"
 )
 
 print(
-    "Não pesquisa mais cidade por cidade."
+    "Filtro reforçado para pessoa real."
 )
 
 print(
-    "Cada instituição é salva imediatamente."
+    "Contas institucionais são rejeitadas."
 )
 
 print(
-    "Cada lead qualificado é salvo imediatamente."
+    "Lead qualificado é salvo imediatamente."
 )
 
 print(
-    "Cada pesquisa possui checkpoint."
+    "Checkpoint após cada pesquisa."
 )
 
 print(
@@ -3623,15 +3542,11 @@ print(
 )
 
 
-# ============================================================
-# EXECUTAR
-# ============================================================
-
 executar()
 
 
 # ============================================================
-# RESUMO FINAL
+# RESUMO
 # ============================================================
 
 print("")
@@ -3668,18 +3583,28 @@ print(
 )
 
 print(
+    f"Instituições enviadas para revisão: "
+    f"{estatisticas['instituicoes_revisar']}"
+)
+
+print(
     f"Instituições processadas: "
     f"{estatisticas['instituicoes_processadas']}"
 )
 
 print(
-    f"Resultados de leads analisados: "
+    f"Resultados analisados: "
     f"{estatisticas['resultados_analisados']}"
 )
 
 print(
-    f"Perfis únicos: "
+    f"Perfis únicos analisados: "
     f"{estatisticas['perfis_unicos']}"
+)
+
+print(
+    f"Contas institucionais rejeitadas: "
+    f"{estatisticas['institucionais']}"
 )
 
 print(
@@ -3698,7 +3623,7 @@ print(
 )
 
 print(
-    f"Rejeitados: "
+    f"Outros rejeitados: "
     f"{estatisticas['rejeitados']}"
 )
 
