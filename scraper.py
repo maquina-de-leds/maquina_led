@@ -18,7 +18,7 @@ ETAPA_CARGA_IES = "carga_inep_nutricao_v5"
 ETAPA_CAPTACAO = "captacao_nacional_nutricao_v5"
 ORIGEM_IES = "inep_censo_superior_v5"
 MAX_RESULTADOS = 12
-MAX_INSTITUICOES_POR_EXECUCAO = 8
+MAX_INSTITUICOES_POR_EXECUCAO = 1
 PAUSA_ENTRE_BUSCAS = 2.0
 
 INEP_FONTES = [
