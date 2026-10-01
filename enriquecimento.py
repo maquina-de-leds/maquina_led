@@ -40,6 +40,7 @@ MAX_RESULTADOS = 10
 stats = {
     "pendentes": 0,
     "processados": 0,
+    "ignorados_nao_pessoa": 0,
     "instagram_encontrado": 0,
     "instagram_repetido": 0,
     "linkedin_encontrado": 0,
@@ -87,6 +88,121 @@ def pausa():
             PAUSA_MAX
         )
     )
+
+
+# ============================================================
+# VERIFICAR SE PARECE NOME DE PESSOA
+# ============================================================
+
+def parece_pessoa(nome):
+
+    if not nome:
+        return False
+
+    nome = re.sub(
+        r"\s+",
+        " ",
+        nome
+    ).strip()
+
+    if len(nome) < 7:
+        return False
+
+    if len(nome) > 90:
+        return False
+
+    partes = nome.split()
+
+    if len(partes) < 2:
+        return False
+
+    texto = normalizar(
+        nome
+    )
+
+    termos_institucionais = [
+        "vestibular",
+        "encontro cientifico",
+        "universidade",
+        "faculdade",
+        "campus",
+        "ead",
+        "evento",
+        "palestra",
+        "congresso",
+        "seminario",
+        "curso",
+        "turma",
+        "colegio",
+        "instituto",
+        "centro universitario",
+        "programa",
+        "pos graduacao",
+        "pos-graduacao",
+        "secretaria",
+        "reitoria",
+        "qnn ",
+        "lote ",
+        "conjunto ",
+    ]
+
+    for termo in termos_institucionais:
+
+        if termo in texto:
+            return False
+
+    # muitos números = provavelmente não é pessoa
+    quantidade_numeros = len(
+        re.findall(
+            r"\d",
+            nome
+        )
+    )
+
+    if quantidade_numeros >= 2:
+        return False
+
+    return True
+
+
+# ============================================================
+# MARCAR REGISTRO NÃO-PESSOA
+# ============================================================
+
+def marcar_como_b2b(lead):
+
+    try:
+
+        (
+            supabase
+            .table("leds")
+            .update({
+                "qualificado":
+                    False,
+
+                "proxima_acao":
+                    "revisao_b2b"
+            })
+            .eq(
+                "id",
+                lead["id"]
+            )
+            .execute()
+        )
+
+        print(
+            "   🏢 Registro separado para possível B2B",
+            flush=True
+        )
+
+    except Exception as erro:
+
+        print(
+            f"   ⚠️ Erro marcando B2B: {erro}",
+            flush=True
+        )
+
+        stats["erros"] += 1
 
 
 # ============================================================
@@ -293,7 +409,7 @@ def instagram_ja_usado(
 
 
 # ============================================================
-# BUSCAS PARA INSTAGRAM
+# MONTAR BUSCAS DO INSTAGRAM
 # ============================================================
 
 def montar_consultas_instagram(lead):
@@ -318,13 +434,9 @@ def montar_consultas_instagram(lead):
     )
 
     consultas = [
-
         f'"{nome}" Instagram',
-
         f'"{nome}" Nutrição Instagram',
-
         f'"{nome}" nutricionista Instagram',
-
         f'"{nome}" site:instagram.com',
     ]
 
@@ -432,7 +544,7 @@ def buscar_instagram(
 
 
 # ============================================================
-# BUSCAR INSTAGRAM CITADO EM OUTRAS PÁGINAS
+# BUSCAR INSTAGRAM EM TEXTO
 # ============================================================
 
 def buscar_handle_em_texto(
@@ -443,18 +555,13 @@ def buscar_handle_em_texto(
     nome = lead["nome"]
 
     consultas = [
-
         f'"{nome}" Instagram Nutrição',
-
         f'"{nome}" "instagram.com/" Nutrição',
-
         f'"{nome}" LinkedIn Instagram Nutrição',
     ]
 
     padroes = [
-
         r"instagram\.com/([A-Za-z0-9._]+)",
-
         r"@([A-Za-z0-9._]{3,30})",
     ]
 
@@ -541,9 +648,7 @@ def buscar_linkedin(
     )
 
     consultas = [
-
         f'"{nome}" Nutrição LinkedIn',
-
         f'"{nome}" site:linkedin.com/in',
     ]
 
@@ -663,7 +768,7 @@ def atualizar_lead(
 
 
 # ============================================================
-# PROCESSAR UM LEAD
+# PROCESSAR LEAD
 # ============================================================
 
 def processar_lead(
@@ -686,6 +791,29 @@ def processar_lead(
         f"👤 {nome}",
         flush=True
     )
+
+    # ========================================================
+    # VERIFICA SE É PESSOA
+    # ========================================================
+
+    if not parece_pessoa(
+        nome
+    ):
+
+        stats[
+            "ignorados_nao_pessoa"
+        ] += 1
+
+        print(
+            "   🏢 Não parece pessoa física",
+            flush=True
+        )
+
+        marcar_como_b2b(
+            lead
+        )
+
+        return
 
     print(
         f"   Faculdade: "
@@ -710,7 +838,7 @@ def processar_lead(
     ] += 1
 
     # ========================================================
-    # 1 - INSTAGRAM DIRETO
+    # INSTAGRAM DIRETO
     # ========================================================
 
     instagram = buscar_instagram(
@@ -737,7 +865,7 @@ def processar_lead(
         return
 
     # ========================================================
-    # 2 - INSTAGRAM CITADO EM OUTRAS PÁGINAS
+    # INSTAGRAM EM OUTRAS PÁGINAS
     # ========================================================
 
     instagram = buscar_handle_em_texto(
@@ -764,7 +892,7 @@ def processar_lead(
         return
 
     # ========================================================
-    # 3 - LINKEDIN COMO APOIO
+    # LINKEDIN AUXILIAR
     # ========================================================
 
     linkedin = buscar_linkedin(
@@ -877,8 +1005,14 @@ def executar():
     )
 
     print(
-        f"Processados: "
+        f"Processados como pessoa: "
         f"{stats['processados']}",
+        flush=True
+    )
+
+    print(
+        f"Separados para B2B: "
+        f"{stats['ignorados_nao_pessoa']}",
         flush=True
     )
 
@@ -917,10 +1051,6 @@ def executar():
         flush=True
     )
 
-
-# ============================================================
-# START
-# ============================================================
 
 if __name__ == "__main__":
 
