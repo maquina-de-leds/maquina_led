@@ -269,6 +269,16 @@ class SupabaseRepo:
         payload = dict(dados)
         payload["etapa"] = etapa
         payload["atualizado_em"] = agora()
+
+        # A tabela controle_busca exige estes campos preenchidos.
+        # Checkpoints nacionais usam valores neutros em vez de NULL.
+        if not payload.get("estado"):
+            payload["estado"] = "BR"
+        if not payload.get("cidade"):
+            payload["cidade"] = "Nacional"
+        if not payload.get("instituicao"):
+            payload["instituicao"] = "Carga oficial INEP"
+
         atual = self.controle_get(etapa)
         if atual:
             self.client.table("controle_busca").update(payload).eq("id", atual["id"]).execute()
