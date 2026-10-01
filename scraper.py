@@ -1,18 +1,14 @@
-import os
+import osimport os
 import re
-import time
-import random
 import unicodedata
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from ddgs import DDGS
 from supabase import create_client
 
 
-print("🚀 SCRAPER OFICIAL MACKENZIE INICIADO", flush=True)
+print("🚀 SCRAPER SEGURO MACKENZIE INICIADO", flush=True)
 
 
 # ============================================================
@@ -37,105 +33,22 @@ FACULDADE = {
     "sigla": "Mackenzie",
     "cidade": "São Paulo",
     "estado": "SP",
-    "dominio": "mackenzie.br",
 }
 
-ETAPA = "fontes_oficiais_mackenzie_2025_2026"
-
-MAX_RESULTADOS = 10
-
-PAUSA_MIN = 3
-PAUSA_MAX = 5
+URL_TCC_2026_1 = (
+    "https://www.mackenzie.br/"
+    "universidade/unidades-academicas/"
+    "ccbs/tcc-e-pesquisa/mostra-de-tcc"
+)
 
 
 stats = {
-    "buscas": 0,
-    "paginas_oficiais": 0,
-    "paginas_validas": 0,
+    "fontes_processadas": 0,
     "nomes_extraidos": 0,
     "salvos": 0,
     "duplicados": 0,
-    "rejeitados": 0,
     "erros": 0,
 }
-
-
-# ============================================================
-# CONSULTAS
-# ============================================================
-
-CONSULTAS = [
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "TCC" "2026"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "TCC" "2025"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "8º semestre"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "8ª etapa"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "7º semestre"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "7ª etapa"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "estágio obrigatório"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "estágio curricular"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "formandos" "2026"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "formandos" "2025"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "formatura" "2026"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "formatura" "2025"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "colação" "2026"'
-    ),
-
-    (
-        'site:mackenzie.br '
-        '"Nutrição" "colação" "2025"'
-    ),
-]
 
 
 # ============================================================
@@ -176,257 +89,8 @@ def normalizar(texto):
     return texto.strip()
 
 
-def pausa():
-
-    time.sleep(
-        random.uniform(
-            PAUSA_MIN,
-            PAUSA_MAX
-        )
-    )
-
-
 # ============================================================
-# PÁGINA OFICIAL?
-# ============================================================
-
-def url_oficial(url):
-
-    if not url:
-        return False
-
-    try:
-
-        host = (
-            urlparse(url)
-            .netloc
-            .lower()
-        )
-
-        return (
-            host.endswith(
-                "mackenzie.br"
-            )
-        )
-
-    except Exception:
-
-        return False
-
-
-# ============================================================
-# BUSCA
-# ============================================================
-
-def pesquisar(
-    ddgs,
-    consulta
-):
-
-    stats["buscas"] += 1
-
-    print("")
-    print(
-        f"🔎 {consulta}",
-        flush=True
-    )
-
-    try:
-
-        resultados = list(
-            ddgs.text(
-                consulta,
-                max_results=
-                    MAX_RESULTADOS
-            )
-        )
-
-        return resultados
-
-    except Exception as erro:
-
-        print(
-            f"⚠️ Erro na busca: "
-            f"{erro}",
-            flush=True
-        )
-
-        stats["erros"] += 1
-
-        return []
-
-
-# ============================================================
-# BAIXAR PÁGINA
-# ============================================================
-
-def baixar_pagina(url):
-
-    try:
-
-        resposta = requests.get(
-            url,
-            timeout=30,
-            headers={
-                "User-Agent":
-                    "Mozilla/5.0"
-            }
-        )
-
-        resposta.raise_for_status()
-
-        tipo = (
-            resposta.headers
-            .get(
-                "Content-Type",
-                ""
-            )
-            .lower()
-        )
-
-        if (
-            "text/html"
-            not in tipo
-        ):
-
-            return None
-
-        return resposta.text
-
-    except Exception as erro:
-
-        print(
-            f"   ⚠️ Não abriu página: "
-            f"{erro}",
-            flush=True
-        )
-
-        return None
-
-
-# ============================================================
-# PROVA DE NUTRIÇÃO
-# ============================================================
-
-def tem_nutricao(texto):
-
-    t = normalizar(texto)
-
-    return (
-        "nutricao" in t
-        or
-        "curso de nutricao"
-        in t
-    )
-
-
-# ============================================================
-# PROVA DE FASE FINAL
-# ============================================================
-
-def identificar_fase(texto):
-
-    t = normalizar(texto)
-
-    regras = [
-
-        (
-            "TCC",
-            [
-                "tcc",
-                "trabalho de conclusao",
-                "trabalho de conclusão",
-            ]
-        ),
-
-        (
-            "8º semestre",
-            [
-                "8 semestre",
-                "8º semestre",
-                "oitavo semestre",
-                "8 etapa",
-                "8ª etapa",
-            ]
-        ),
-
-        (
-            "7º semestre",
-            [
-                "7 semestre",
-                "7º semestre",
-                "setimo semestre",
-                "sétimo semestre",
-                "7 etapa",
-                "7ª etapa",
-            ]
-        ),
-
-        (
-            "estágio final",
-            [
-                "estagio obrigatorio",
-                "estágio obrigatório",
-                "estagio curricular",
-                "estágio curricular",
-                "estagio supervisionado",
-                "estágio supervisionado",
-            ]
-        ),
-
-        (
-            "formatura",
-            [
-                "formatura",
-                "formando",
-                "formanda",
-                "formandos",
-            ]
-        ),
-
-        (
-            "colação",
-            [
-                "colacao de grau",
-                "colação de grau",
-                "colacao",
-                "colação",
-            ]
-        ),
-    ]
-
-    for fase, sinais in regras:
-
-        for sinal in sinais:
-
-            if normalizar(
-                sinal
-            ) in t:
-
-                return fase
-
-    return None
-
-
-# ============================================================
-# ANO
-# ============================================================
-
-def identificar_ano(texto):
-
-    t = normalizar(texto)
-
-    if "2026" in t:
-        return 2026
-
-    if "2025" in t:
-        return 2025
-
-    return None
-
-
-# ============================================================
-# NOME PARECE PESSOA?
+# NOME PARECE PESSOA
 # ============================================================
 
 def nome_parece_pessoa(nome):
@@ -443,7 +107,7 @@ def nome_parece_pessoa(nome):
     if len(nome) < 7:
         return False
 
-    if len(nome) > 80:
+    if len(nome) > 90:
         return False
 
     palavras = nome.split()
@@ -451,183 +115,177 @@ def nome_parece_pessoa(nome):
     if len(palavras) < 2:
         return False
 
-    if len(palavras) > 7:
+    if len(palavras) > 8:
         return False
+
+    proibidos = [
+        "universidade",
+        "faculdade",
+        "curso",
+        "nutricao",
+        "reitoria",
+        "coordenadoria",
+        "departamento",
+        "laboratorio",
+        "programa",
+        "campus",
+        "graduacao",
+        "pos",
+        "pesquisa",
+        "atendimento",
+    ]
 
     n = normalizar(nome)
 
-    proibidos = [
-
-        "universidade",
-
-        "mackenzie",
-
-        "nutricao",
-
-        "faculdade",
-
-        "centro",
-
-        "curso",
-
-        "coordenacao",
-
-        "departamento",
-
-        "professor",
-
-        "professora",
-
-        "orientador",
-
-        "orientadora",
-
-        "formatura",
-
-        "trabalho",
-
-        "conclusao",
-
-        "estagio",
-
-        "evento",
-
-        "jornada",
-
-        "congresso",
-
-        "alunos",
-
-        "alunas",
-    ]
-
     if any(
-        termo in n
-        for termo in proibidos
+        palavra in n
+        for palavra in proibidos
     ):
-
         return False
 
     return True
 
 
 # ============================================================
-# EXTRAIR NOMES
+# EXTRAÇÃO EXCLUSIVA DA MOSTRA DE TCC
 # ============================================================
 
-def extrair_nomes(
-    soup
-):
+def extrair_tcc_2026_1():
 
-    encontrados = []
-
-    seletores = [
-        "li",
-        "p",
-        "td",
-        "h3",
-        "h4",
-        "strong",
-    ]
-
-    textos = []
-
-    for seletor in seletores:
-
-        for elemento in soup.select(
-            seletor
-        ):
-
-            texto = (
-                elemento
-                .get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if texto:
-
-                textos.append(
-                    texto
-                )
-
-    padrao_nome = re.compile(
-
-        r"\b("
-        r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ]"
-        r"[a-záéíóúâêôãõç]+"
-        r"(?:\s+"
-        r"(?:de|da|do|das|dos|e)"
-        r")?"
-        r"(?:\s+"
-        r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ]"
-        r"[a-záéíóúâêôãõç]+"
-        r"){1,5}"
-        r")\b"
+    print(
+        "📚 Processando fonte oficial TCC 2026.1",
+        flush=True
     )
 
-    for texto in textos:
+    resposta = requests.get(
+        URL_TCC_2026_1,
+        timeout=40,
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        }
+    )
 
-        contexto = normalizar(
-            texto
+    resposta.raise_for_status()
+
+    soup = BeautifulSoup(
+        resposta.text,
+        "html.parser"
+    )
+
+    linhas = [
+        linha.strip()
+        for linha
+        in soup.get_text("\n").splitlines()
+        if linha.strip()
+    ]
+
+    nomes = []
+
+    dentro_nutricao = False
+    contador_trabalhos = 0
+
+    for linha in linhas:
+
+        linha_norm = normalizar(
+            linha
         )
 
-        # prioriza trechos acadêmicos
-        if not any(
-            palavra in contexto
-            for palavra in [
-                "aluna",
-                "aluno",
-                "graduanda",
-                "graduando",
-                "discente",
-                "autora",
-                "autor",
-                "tcc",
-                "trabalho",
-                "formanda",
-                "formando",
-                "estagio",
-                "estágio",
-            ]
+        # começa exatamente na seção Nutrição 2026.1
+        if (
+            linha_norm
+            == "nutricao 2026.1"
         ):
+
+            dentro_nutricao = True
 
             continue
 
-        matches = (
-            padrao_nome
-            .findall(texto)
+        if not dentro_nutricao:
+
+            continue
+
+        # só aceita linhas numeradas 01 até 19
+        match = re.match(
+            r"^(\d{1,2})\s*-\s*(.+)$",
+            linha
         )
 
-        for nome in matches:
+        if not match:
+
+            continue
+
+        numero = int(
+            match.group(1)
+        )
+
+        if numero < 1 or numero > 19:
+
+            continue
+
+        contador_trabalhos += 1
+
+        bloco_nomes = (
+            match
+            .group(2)
+            .strip()
+        )
+
+        # separa os trabalhos em dupla
+        partes = re.split(
+            r"\s+e\s+",
+            bloco_nomes,
+            flags=re.I
+        )
+
+        for parte in partes:
 
             nome = re.sub(
                 r"\s+",
                 " ",
-                nome
-            ).strip()
+                parte
+            ).strip(
+                " -"
+            )
 
             if nome_parece_pessoa(
                 nome
             ):
 
-                encontrados.append(
+                nomes.append(
                     nome
                 )
 
-    return list(
+        # depois do trabalho 19, encerra
+        if numero == 19:
+
+            break
+
+    nomes = list(
         dict.fromkeys(
-            encontrados
+            nomes
         )
     )
 
+    print(
+        f"   Trabalhos encontrados: "
+        f"{contador_trabalhos}",
+        flush=True
+    )
+
+    print(
+        f"   Pessoas encontradas: "
+        f"{len(nomes)}",
+        flush=True
+    )
+
+    return nomes
+
 
 # ============================================================
-# EXISTE?
+# DUPLICIDADE
 # ============================================================
 
-def existe(
+def existe_lead(
     nome
 ):
 
@@ -661,6 +319,10 @@ def existe(
             flush=True
         )
 
+        stats[
+            "erros"
+        ] += 1
+
         return None
 
 
@@ -669,13 +331,10 @@ def existe(
 # ============================================================
 
 def salvar_lead(
-    nome,
-    ano,
-    fase,
-    url
+    nome
 ):
 
-    duplicado = existe(
+    duplicado = existe_lead(
         nome
     )
 
@@ -686,7 +345,7 @@ def salvar_lead(
         ] += 1
 
         print(
-            f"   ♻️ Duplicado: "
+            f"♻️ Duplicado: "
             f"{nome}",
             flush=True
         )
@@ -715,7 +374,7 @@ def salvar_lead(
             "nutricionista",
 
         "origem":
-            "fonte_oficial_mackenzie",
+            "fonte_academica_oficial",
 
         "origem_lead":
             "fonte_academica",
@@ -748,42 +407,35 @@ def salvar_lead(
             0,
 
         "cidade":
-            FACULDADE[
-                "cidade"
-            ],
+            FACULDADE["cidade"],
 
         "estado":
-            FACULDADE[
-                "estado"
-            ],
+            FACULDADE["estado"],
 
         "instituicao":
-            FACULDADE[
-                "nome"
-            ],
+            FACULDADE["nome"],
 
         "ano_alvo":
-            ano,
+            2026,
 
         "periodo_alvo":
-            fase,
+            "TCC 2026.1",
 
         "pontuacao":
             10,
 
         "evidencia":
             (
-                f"Fonte oficial Mackenzie | "
-                f"Nutrição | "
-                f"{fase} | "
-                f"{ano}"
+                "Fonte oficial Mackenzie | "
+                "Nutrição | "
+                "TCC 2026.1"
             ),
 
         "fonte_url":
-            url,
+            URL_TCC_2026_1,
 
         "fonte_validacao":
-            "site oficial Mackenzie",
+            "Mostra de TCC oficial Mackenzie",
     }
 
     try:
@@ -800,10 +452,8 @@ def salvar_lead(
         ] += 1
 
         print(
-            f"   ✅ SALVO: "
-            f"{nome} | "
-            f"{fase} | "
-            f"{ano}",
+            f"✅ SALVO: "
+            f"{nome}",
             flush=True
         )
 
@@ -812,7 +462,7 @@ def salvar_lead(
     except Exception as erro:
 
         print(
-            f"   ❌ Erro salvando "
+            f"❌ Erro salvando "
             f"{nome}: "
             f"{erro}",
             flush=True
@@ -823,286 +473,6 @@ def salvar_lead(
         ] += 1
 
         return False
-
-
-# ============================================================
-# PROCESSAR PÁGINA
-# ============================================================
-
-def processar_pagina(
-    url
-):
-
-    if not url_oficial(
-        url
-    ):
-
-        return
-
-    stats[
-        "paginas_oficiais"
-    ] += 1
-
-    html = baixar_pagina(
-        url
-    )
-
-    if not html:
-
-        return
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    texto = soup.get_text(
-        " ",
-        strip=True
-    )
-
-    # --------------------------------------------
-    # TEM QUE SER NUTRIÇÃO
-    # --------------------------------------------
-
-    if not tem_nutricao(
-        texto
-    ):
-
-        stats[
-            "rejeitados"
-        ] += 1
-
-        return
-
-    # --------------------------------------------
-    # TEM QUE TER FASE FINAL
-    # --------------------------------------------
-
-    fase = identificar_fase(
-        texto
-    )
-
-    if not fase:
-
-        stats[
-            "rejeitados"
-        ] += 1
-
-        print(
-            "   ⛔ Página sem prova "
-            "de fase final",
-            flush=True
-        )
-
-        return
-
-    # --------------------------------------------
-    # TEM QUE SER 2025/2026
-    # --------------------------------------------
-
-    ano = identificar_ano(
-        texto
-    )
-
-    if ano not in [
-        2025,
-        2026
-    ]:
-
-        stats[
-            "rejeitados"
-        ] += 1
-
-        print(
-            "   ⛔ Página fora de "
-            "2025/2026",
-            flush=True
-        )
-
-        return
-
-    stats[
-        "paginas_validas"
-    ] += 1
-
-    print(
-        f"   ✅ Página válida: "
-        f"{fase} | {ano}",
-        flush=True
-    )
-
-    # --------------------------------------------
-    # EXTRAIR NOMES
-    # --------------------------------------------
-
-    nomes = extrair_nomes(
-        soup
-    )
-
-    stats[
-        "nomes_extraidos"
-    ] += len(
-        nomes
-    )
-
-    print(
-        f"   👥 Nomes candidatos: "
-        f"{len(nomes)}",
-        flush=True
-    )
-
-    for nome in nomes:
-
-        salvar_lead(
-            nome=nome,
-            ano=ano,
-            fase=fase,
-            url=url
-        )
-
-
-# ============================================================
-# CHECKPOINT
-# ============================================================
-
-def checkpoint_existe():
-
-    try:
-
-        resposta = (
-            supabase
-            .table(
-                "controle_busca"
-            )
-            .select("*")
-            .eq(
-                "etapa",
-                ETAPA
-            )
-            .limit(1)
-            .execute()
-        )
-
-        if resposta.data:
-
-            return resposta.data[0]
-
-        return None
-
-    except Exception:
-
-        return None
-
-
-def salvar_checkpoint(
-    indice
-):
-
-    atual = checkpoint_existe()
-
-    dados = {
-
-        "estado":
-            "SP",
-
-        "cidade":
-            "São Paulo",
-
-        "instituicao":
-            FACULDADE["nome"],
-
-        "etapa":
-            ETAPA,
-
-        "status":
-            "pendente",
-
-        "indice_pesquisa":
-            indice,
-
-        "total_pesquisas":
-            len(CONSULTAS),
-
-        "consulta_atual":
-            (
-                CONSULTAS[indice]
-                if indice
-                < len(CONSULTAS)
-                else "concluido"
-            ),
-
-        "fonte_atual":
-            "mackenzie.br",
-
-        "atualizado_em":
-            agora(),
-    }
-
-    try:
-
-        if atual:
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .update(
-                    dados
-                )
-                .eq(
-                    "id",
-                    atual["id"]
-                )
-                .execute()
-            )
-
-        else:
-
-            dados[
-                "iniciado_em"
-            ] = agora()
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .insert(
-                    dados
-                )
-                .execute()
-            )
-
-    except Exception as erro:
-
-        print(
-            f"⚠️ Checkpoint: "
-            f"{erro}",
-            flush=True
-        )
-
-
-def indice_atual():
-
-    atual = checkpoint_existe()
-
-    if not atual:
-
-        return 0
-
-    indice = atual.get(
-        "indice_pesquisa"
-    )
-
-    if indice is None:
-
-        return 0
-
-    return int(
-        indice
-    )
 
 
 # ============================================================
@@ -1118,12 +488,12 @@ def executar():
     )
 
     print(
-        "BUSCA EM FONTES OFICIAIS — MACKENZIE",
+        "MACKENZIE — EXTRAÇÃO SEGURA",
         flush=True
     )
 
     print(
-        "NUTRIÇÃO | 2025 / 2026 | FASE FINAL",
+        "SOMENTE FONTES COM ESTRUTURA VALIDADA",
         flush=True
     )
 
@@ -1132,82 +502,23 @@ def executar():
         flush=True
     )
 
-    inicio = indice_atual()
+    nomes = extrair_tcc_2026_1()
 
-    if inicio >= len(
-        CONSULTAS
-    ):
+    stats[
+        "fontes_processadas"
+    ] += 1
 
-        print(
-            "✅ Todas as consultas "
-            "já foram processadas.",
-            flush=True
+    stats[
+        "nomes_extraidos"
+    ] += len(
+        nomes
+    )
+
+    for nome in nomes:
+
+        salvar_lead(
+            nome
         )
-
-        return
-
-    urls_processadas = set()
-
-    with DDGS() as ddgs:
-
-        for indice in range(
-            inicio,
-            len(CONSULTAS)
-        ):
-
-            consulta = (
-                CONSULTAS[
-                    indice
-                ]
-            )
-
-            resultados = pesquisar(
-                ddgs,
-                consulta
-            )
-
-            for resultado in resultados:
-
-                url = (
-                    resultado.get(
-                        "href"
-                    )
-                    or
-                    resultado.get(
-                        "url"
-                    )
-                    or
-                    ""
-                )
-
-                if not url_oficial(
-                    url
-                ):
-
-                    continue
-
-                if url in urls_processadas:
-
-                    continue
-
-                urls_processadas.add(
-                    url
-                )
-
-                print(
-                    f"   📄 {url}",
-                    flush=True
-                )
-
-                processar_pagina(
-                    url
-                )
-
-            salvar_checkpoint(
-                indice + 1
-            )
-
-            pausa()
 
     print("")
     print(
@@ -1226,20 +537,8 @@ def executar():
     )
 
     print(
-        f"Buscas: "
-        f"{stats['buscas']}",
-        flush=True
-    )
-
-    print(
-        f"Páginas oficiais: "
-        f"{stats['paginas_oficiais']}",
-        flush=True
-    )
-
-    print(
-        f"Páginas válidas: "
-        f"{stats['paginas_validas']}",
+        f"Fontes processadas: "
+        f"{stats['fontes_processadas']}",
         flush=True
     )
 
@@ -1258,12 +557,6 @@ def executar():
     print(
         f"Duplicados: "
         f"{stats['duplicados']}",
-        flush=True
-    )
-
-    print(
-        f"Rejeitados: "
-        f"{stats['rejeitados']}",
         flush=True
     )
 
