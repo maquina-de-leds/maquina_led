@@ -1,4 +1,5 @@
 import os
+print("🚀 ARQUIVO SCRAPER CARREGADO", flush=True)
 import re
 import time
 import random
@@ -1310,5 +1311,6 @@ def executar():
 # ============================================================
 
 if __name__ == "__main__":
-
+    print("🚀 ENTRANDO NA FUNÇÃO EXECUTAR", flush=True)
     executar()
+    print("✅ SCRAPER FINALIZADO", flush=True)
