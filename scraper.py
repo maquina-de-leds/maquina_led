@@ -1,4 +1,4 @@
-import os
+import osimport os
 import re
 import time
 import random
@@ -36,7 +36,7 @@ INSTITUICAO = "Universidade Presbiteriana Mackenzie"
 ESTADO = "SP"
 CIDADE = "São Paulo"
 
-ETAPA = "mackenzie_captacao_ampliada_v1"
+ETAPA = "mackenzie_captacao_ampliada_v2"
 
 MAX_RESULTADOS = 15
 
@@ -44,17 +44,12 @@ PAUSA_MIN = 2
 PAUSA_MAX = 4
 
 
-# Fonte oficial já validada
 URL_TCC_2026 = (
     "https://www.mackenzie.br/"
     "universidade/unidades-academicas/"
     "ccbs/tcc-e-pesquisa/mostra-de-tcc"
 )
 
-
-# ============================================================
-# CONSULTAS COMPLEMENTARES
-# ============================================================
 
 CONSULTAS = [
 
@@ -81,12 +76,13 @@ CONSULTAS = [
 
 
 stats = {
-    "fontes": 0,
     "nomes_encontrados": 0,
     "salvos": 0,
     "duplicados": 0,
     "instagram_encontrado": 0,
+    "instagram_duplicado": 0,
     "linkedin_encontrado": 0,
+    "sem_instagram": 0,
     "erros": 0,
 }
 
@@ -96,6 +92,7 @@ stats = {
 # ============================================================
 
 def agora():
+
     return datetime.now(
         timezone.utc
     ).isoformat()
@@ -139,7 +136,7 @@ def pausa():
 
 
 # ============================================================
-# NOME
+# VALIDAÇÃO BÁSICA DE NOME
 # ============================================================
 
 def nome_valido(nome):
@@ -167,7 +164,9 @@ def nome_valido(nome):
     if len(partes) > 8:
         return False
 
-    texto = normalizar(nome)
+    texto = normalizar(
+        nome
+    )
 
     proibidos = [
         "universidade",
@@ -182,6 +181,9 @@ def nome_valido(nome):
         "coordenadora",
         "mostra de tcc",
         "trabalho de conclusao",
+        "faculdade",
+        "campus",
+        "palestra",
     ]
 
     for termo in proibidos:
@@ -193,7 +195,7 @@ def nome_valido(nome):
 
 
 # ============================================================
-# DUPLICIDADE
+# BUSCAR LEAD EXISTENTE
 # ============================================================
 
 def buscar_lead(nome):
@@ -226,7 +228,7 @@ def buscar_lead(nome):
     except Exception as erro:
 
         print(
-            f"⚠️ Erro ao verificar duplicidade: {erro}",
+            f"⚠️ Erro ao verificar lead: {erro}",
             flush=True
         )
 
@@ -352,6 +354,7 @@ def salvar_lead(
         )
 
         if resposta.data:
+
             return resposta.data[0]["id"]
 
     except Exception as erro:
@@ -382,10 +385,15 @@ def atualizar_contato(
     dados = {}
 
     if instagram:
+
         dados["instagram"] = instagram
-        dados["proxima_acao"] = "primeiro_contato_instagram"
+
+        dados[
+            "proxima_acao"
+        ] = "primeiro_contato_instagram"
 
     if linkedin:
+
         dados["linkedin"] = linkedin
 
     if not dados:
@@ -415,7 +423,69 @@ def atualizar_contato(
 
 
 # ============================================================
-# INSTAGRAM
+# INSTAGRAM JÁ USADO?
+# ============================================================
+
+def instagram_ja_usado(
+    handle,
+    lead_id_atual=None
+):
+
+    if not handle:
+        return False
+
+    try:
+
+        resposta = (
+            supabase
+            .table("leds")
+            .select(
+                "id,nome,instagram"
+            )
+            .ilike(
+                "instagram",
+                handle
+            )
+            .limit(10)
+            .execute()
+        )
+
+        if not resposta.data:
+            return False
+
+        for item in resposta.data:
+
+            if (
+                lead_id_atual
+                and
+                item["id"] == lead_id_atual
+            ):
+                continue
+
+            print(
+                f"   ⚠️ {handle} já pertence a: "
+                f"{item.get('nome')}",
+                flush=True
+            )
+
+            return True
+
+        return False
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Erro verificando Instagram repetido: {erro}",
+            flush=True
+        )
+
+        stats["erros"] += 1
+
+        return False
+
+
+# ============================================================
+# EXTRAIR @ DO INSTAGRAM
 # ============================================================
 
 def extrair_instagram_url(url):
@@ -425,8 +495,12 @@ def extrair_instagram_url(url):
 
     try:
 
+        parsed = urlparse(
+            url
+        )
+
         host = (
-            urlparse(url)
+            parsed
             .netloc
             .lower()
         )
@@ -435,7 +509,7 @@ def extrair_instagram_url(url):
             return None
 
         caminho = (
-            urlparse(url)
+            parsed
             .path
             .strip("/")
         )
@@ -443,7 +517,11 @@ def extrair_instagram_url(url):
         if not caminho:
             return None
 
-        primeira = caminho.split("/")[0]
+        primeira = (
+            caminho
+            .split("/")[0]
+            .strip()
+        )
 
         proibidos = [
             "p",
@@ -452,6 +530,8 @@ def extrair_instagram_url(url):
             "explore",
             "stories",
             "accounts",
+            "about",
+            "developer",
         ]
 
         if primeira.lower() in proibidos:
@@ -467,12 +547,19 @@ def extrair_instagram_url(url):
         return None
 
 
+# ============================================================
+# BUSCAR INSTAGRAM
+# ============================================================
+
 def buscar_instagram(
     ddgs,
-    nome
+    nome,
+    lead_id=None
 ):
 
     consultas = [
+
+        f'"{nome}" Instagram',
 
         f'"{nome}" Nutrição Instagram',
 
@@ -490,11 +577,16 @@ def buscar_instagram(
             resultados = list(
                 ddgs.text(
                     consulta,
-                    max_results=8
+                    max_results=10
                 )
             )
 
-        except Exception:
+        except Exception as erro:
+
+            print(
+                f"   ⚠️ Busca Instagram falhou: {erro}",
+                flush=True
+            )
 
             continue
 
@@ -502,8 +594,10 @@ def buscar_instagram(
 
             url = (
                 resultado.get("href")
-                or resultado.get("url")
-                or ""
+                or
+                resultado.get("url")
+                or
+                ""
             )
 
             handle = extrair_instagram_url(
@@ -513,40 +607,23 @@ def buscar_instagram(
             if not handle:
                 continue
 
-            texto = normalizar(
-                (
-                    resultado.get("title", "")
-                    + " "
-                    + resultado.get("body", "")
-                )
-            )
-
-            nome_normalizado = normalizar(
-                nome
-            )
-
-            primeiro_nome = (
-                nome_normalizado
-                .split()[0]
-            )
-
-            sobrenome = (
-                nome_normalizado
-                .split()[-1]
-            )
-
-            # confirmação simples
-            if (
-                primeiro_nome in texto
-                or
-                sobrenome in texto
-                or
-                "nutricao" in texto
-                or
-                "nutricionista" in texto
+            if instagram_ja_usado(
+                handle,
+                lead_id
             ):
 
-                return handle
+                stats[
+                    "instagram_duplicado"
+                ] += 1
+
+                continue
+
+            print(
+                f"   📸 Instagram candidato: {handle}",
+                flush=True
+            )
+
+            return handle
 
         pausa()
 
@@ -554,7 +631,7 @@ def buscar_instagram(
 
 
 # ============================================================
-# LINKEDIN
+# BUSCAR LINKEDIN
 # ============================================================
 
 def buscar_linkedin(
@@ -588,40 +665,16 @@ def buscar_linkedin(
 
             url = (
                 resultado.get("href")
-                or resultado.get("url")
-                or ""
+                or
+                resultado.get("url")
+                or
+                ""
             )
 
             if "linkedin.com/in/" not in url:
                 continue
 
-            texto = normalizar(
-                (
-                    resultado.get("title", "")
-                    + " "
-                    + resultado.get("body", "")
-                )
-            )
-
-            nome_n = normalizar(
-                nome
-            )
-
-            partes = nome_n.split()
-
-            if not partes:
-                continue
-
-            primeiro = partes[0]
-            ultimo = partes[-1]
-
-            if (
-                primeiro in texto
-                or
-                ultimo in texto
-            ):
-
-                return url
+            return url
 
         pausa()
 
@@ -638,6 +691,47 @@ def enriquecer_lead(
     nome
 ):
 
+    if not lead_id:
+        return
+
+    # Verifica se já possui Instagram
+    try:
+
+        atual = (
+            supabase
+            .table("leds")
+            .select(
+                "instagram,linkedin"
+            )
+            .eq(
+                "id",
+                lead_id
+            )
+            .limit(1)
+            .execute()
+        )
+
+        if atual.data:
+
+            instagram_atual = (
+                atual.data[0]
+                .get("instagram")
+            )
+
+            if instagram_atual:
+
+                print(
+                    f"   📸 Já possui Instagram: "
+                    f"{instagram_atual}",
+                    flush=True
+                )
+
+                return
+
+    except Exception:
+
+        pass
+
     print(
         f"   🔍 Procurando contato: {nome}",
         flush=True
@@ -645,7 +739,8 @@ def enriquecer_lead(
 
     instagram = buscar_instagram(
         ddgs,
-        nome
+        nome,
+        lead_id
     )
 
     if instagram:
@@ -655,7 +750,7 @@ def enriquecer_lead(
         ] += 1
 
         print(
-            f"   📸 Instagram: {instagram}",
+            f"   ✅ Instagram salvo: {instagram}",
             flush=True
         )
 
@@ -666,10 +761,18 @@ def enriquecer_lead(
 
         return
 
+    stats[
+        "sem_instagram"
+    ] += 1
+
     print(
         "   📸 Instagram não encontrado",
         flush=True
     )
+
+    # ========================================================
+    # LINKEDIN SOMENTE COMO APOIO
+    # ========================================================
 
     linkedin = buscar_linkedin(
         ddgs,
@@ -683,7 +786,7 @@ def enriquecer_lead(
         ] += 1
 
         print(
-            f"   💼 LinkedIn encontrado",
+            f"   💼 LinkedIn encontrado: {linkedin}",
             flush=True
         )
 
@@ -696,6 +799,33 @@ def enriquecer_lead(
 
         print(
             "   💼 LinkedIn não encontrado",
+            flush=True
+        )
+
+    # ========================================================
+    # MARCAR PARA BUSCA FUTURA
+    # ========================================================
+
+    try:
+
+        (
+            supabase
+            .table("leds")
+            .update({
+                "proxima_acao":
+                    "buscar_instagram"
+            })
+            .eq(
+                "id",
+                lead_id
+            )
+            .execute()
+        )
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Não foi possível marcar pendência: {erro}",
             flush=True
         )
 
@@ -716,7 +846,7 @@ def extrair_tcc_2026():
 
         resposta = requests.get(
             URL_TCC_2026,
-            timeout=30,
+            timeout=40,
             headers={
                 "User-Agent":
                     "Mozilla/5.0"
@@ -728,7 +858,7 @@ def extrair_tcc_2026():
     except Exception as erro:
 
         print(
-            f"❌ Falha ao abrir fonte oficial: {erro}",
+            f"❌ Falha fonte oficial: {erro}",
             flush=True
         )
 
@@ -767,7 +897,7 @@ def extrair_tcc_2026():
 
     trecho = texto[
         inicio:
-        inicio + 15000
+        inicio + 18000
     ]
 
     padrao = re.compile(
@@ -796,9 +926,22 @@ def extrair_tcc_2026():
 
         for nome in partes:
 
-            nome = nome.strip().title()
+            nome = (
+                nome
+                .strip()
+                .title()
+            )
 
-            if nome_valido(nome):
+            # remove letra isolada no final
+            nome = re.sub(
+                r"\s+[A-ZÀ-Ú]$",
+                "",
+                nome
+            ).strip()
+
+            if nome_valido(
+                nome
+            ):
 
                 nomes.append(
                     nome
@@ -825,7 +968,7 @@ def extrair_tcc_2026():
 
 
 # ============================================================
-# BUSCA COMPLEMENTAR
+# IDENTIFICAR ANO
 # ============================================================
 
 def identificar_ano(texto):
@@ -843,25 +986,49 @@ def identificar_ano(texto):
     return None
 
 
+# ============================================================
+# IDENTIFICAR PERÍODO
+# ============================================================
+
 def identificar_periodo(texto):
 
     t = normalizar(
         texto
     )
 
-    if "8º semestre" in t or "8o semestre" in t:
+    if (
+        "8º semestre" in t
+        or
+        "8o semestre" in t
+        or
+        "8 semestre" in t
+    ):
         return "8º semestre"
 
-    if "7º semestre" in t or "7o semestre" in t:
+    if (
+        "7º semestre" in t
+        or
+        "7o semestre" in t
+        or
+        "7 semestre" in t
+    ):
         return "7º semestre"
 
     if "tcc" in t:
         return "TCC"
 
-    if "colacao" in t:
+    if (
+        "colacao" in t
+        or
+        "formatura" in t
+    ):
         return "formada/o"
 
-    if "formanda" in t or "formando" in t:
+    if (
+        "formanda" in t
+        or
+        "formando" in t
+    ):
         return "formanda/o"
 
     if "estagio obrigatorio" in t:
@@ -869,6 +1036,10 @@ def identificar_periodo(texto):
 
     return "2025/2026"
 
+
+# ============================================================
+# EXTRAIR NOME DO RESULTADO
+# ============================================================
 
 def extrair_nome_resultado(
     resultado
@@ -882,26 +1053,32 @@ def extrair_nome_resultado(
     )
 
     titulo = re.sub(
-        r"\s*[-|–].*$",
-        "",
-        titulo
-    ).strip()
-
-    titulo = re.sub(
         r"\s+\|\s+LinkedIn.*$",
         "",
         titulo,
         flags=re.I
     )
 
+    titulo = re.sub(
+        r"\s+[-–]\s+LinkedIn.*$",
+        "",
+        titulo,
+        flags=re.I
+    )
+
+    titulo = titulo.strip()
+
     if nome_valido(
         titulo
     ):
-
         return titulo
 
     return None
 
+
+# ============================================================
+# BUSCA COMPLEMENTAR
+# ============================================================
 
 def buscar_complementares(
     ddgs
@@ -909,7 +1086,7 @@ def buscar_complementares(
 
     print("")
     print(
-        "🌐 Busca complementar 2025/2026",
+        "🌐 Busca complementar Mackenzie 2025/2026",
         flush=True
     )
 
@@ -939,7 +1116,6 @@ def buscar_complementares(
                 flush=True
             )
 
-            stats["erros"] += 1
             continue
 
         for resultado in resultados:
@@ -980,24 +1156,18 @@ def buscar_complementares(
                 texto
             )
 
-            # precisa ter nutrição + Mackenzie
-            if (
-                "nutricao"
-                not in nt
-            ):
+            # precisa ser Nutrição
+            if "nutricao" not in nt:
                 continue
 
-            if (
-                "mackenzie"
-                not in nt
-            ):
+            # precisa ter relação com Mackenzie
+            if "mackenzie" not in nt:
                 continue
 
             ano = identificar_ano(
                 texto
             )
 
-            # aceita 2025/2026 ou sinais claros de fase final
             periodo = identificar_periodo(
                 texto
             )
@@ -1007,11 +1177,14 @@ def buscar_complementares(
                 for termo in [
                     "7º semestre",
                     "7o semestre",
+                    "7 semestre",
                     "8º semestre",
                     "8o semestre",
+                    "8 semestre",
                     "tcc",
                     "formanda",
                     "formando",
+                    "formatura",
                     "colacao",
                     "estagio obrigatorio",
                 ]
@@ -1034,28 +1207,29 @@ def buscar_complementares(
             if not nome:
                 continue
 
-            candidatos.append(
-                {
-                    "nome":
-                        nome,
+            candidatos.append({
+                "nome":
+                    nome,
 
-                    "ano":
-                        ano or 2026,
+                "ano":
+                    ano or 2026,
 
-                    "periodo":
-                        periodo,
+                "periodo":
+                    periodo,
 
-                    "fonte_url":
-                        url,
+                "fonte_url":
+                    url,
 
-                    "evidencia":
-                        texto[:1000],
-                }
-            )
+                "evidencia":
+                    texto[:1000],
+            })
 
         pausa()
 
-    # remove repetidos
+    # ========================================================
+    # REMOVER REPETIDOS
+    # ========================================================
+
     unicos = {}
 
     for candidato in candidatos:
@@ -1066,7 +1240,9 @@ def buscar_complementares(
 
         if chave not in unicos:
 
-            unicos[chave] = candidato
+            unicos[
+                chave
+            ] = candidato
 
     resultado = list(
         unicos.values()
@@ -1192,27 +1368,32 @@ def executar():
 
     print("")
     print(
-        "=" * 60,
+        "=" * 65,
         flush=True
     )
 
     print(
-        "CAPTAÇÃO MACKENZIE - NUTRIÇÃO 2025/2026",
+        "MACKENZIE - NUTRIÇÃO 2025/2026",
         flush=True
     )
 
     print(
-        "=" * 60,
+        "CAPTAÇÃO + INSTAGRAM + LINKEDIN AUXILIAR",
         flush=True
     )
+
+    print(
+        "=" * 65,
+        flush=True
+    )
+
+    # ========================================================
+    # 1 - FONTE OFICIAL
+    # ========================================================
 
     nomes_oficiais = extrair_tcc_2026()
 
     with DDGS() as ddgs:
-
-        # ----------------------------------------------------
-        # FONTE OFICIAL
-        # ----------------------------------------------------
 
         for nome in nomes_oficiais:
 
@@ -1244,9 +1425,9 @@ def executar():
 
             pausa()
 
-        # ----------------------------------------------------
-        # COMPLEMENTARES
-        # ----------------------------------------------------
+        # ====================================================
+        # 2 - BUSCA COMPLEMENTAR
+        # ====================================================
 
         complementares = buscar_complementares(
             ddgs
@@ -1257,29 +1438,19 @@ def executar():
             lead_id = salvar_lead(
 
                 nome=
-                    candidato[
-                        "nome"
-                    ],
+                    candidato["nome"],
 
                 ano=
-                    candidato[
-                        "ano"
-                    ],
+                    candidato["ano"],
 
                 periodo=
-                    candidato[
-                        "periodo"
-                    ],
+                    candidato["periodo"],
 
                 evidencia=
-                    candidato[
-                        "evidencia"
-                    ],
+                    candidato["evidencia"],
 
                 fonte_url=
-                    candidato[
-                        "fonte_url"
-                    ],
+                    candidato["fonte_url"],
 
                 origem=
                     "busca_publica_mackenzie_2025_2026"
@@ -1288,28 +1459,34 @@ def executar():
             enriquecer_lead(
                 ddgs,
                 lead_id,
-                candidato[
-                    "nome"
-                ]
+                candidato["nome"]
             )
 
             pausa()
 
+    # ========================================================
+    # CHECKPOINT
+    # ========================================================
+
     salvar_checkpoint()
+
+    # ========================================================
+    # RESUMO
+    # ========================================================
 
     print("")
     print(
-        "=" * 60,
+        "=" * 65,
         flush=True
     )
 
     print(
-        "RESUMO",
+        "RESUMO FINAL",
         flush=True
     )
 
     print(
-        "=" * 60,
+        "=" * 65,
         flush=True
     )
 
@@ -1338,6 +1515,18 @@ def executar():
     )
 
     print(
+        f"Instagram repetidos descartados: "
+        f"{stats['instagram_duplicado']}",
+        flush=True
+    )
+
+    print(
+        f"Leads sem Instagram: "
+        f"{stats['sem_instagram']}",
+        flush=True
+    )
+
+    print(
         f"LinkedIn encontrados: "
         f"{stats['linkedin_encontrado']}",
         flush=True
@@ -1350,10 +1539,14 @@ def executar():
     )
 
     print(
-        "=" * 60,
+        "=" * 65,
         flush=True
     )
 
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
 
