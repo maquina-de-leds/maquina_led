@@ -1,25 +1,34 @@
+import csv
+import io
 import os
 import re
+import tempfile
 import time
-import random
 import unicodedata
+import zipfile
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
-from ddgs import DDGS
-from supabase import create_client
+# ============================================================
+# CONFIGURACAO
+# ============================================================
 
-print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V4", flush=True)
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-DISCOVERY_VERSION = "v4"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v4"
-MAX_RESULTADOS = 30
+VERSAO = "v5"
+ETAPA_CARGA_IES = "carga_inep_nutricao_v5"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v5"
+ORIGEM_IES = "inep_censo_superior_v5"
+MAX_RESULTADOS = 12
 MAX_INSTITUICOES_POR_EXECUCAO = 8
-PAUSA_MIN = 1.0
-PAUSA_MAX = 2.0
+PAUSA_ENTRE_BUSCAS = 2.0
+
+INEP_FONTES = [
+    (2024, "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"),
+]
+
+MACKENZIE_TCC_URL = (
+    "https://www.mackenzie.br/universidade/unidades-academicas/"
+    "ccbs/tcc-e-pesquisa/mostra-de-tcc"
+)
 
 ESTADOS = [
     ("AC", "Acre"), ("AL", "Alagoas"), ("AP", "Amapá"), ("AM", "Amazonas"),
@@ -34,10 +43,7 @@ ESTADOS = [
 ]
 
 stats = {
-    "estados_descobertos": 0,
-    "estados_descoberta_falhou": 0,
-    "instituicoes_descobertas": 0,
-    "instituicoes_reabertas": 0,
+    "ies_carregadas": 0,
     "instituicoes_processadas": 0,
     "instituicoes_concluidas": 0,
     "instituicoes_erro": 0,
@@ -53,2439 +59,832 @@ def agora():
     return datetime.now(timezone.utc).isoformat()
 
 
-def pausa():
-    time.sleep(random.uniform(PAUSA_MIN, PAUSA_MAX))
+def limpar_espacos(texto):
+    return re.sub(r"\s+", " ", str(texto or "")).strip()
 
 
 def normalizar(texto):
-    texto = str(texto or "").strip().lower()
+    texto = limpar_espacos(texto).lower()
     texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(
-        c for c in texto
-        if not unicodedata.combining(c)
-    )
-    texto = re.sub(
-        r"\s+",
-        " ",
-        texto
-    )
-    return texto.strip()
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return texto
 
 
-def limpar_espacos(texto):
-    return re.sub(
-        r"\s+",
-        " ",
-        str(texto or "")
-    ).strip()
+def valor(row, *nomes):
+    mapa = {str(k or "").strip().upper(): v for k, v in row.items()}
+    for nome in nomes:
+        v = mapa.get(nome.upper())
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return ""
 
 
-def buscar_ddgs(
-    ddgs,
-    consulta,
-    max_results=MAX_RESULTADOS
-):
-    backends = [
-        "google,brave,bing,yahoo,duckduckgo",
-        "google,brave,bing",
-        "bing,yahoo,duckduckgo",
-    ]
+def encoding_membro(zf, nome):
+    with zf.open(nome) as f:
+        amostra = f.read(65536)
+    try:
+        amostra.decode("utf-8-sig")
+        return "utf-8-sig"
+    except UnicodeDecodeError:
+        return "latin1"
 
-    ultimo_erro = None
 
-    for tentativa, backend in enumerate(
-        backends,
-        start=1
-    ):
-        try:
+def leitor_csv_zip(zf, nome):
+    enc = encoding_membro(zf, nome)
+    bruto = zf.open(nome)
+    texto = io.TextIOWrapper(bruto, encoding=enc, newline="")
+    # O Censo Superior usa ';'. Sniffer fica como protecao para alteracoes futuras.
+    cabecalho = texto.readline()
+    texto.seek(0)
+    delimitador = ";" if cabecalho.count(";") >= cabecalho.count(",") else ","
+    return texto, csv.DictReader(texto, delimiter=delimitador)
 
-            resultados = ddgs.text(
-                consulta,
-                region="br-pt",
-                safesearch="moderate",
-                max_results=max_results,
-                backend=backend,
-            )
 
-            return list(
-                resultados or []
-            )
-
-        except Exception as exc:
-
-            ultimo_erro = exc
-
-            print(
-                f"      ⚠️ Busca falhou "
-                f"({tentativa}/{len(backends)}) "
-                f"[{backend}]: {exc}",
-                flush=True,
-            )
-
-            if tentativa < len(backends):
-                time.sleep(
-                    1.5 * tentativa
-                )
-
-    print(
-        f"      ❌ Busca indisponível: "
-        f"{ultimo_erro}",
-        flush=True
-    )
-
+def localizar_membro(zf, trecho):
+    trecho = trecho.upper()
+    for nome in zf.namelist():
+        if trecho in nome.upper() and nome.upper().endswith(".CSV"):
+            return nome
     return None
 
 
+def extrair_instituicoes_inep(caminho_zip, ano):
+    """Retorna uma linha por IES/UF que oferta graduação em Nutrição no Censo Superior."""
+    ufs_validas = {x[0] for x in ESTADOS}
+    with zipfile.ZipFile(caminho_zip) as zf:
+        arq_cursos = localizar_membro(zf, f"MICRODADOS_CADASTRO_CURSOS_{ano}")
+        arq_ies = localizar_membro(zf, f"MICRODADOS_ED_SUP_IES_{ano}")
+        if not arq_cursos or not arq_ies:
+            raise RuntimeError(
+                f"Arquivos esperados do Censo {ano} nao encontrados no ZIP. "
+                f"Cursos={bool(arq_cursos)} IES={bool(arq_ies)}"
+            )
+
+        ies_por_codigo = {}
+        texto_ies, leitor_ies = leitor_csv_zip(zf, arq_ies)
+        try:
+            for row in leitor_ies:
+                co_ies = valor(row, "CO_IES")
+                if not co_ies:
+                    continue
+                ies_por_codigo[co_ies] = {
+                    "instituicao": valor(row, "NO_IES"),
+                    "sigla": valor(row, "SG_IES"),
+                    "estado": valor(row, "SG_UF_IES", "SG_UF"),
+                    "cidade": valor(row, "NO_MUNICIPIO_IES", "NO_MUNICIPIO"),
+                }
+        finally:
+            texto_ies.close()
+
+        # Uma IES pode aparecer muitas vezes (campi/polos/linhas do mesmo curso).
+        # Para a máquina de leads basta uma fila por IES+UF; pesquisar a mesma IES
+        # dezenas de vezes por polo só gera carga e duplicidade.
+        unicos = {}
+        texto_cursos, leitor_cursos = leitor_csv_zip(zf, arq_cursos)
+        try:
+            for row in leitor_cursos:
+                cine = valor(row, "NO_CINE_ROTULO")
+                nome_curso = valor(row, "NO_CURSO")
+                # O rótulo CINE é a classificação canônica do Censo. Só usamos
+                # NO_CURSO como fallback para arquivos que eventualmente não o tragam.
+                if cine:
+                    if normalizar(cine) != "nutricao":
+                        continue
+                else:
+                    nome_norm = normalizar(nome_curso)
+                    if not (nome_norm == "nutricao" or nome_norm.startswith("nutricao ")):
+                        continue
+
+                co_ies = valor(row, "CO_IES")
+                ies = ies_por_codigo.get(co_ies, {})
+                instituicao = ies.get("instituicao", "")
+                if not instituicao:
+                    continue
+
+                uf = (valor(row, "SG_UF", "SG_UF_CURSO") or ies.get("estado", "")).strip().upper()
+                if uf not in ufs_validas:
+                    continue
+
+                cidade_curso = valor(row, "NO_MUNICIPIO", "NO_MUNICIPIO_CURSO")
+                cidade_sede = ies.get("cidade", "")
+                cidade = limpar_espacos(cidade_curso or cidade_sede) or "Não identificado"
+                instituicao = limpar_espacos(instituicao)
+                modalidade = valor(row, "TP_MODALIDADE_ENSINO")
+
+                # Presencial com município identificado é a melhor representação.
+                # Depois vem qualquer linha com município, e por último a sede da IES.
+                prioridade = (2 if modalidade == "1" else 0) + (1 if cidade_curso else 0)
+                chave = (uf, normalizar(instituicao))
+                atual = unicos.get(chave)
+                if atual is None or prioridade > atual[0]:
+                    unicos[chave] = (
+                        prioridade,
+                        {
+                            "estado": uf,
+                            "cidade": cidade,
+                            "instituicao": instituicao,
+                            "curso": "Nutrição",
+                            "origem": ORIGEM_IES,
+                            "fonte_url": INEP_FONTES[0][1],
+                            "status": "pendente",
+                            "fonte_validacao": f"INEP Censo da Educação Superior {ano}",
+                            "validada": True,
+                            "tentativa_descoberta": 0,
+                        },
+                    )
+        finally:
+            texto_cursos.close()
+
+    registros = [v[1] for v in unicos.values()]
+    return sorted(registros, key=lambda x: (x["estado"], normalizar(x["instituicao"])))
+
+
+def baixar_microdados_inep():
+    import requests
+
+    erros = []
+    for ano, url in INEP_FONTES:
+        destino = os.path.join(tempfile.gettempdir(), f"microdados_censo_superior_{ano}.zip")
+        try:
+            print(f"📥 Baixando base oficial do INEP {ano}...", flush=True)
+            with requests.get(
+                url,
+                stream=True,
+                timeout=(30, 300),
+                headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"},
+            ) as r:
+                r.raise_for_status()
+                total = 0
+                proximo_aviso = 25 * 1024 * 1024
+                with open(destino, "wb") as f:
+                    for bloco in r.iter_content(chunk_size=1024 * 1024):
+                        if not bloco:
+                            continue
+                        f.write(bloco)
+                        total += len(bloco)
+                        if total >= proximo_aviso:
+                            print(f"   ... {total // (1024 * 1024)} MB", flush=True)
+                            proximo_aviso += 25 * 1024 * 1024
+            if not zipfile.is_zipfile(destino):
+                raise RuntimeError("arquivo baixado nao e um ZIP valido")
+            return ano, destino
+        except Exception as exc:
+            erros.append(f"{ano}: {exc}")
+            print(f"⚠️ Falha na fonte INEP {ano}: {exc}", flush=True)
+            try:
+                if os.path.exists(destino):
+                    os.remove(destino)
+            except OSError:
+                pass
+
+    raise RuntimeError("Nenhuma fonte oficial do INEP ficou acessivel: " + " | ".join(erros))
+
+
 # ============================================================
-# DESCOBERTA DE FACULDADES
+# REPOSITORIO SUPABASE
 # ============================================================
 
-MARCADORES_IES = [
-    "universidade",
-    "faculdade",
-    "centro universitario",
-    "instituto federal",
-]
+class SupabaseRepo:
+    def __init__(self, client):
+        self.client = client
 
-BLOQUEIOS_IES = [
-    "wikipedia",
-    "ranking",
-    "melhores faculdades",
-    "quero bolsa",
-    "mensalidade",
-    "vestibular",
-    "faculdades de nutricao",
-    "lista de faculdades",
-    "educabras",
-    "cursos.io",
-]
+    @classmethod
+    def from_env(cls):
+        from supabase import create_client
+        url = os.environ["SUPABASE_URL"]
+        key = os.environ["SUPABASE_KEY"]
+        return cls(create_client(url, key))
 
-
-def limpar_nome_instituicao(texto):
-
-    texto = limpar_espacos(
-        texto
-    )
-
-    texto = re.sub(
-        r"(?i)^pdf\s+minist[eé]rio\s+da\s+educa[cç][aã]o\s+",
-        "",
-        texto
-    )
-
-    texto = re.sub(
-        r"(?i)^curso de\s+",
-        "",
-        texto
-    )
-
-    texto = re.split(
-        r"\s+[|–—]\s+",
-        texto,
-        maxsplit=1
-    )[0]
-
-    texto = re.sub(
-        r"\s+-\s+(?:[A-Z0-9]{2,12}|"
-        r"[a-z0-9.-]+\.(?:br|com|org)(?:\.[a-z]{2})?)\s*$",
-        "",
-        texto,
-        flags=re.I,
-    )
-
-    cortes = [
-        r"\s+foi\s+",
-        r"\s+anunciou\s+",
-        r"\s+anuncia\s+",
-        r"\s+prepara\s+",
-        r"\s+oferece\s+",
-        r"\s+abre\s+",
-        r"\s+o\s+curso\s+",
-        r"\s+curso\s+de\s+nutri[cç][aã]o\s+",
-        r"\s+pr[oó]-reitoria\s+de(?:\s+|$)",
-        r"\s+centro\s+de\s+\.\.\.",
-        r"\s+jun\s+\d{1,2},\s+\d{4}",
-        r"\s+documentos\b",
-        r"\s+prepara\s+profissionais\b",
-    ]
-
-    for corte in cortes:
-
-        texto = re.split(
-            corte,
-            texto,
-            maxsplit=1,
-            flags=re.I
-        )[0]
-
-    texto = re.sub(
-        r"\s*\([A-Z0-9.-]{2,12}\)\s*$",
-        "",
-        texto
-    )
-
-    texto = re.sub(
-        r"(?i)\s*[-:|–—]\s*"
-        r"(curso de\s+)?nutri[cç][aã]o.*$",
-        "",
-        texto
-    )
-
-    texto = re.sub(
-        r"(?i)\s*[-:|–—]\s*"
-        r"gradua[cç][aã]o.*$",
-        "",
-        texto
-    )
-
-    return limpar_espacos(
-        texto
-    ).strip(
-        " -–—|:,.;"
-    )
-
-
-def extrair_instituicoes_resultado(
-    resultado
-):
-
-    titulo = limpar_espacos(
-        resultado.get(
-            "title",
-            ""
-        )
-    )
-
-    corpo = limpar_espacos(
-        resultado.get(
-            "body",
-            ""
-        )
-    )
-
-    url = str(
-        resultado.get(
-            "href"
-        )
-        or
-        resultado.get(
-            "url"
-        )
-        or
-        ""
-    )
-
-    contexto = normalizar(
-        f"{titulo} {corpo} {url}"
-    )
-
-    if "nutricao" not in contexto:
-        return []
-
-    if any(
-        x in contexto
-        for x in [
-            "foi transformado",
-            "foi transformada",
-            "instituicao extinta",
-            "instituicao descredenciada",
-            "antiga denominacao",
-            "antigo nome",
-        ]
-    ):
-        return []
-
-    candidatos = []
-
-    texto = (
-        f"{titulo} "
-        f"{corpo}"
-    )
-
-    padroes = [
-        r"\bUniversidade\s+"
-        r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]"
-        r"[\wÀ-ÿ .,'&()\-]{2,75}",
-
-        r"\bCentro\s+Universit[aá]rio\s+"
-        r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]"
-        r"[\wÀ-ÿ .,'&()\-]{2,75}",
-
-        r"\bFaculdade\s+"
-        r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]"
-        r"[\wÀ-ÿ .,'&()\-]{2,75}",
-
-        r"\bInstituto\s+Federal\s+"
-        r"[A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ]"
-        r"[\wÀ-ÿ .,'&()\-]{2,75}",
-    ]
-
-    for padrao in padroes:
-
-        for achado in re.finditer(
-            padrao,
-            texto,
-            flags=re.I
-        ):
-
-            candidatos.append(
-                limpar_nome_instituicao(
-                    achado.group(0)
-                )
-            )
-
-    titulo_limpo = (
-        limpar_nome_instituicao(
-            titulo
-        )
-    )
-
-    if any(
-        m in normalizar(
-            titulo_limpo
-        )
-        for m in MARCADORES_IES
-    ):
-
-        candidatos.append(
-            titulo_limpo
-        )
-
-    saida = []
-    vistos = set()
-
-    for nome in candidatos:
-
-        nome = limpar_nome_instituicao(
-            nome
-        )[:100].strip(
-            " -–—|:,.;"
-        )
-
-        n = normalizar(
-            nome
-        )
-
-        if not (
-            5 <= len(nome) <= 100
-        ):
-            continue
-
-        if any(
-            b in n
-            for b in BLOQUEIOS_IES
-        ):
-            continue
-
-        if not any(
-            m in n
-            for m in MARCADORES_IES
-        ):
-            continue
-
-        moldura = (
-            f" {n} "
-        )
-
-        sobras_ruins = [
-            " ministerio da educacao ",
-            " pro-reitoria ",
-            " curso de nutricao ",
-            " prepara profissionais ",
-            " abertura de vagas ",
-            " anunciou ",
-            " documentos ",
-        ]
-
-        if any(
-            x in moldura
-            for x in sobras_ruins
-        ):
-            continue
-
-        if n not in vistos:
-
-            vistos.add(
-                n
-            )
-
-            saida.append(
-                nome
-            )
-
-    return saida
-
-
-def buscar_instituicao_existente(
-    uf,
-    instituicao
-):
-
-    try:
-
+    def controle_get(self, etapa):
         r = (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .select(
-                "id,status,cidade,instituicao"
-            )
-            .eq(
-                "estado",
-                uf
-            )
-            .ilike(
-                "instituicao",
-                instituicao
-            )
+            self.client.table("controle_busca")
+            .select("*")
+            .eq("etapa", etapa)
             .limit(1)
             .execute()
         )
+        return r.data[0] if r.data else None
 
-        return (
-            r.data[0]
-            if r.data
-            else None
+    def controle_salvar(self, etapa, dados):
+        payload = dict(dados)
+        payload["etapa"] = etapa
+        payload["atualizado_em"] = agora()
+        atual = self.controle_get(etapa)
+        if atual:
+            self.client.table("controle_busca").update(payload).eq("id", atual["id"]).execute()
+        else:
+            payload.setdefault("tentativas", 0)
+            payload.setdefault("iniciado_em", agora())
+            self.client.table("controle_busca").insert(payload).execute()
+
+    def contar_ies_v5(self):
+        r = (
+            self.client.table("instituicoes_nutricao")
+            .select("id", count="exact")
+            .eq("origem", ORIGEM_IES)
+            .execute()
         )
+        return r.count or 0
 
-    except Exception as exc:
-
-        print(
-            f"   ⚠️ Erro verificando "
-            f"instituição: {exc}",
-            flush=True
-        )
-
-        stats[
-            "erros"
-        ] += 1
-
-        return None
-
-
-def salvar_ou_reabrir_instituicao(
-    uf,
-    instituicao,
-    fonte_url
-):
-
-    existente = (
-        buscar_instituicao_existente(
-            uf,
-            instituicao
-        )
-    )
-
-    if existente:
-
-        try:
-
-            dados = {
-                "status":
-                    "pendente",
-
-                "fonte_url":
-                    fonte_url or None,
-
-                "fonte_validacao":
-                    f"descoberta_web_"
-                    f"{DISCOVERY_VERSION}",
-
-                "validada":
-                    True,
-            }
-
-            if not existente.get(
-                "cidade"
-            ):
-
-                dados[
-                    "cidade"
-                ] = "Não identificado"
-
+    def upsert_ies(self, registros):
+        for inicio in range(0, len(registros), 100):
+            lote = registros[inicio: inicio + 100]
             (
-                supabase
-                .table(
-                    "instituicoes_nutricao"
-                )
-                .update(
-                    dados
-                )
-                .eq(
-                    "id",
-                    existente["id"]
-                )
+                self.client.table("instituicoes_nutricao")
+                .upsert(lote, on_conflict="estado,cidade,instituicao")
                 .execute()
             )
 
-            stats[
-                "instituicoes_reabertas"
-            ] += 1
-
-            print(
-                f"   ♻️ Reaberta na fila: "
-                f"{instituicao}",
-                flush=True
+    def limpar_residuos_v4(self):
+        try:
+            (
+                self.client.table("instituicoes_nutricao")
+                .delete()
+                .eq("origem", "descoberta_web_nacional_v4")
+                .execute()
             )
-
-            return True
-
+            print("🧹 Resíduos V4 removidos da fila de instituições.", flush=True)
         except Exception as exc:
+            print(f"⚠️ Não foi possível limpar resíduos V4; eles serão ignorados: {exc}", flush=True)
 
-            print(
-                f"   ⚠️ Não reabriu "
-                f"{instituicao}: {exc}",
-                flush=True
-            )
-
-            stats[
-                "erros"
-            ] += 1
-
-            return False
-
-    dados = {
-
-        "estado":
-            uf,
-
-        "cidade":
-            "Não identificado",
-
-        "instituicao":
-            instituicao,
-
-        "curso":
-            "Nutrição",
-
-        "origem":
-            f"descoberta_web_nacional_"
-            f"{DISCOVERY_VERSION}",
-
-        "fonte_url":
-            fonte_url or None,
-
-        "status":
-            "pendente",
-
-        "fonte_validacao":
-            f"descoberta_web_"
-            f"{DISCOVERY_VERSION}",
-
-        "validada":
-            True,
-
-        "tentativa_descoberta":
-            0,
-    }
-
-    try:
-
-        (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .insert(
-                dados
-            )
+    def fila_estado(self, uf):
+        r = (
+            self.client.table("instituicoes_nutricao")
+            .select("*")
+            .eq("origem", ORIGEM_IES)
+            .eq("estado", uf)
+            .in_("status", ["pendente", "processando", "erro"])
             .execute()
         )
+        dados = r.data or []
+        ordem = {"pendente": 0, "processando": 1, "erro": 2}
+        return sorted(dados, key=lambda x: (ordem.get(x.get("status"), 9), normalizar(x.get("instituicao"))))
 
-        stats[
-            "instituicoes_descobertas"
-        ] += 1
+    def atualizar_instituicao(self, iid, **dados):
+        dados["ultima_verificacao"] = agora()
+        self.client.table("instituicoes_nutricao").update(dados).eq("id", iid).execute()
 
-        print(
-            f"   ➕ Faculdade adicionada: "
-            f"{instituicao}",
-            flush=True
+    def lead_existe(self, nome, instituicao):
+        r = (
+            self.client.table("leds")
+            .select("id")
+            .eq("instituicao", instituicao)
+            .ilike("nome", nome)
+            .limit(1)
+            .execute()
         )
+        return bool(r.data)
 
+    def instagram_usado(self, instagram):
+        if not instagram:
+            return False
+        r = (
+            self.client.table("leds")
+            .select("id")
+            .eq("instagram", instagram)
+            .limit(1)
+            .execute()
+        )
+        return bool(r.data)
+
+    def inserir_lead(self, dados):
+        self.client.table("leds").insert(dados).execute()
+
+
+# ============================================================
+# CARGA DETERMINISTICA DA FILA DE INSTITUICOES
+# ============================================================
+
+def garantir_fila_oficial(repo):
+    cp = repo.controle_get(ETAPA_CARGA_IES)
+    total = repo.contar_ies_v5()
+    if cp and cp.get("status") == "concluido" and total > 0:
+        print(f"📚 Base oficial INEP V5 já carregada: {total} registros.", flush=True)
         return True
 
+    repo.controle_salvar(ETAPA_CARGA_IES, {
+        "estado": None,
+        "cidade": None,
+        "instituicao": None,
+        "status": "processando",
+        "ultimo_erro": None,
+        "leads_encontrados": 0,
+        "leads_salvos": 0,
+    })
+
+    try:
+        ano, caminho = baixar_microdados_inep()
+        registros = extrair_instituicoes_inep(caminho, ano)
+        if not registros:
+            raise RuntimeError("o filtro oficial nao encontrou nenhum curso de Nutricao")
+        repo.limpar_residuos_v4()
+        repo.upsert_ies(registros)
+        total = repo.contar_ies_v5()
+        if total < 20:
+            raise RuntimeError(f"carga suspeita: apenas {total} registros de Nutricao")
+        repo.controle_salvar(ETAPA_CARGA_IES, {
+            "estado": None,
+            "cidade": None,
+            "instituicao": None,
+            "status": "concluido",
+            "ultimo_erro": None,
+            "leads_encontrados": len(registros),
+            "leads_salvos": total,
+            "fonte_atual": f"INEP {ano}",
+            "finalizado_em": agora(),
+        })
+        stats["ies_carregadas"] = total
+        print(f"✅ Fila oficial carregada: {total} registro(s) de IES/cidade com Nutrição.", flush=True)
+        return True
     except Exception as exc:
-
-        print(
-            f"   ⚠️ Não salvou instituição "
-            f"{instituicao}: {exc}",
-            flush=True
-        )
-
-        stats[
-            "erros"
-        ] += 1
-
+        stats["erros"] += 1
+        repo.controle_salvar(ETAPA_CARGA_IES, {
+            "estado": None,
+            "cidade": None,
+            "instituicao": None,
+            "status": "erro",
+            "ultimo_erro": str(exc)[:1000],
+        })
+        print(f"❌ Falha na carga oficial do INEP: {exc}", flush=True)
         return False
 
 
-def quantidade_instituicoes_estado(
-    uf
-):
+# ============================================================
+# BUSCA WEB CONTROLADA
+# ============================================================
 
+def ddgs_texto(consulta, backend, max_results):
+    from ddgs import DDGS
+    with DDGS(timeout=15) as ddgs:
+        return list(ddgs.text(
+            consulta,
+            region="br-pt",
+            safesearch="moderate",
+            max_results=max_results,
+            backend=backend,
+        ) or [])
+
+
+def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
+    """Busca com diagnóstico de 'sem resultado' versus indisponibilidade do motor.
+
+    DDGS pode lançar 'No results found' tanto para uma consulta realmente vazia
+    quanto quando um backend deixa de responder. Se todos os backends disserem
+    isso, fazemos uma única consulta de saúde antes de concluir que o resultado é vazio.
+    """
+    backends = ["brave", "bing"]
+    sem_resultado = 0
+    erros_reais = []
+
+    for backend in backends:
+        try:
+            resultados = fetch_fn(consulta, backend, max_results)
+            if resultados:
+                return resultados
+            # Retorno normal vazio do backend: resultado vazio confiável.
+            return []
+        except Exception as exc:
+            msg = str(exc)
+            if "No results found" in msg:
+                sem_resultado += 1
+            else:
+                erros_reais.append(f"{backend}: {msg}")
+            time.sleep(0.5)
+
+    if sem_resultado:
+        # Diagnóstico barato: se uma busca extremamente ampla funciona, tratamos
+        # 'No results found' da consulta específica como vazio real. Se nem a
+        # busca de saúde funciona, não concluímos a instituição por engano.
+        for backend in backends:
+            try:
+                saude = fetch_fn("Brasil", backend, 1)
+                if saude:
+                    return []
+            except Exception as exc:
+                erros_reais.append(f"health/{backend}: {exc}")
+
+    detalhe = " | ".join(erros_reais[-4:]) or "backends sem resposta verificável"
+    print(f"      ⚠️ Busca externa indisponível: {detalhe}", flush=True)
+    return None
+
+
+def consultas_leads(instituicao):
+    return [
+        f'"{instituicao}" "Nutrição" "TCC" "2026"',
+        f'"{instituicao}" "Nutrição" "TCC" "2025"',
+        f'"{instituicao}" "Nutrição" "formanda" "2026"',
+        f'"{instituicao}" "Nutrição" "formatura" "2025"',
+        f'site:linkedin.com/in "{instituicao}" "Nutrição" "2026"',
+        f'site:instagram.com "{instituicao}" "Nutrição" "2026"',
+    ]
+
+
+SINAIS_FASE_FINAL = [
+    "tcc", "trabalho de conclusao", "formanda", "formando", "formandas", "formandos",
+    "concluinte", "concluintes", "colacao de grau", "formatura", "recem-formad",
+    "7º periodo", "7o periodo", "7 periodo", "8º periodo", "8o periodo", "8 periodo",
+    "7º semestre", "7o semestre", "7 semestre", "8º semestre", "8o semestre", "8 semestre",
+    "7/8", "8/8", "estagio obrigatorio", "estagio supervisionado", "estagio final",
+    "ultimo semestre", "ultimo periodo",
+]
+
+BLOQUEIOS_PESSOA = [
+    "universidade", "faculdade", "centro universitario", "instituto", "vestibular", "curso",
+    "campus", "evento", "congresso", "google docs", "pos ead", "pos-graduacao", "programa",
+    "secretaria", "reitoria", "inscricoes", "edital", "processo seletivo", "portal do aluno",
+    "noticia", "noticias", "projeto pedagogico", "matriz curricular", "grade curricular",
+    "revista", "anais", "mostra de tcc", "trabalho de conclusao",
+]
+
+
+def identificar_ano(texto):
+    n = normalizar(texto)
+    if "2026" in n:
+        return 2026
+    if "2025" in n:
+        return 2025
+    return None
+
+
+def identificar_periodo(texto):
+    n = normalizar(texto)
+    grupos = [
+        ("8º período/semestre", ["8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8"]),
+        ("7º período/semestre", ["7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8"]),
+        ("TCC", ["tcc", "trabalho de conclusao"]),
+        ("estágio final/obrigatório", ["estagio obrigatorio", "estagio supervisionado", "estagio final"]),
+        ("formando", ["formanda", "formando", "concluinte", "colacao de grau", "formatura"]),
+        ("recém-formado", ["recem-formada", "recem-formado"]),
+    ]
+    for rotulo, sinais in grupos:
+        if any(s in n for s in sinais):
+            return rotulo
+    return None
+
+
+def lead_qualificado(texto):
+    n = normalizar(texto)
+    if "nutricao" not in n and "nutricionista" not in n:
+        return False
+    ano = identificar_ano(texto)
+    if ano not in (2025, 2026):
+        return False
+    return any(s in n for s in SINAIS_FASE_FINAL)
+
+
+def nome_parece_pessoa(nome):
+    nome = limpar_espacos(nome).strip(" -–—|:,.;")
+    if len(nome) < 6 or len(nome) > 90 or re.search(r"\d", nome):
+        return False
+    n = normalizar(nome)
+    if any(b in n for b in BLOQUEIOS_PESSOA):
+        return False
+    partes = nome.split()
+    if len(partes) < 2 or len(partes) > 7:
+        return False
+    conectores = {"de", "da", "do", "das", "dos", "e"}
+    principais = [p for p in partes if normalizar(p) not in conectores]
+    if len(principais) < 2:
+        return False
+    if normalizar(partes[0]) in {"estudante", "aluno", "aluna", "nutricao", "nutricionista", "tcc", "mostra"}:
+        return False
+    return True
+
+
+def extrair_nome_resultado(resultado):
+    """Extrai nome somente de perfis sociais individualizados.
+
+    Títulos genéricos de páginas/TCC não são tratados como pessoas. Isso evita
+    repetir o problema das versões antigas, que confundiam título de documento
+    com nome de aluno. Páginas oficiais em lista usam adaptadores específicos.
+    """
+    titulo = limpar_espacos(resultado.get("title", ""))
+    url = str(resultado.get("href") or resultado.get("url") or "")
+    host = urlparse(url).netloc.lower()
+
+    if "linkedin.com" in host and "/in/" in url.lower():
+        titulo = re.sub(r"(?i)\s*[|\-–—•]\s*LinkedIn.*$", "", titulo)
+        candidato = re.split(r"\s+[\-–—|•]\s+", titulo, maxsplit=1)[0]
+    elif "instagram.com" in host:
+        caminho = urlparse(url).path.strip("/").split("/")[0].lower()
+        if not caminho or caminho in {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}:
+            return None
+        titulo = re.sub(r"\s*\(@[A-Za-z0-9._]+\).*$", "", titulo)
+        titulo = re.sub(r"(?i)\s*[|\-–—•]\s*Instagram.*$", "", titulo)
+        candidato = re.split(r"\s+[\-–—|•]\s+", titulo, maxsplit=1)[0]
+    else:
+        return None
+
+    candidato = limpar_espacos(candidato).strip(" -–—|•:,.;")
+    return candidato if nome_parece_pessoa(candidato) else None
+
+
+def extrair_instagram(resultado):
+    url = str(resultado.get("href") or resultado.get("url") or "")
+    m = re.search(r"instagram\.com/([A-Za-z0-9._]+)", url, flags=re.I)
+    if not m:
+        return None
+    usuario = m.group(1).lower()
+    if usuario in {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}:
+        return None
+    return "@" + usuario
+
+
+def relacionado_a_instituicao(texto, instituicao, cidade=""):
+    ntexto = normalizar(texto)
+    inst = normalizar(instituicao)
+    if inst and inst in ntexto:
+        return True
+    ignorar = {"universidade", "faculdade", "centro", "universitario", "instituto", "federal", "estadual", "de", "da", "do", "das", "dos", "e"}
+    tokens = [p for p in inst.split() if len(p) >= 4 and p not in ignorar]
+    matches = sum(1 for p in tokens if p in ntexto)
+    if matches >= min(2, max(1, len(tokens))):
+        return True
+    ncidade = normalizar(cidade)
+    return bool(ncidade and ncidade != "nao identificado" and ncidade in ntexto and matches >= 1)
+
+
+def formatar_nome_pessoa(nome):
+    partes = limpar_espacos(nome).lower().split()
+    conectores = {"de", "da", "do", "das", "dos", "e"}
+    saida = []
+    for i, p in enumerate(partes):
+        if i > 0 and p in conectores:
+            saida.append(p)
+        else:
+            saida.append(p[:1].upper() + p[1:])
+    return " ".join(saida)
+
+
+def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None):
+    nome = formatar_nome_pessoa(nome)
+    if repo.lead_existe(nome, instituicao):
+        stats["duplicados"] += 1
+        print(f"      ♻️ DUPLICADO: {nome}", flush=True)
+        return False
+    if instagram and repo.instagram_usado(instagram):
+        instagram = None
+
+    ano = ano_forcado or identificar_ano(texto)
+    periodo = periodo_forcado or identificar_periodo(texto)
+    dados = {
+        "nome": nome,
+        "instagram": instagram,
+        "linkedin": linkedin,
+        "whatsapp": None,
+        "nicho": "nutricionista",
+        "origem": "captacao_nacional_fila_v5",
+        "status": "novo",
+        "app_baixado": False,
+        "nao_contatar": False,
+        "qualificado": True,
+        "data_primeiro_contato": None,
+        "data_ultimo_contato": None,
+        "proxima_acao": "primeiro_contato_instagram" if instagram else "buscar_instagram",
+        "tentativas_contato": 0,
+        "cliente": False,
+        "funil_destino": None,
+        "cidade": cidade or "Não identificado",
+        "estado": uf,
+        "instituicao": instituicao,
+        "pontuacao": 10,
+        "evidencia": limpar_espacos(texto)[:1500],
+        "fonte_url": url or None,
+        "ano_alvo": ano,
+        "periodo_alvo": periodo or ("2025/2026" if ano else None),
+        "origem_lead": "captacao_academica",
+        "rede_processada": False,
+        "nivel_rede": 0,
+        "fonte_validacao": "fonte_publica_validada_v5",
+    }
+    repo.inserir_lead(dados)
+    stats["leads_salvos"] += 1
+    print(f"      ✅ SALVO: {nome}" + (f" | {instagram}" if instagram else " | Instagram pendente"), flush=True)
+    return True
+
+
+# ============================================================
+# ADAPTADOR OFICIAL MACKENZIE (FONTE ESTRUTURADA)
+# ============================================================
+
+def extrair_nomes_mackenzie_html(html):
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    linhas = [limpar_espacos(x) for x in soup.stripped_strings]
+    dentro = False
+    nomes = []
+    for linha in linhas:
+        n = normalizar(linha)
+        if "nutricao 2026.1" in n:
+            dentro = True
+            continue
+        if dentro and ("cursos de graduacao" in n or "cursos de pós-graduação" in n or "cursos de pos-graduacao" in n):
+            break
+        if not dentro:
+            continue
+        m = re.match(r"^\d{1,2}\s*-\s*(.+)$", linha)
+        if not m:
+            continue
+        bloco = m.group(1)
+        for parte in re.split(r"\s+e\s+", bloco, flags=re.I):
+            parte = limpar_espacos(parte)
+            if nome_parece_pessoa(parte):
+                nomes.append(parte)
+    # dedupe preservando ordem
+    out = []
+    vistos = set()
+    for nome in nomes:
+        k = normalizar(nome)
+        if k not in vistos:
+            vistos.add(k)
+            out.append(nome)
+    return out
+
+
+def processar_adaptadores_oficiais(repo, item):
+    inst_n = normalizar(item.get("instituicao"))
+    if not (item.get("estado") == "SP" and inst_n == "universidade presbiteriana mackenzie"):
+        return 0
+    import requests
     try:
-
-        r = (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .select(
-                "id",
-                count="exact"
-            )
-            .eq(
-                "estado",
-                uf
-            )
-            .execute()
-        )
-
-        return (
-            r.count or 0
-        )
-
-    except Exception:
-
+        r = requests.get(MACKENZIE_TCC_URL, timeout=(20, 60), headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"})
+        r.raise_for_status()
+        nomes = extrair_nomes_mackenzie_html(r.text)
+        salvos = 0
+        for nome in nomes:
+            stats["leads_encontrados"] += 1
+            if salvar_lead(
+                repo, nome, item["instituicao"], item.get("cidade") or "São Paulo", item["estado"],
+                "Mostra de TCC Nutrição 2026.1 - Universidade Presbiteriana Mackenzie",
+                MACKENZIE_TCC_URL, ano_forcado=2026, periodo_forcado="TCC"
+            ):
+                salvos += 1
+        if nomes:
+            print(f"   📄 Fonte oficial Mackenzie: {len(nomes)} nome(s) lido(s), {salvos} novo(s).", flush=True)
+        return salvos
+    except Exception as exc:
+        print(f"   ⚠️ Adaptador Mackenzie indisponível: {exc}", flush=True)
         return 0
 
 
-def etapa_descoberta(
-    uf
-):
-
-    return (
-        f"descoberta_nutricao_"
-        f"{uf}_"
-        f"{DISCOVERY_VERSION}"
-    )
-
-
-def checkpoint_descoberta(
-    uf
-):
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "controle_busca"
-            )
-            .select(
-                "id,status"
-            )
-            .eq(
-                "etapa",
-                etapa_descoberta(
-                    uf
-                )
-            )
-            .limit(1)
-            .execute()
-        )
-
-        return (
-            r.data[0]
-            if r.data
-            else None
-        )
-
-    except Exception:
-
-        return None
-
-
-def marcar_descoberta(
-    uf,
-    status,
-    total=0,
-    erro=None
-):
-
-    etapa = (
-        etapa_descoberta(
-            uf
-        )
-    )
-
-    dados = {
-
-        "estado":
-            uf,
-
-        "cidade":
-            None,
-
-        "instituicao":
-            None,
-
-        "etapa":
-            etapa,
-
-        "status":
-            status,
-
-        "leads_encontrados":
-            total,
-
-        "leads_salvos":
-            total,
-
-        "ultimo_erro":
-            erro,
-
-        "atualizado_em":
-            agora(),
-    }
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "controle_busca"
-            )
-            .select(
-                "id"
-            )
-            .eq(
-                "etapa",
-                etapa
-            )
-            .limit(1)
-            .execute()
-        )
-
-        if r.data:
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .update(
-                    dados
-                )
-                .eq(
-                    "id",
-                    r.data[0]["id"]
-                )
-                .execute()
-            )
-
-        else:
-
-            dados[
-                "tentativas"
-            ] = 0
-
-            dados[
-                "iniciado_em"
-            ] = agora()
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .insert(
-                    dados
-                )
-                .execute()
-            )
-
-    except Exception as exc:
-
-        print(
-            f"   ⚠️ Falha no checkpoint "
-            f"de descoberta: {exc}",
-            flush=True
-        )
-
-
-def descobrir_instituicoes_estado(
-    ddgs,
-    uf,
-    estado_nome
-):
-
-    cp = checkpoint_descoberta(
-        uf
-    )
-
-    total_existente = (
-        quantidade_instituicoes_estado(
-            uf
-        )
-    )
-
-    if (
-        cp
-        and
-        cp.get(
-            "status"
-        ) == "concluido"
-        and
-        total_existente > 0
-    ):
-
-        print(
-            f"📚 {uf}: descoberta "
-            f"{DISCOVERY_VERSION} "
-            f"já concluída "
-            f"({total_existente} no banco).",
-            flush=True
-        )
-
-        return True
-
-    print(
-        f"📚 DESCOBRINDO FACULDADES "
-        f"DE NUTRIÇÃO — "
-        f"{estado_nome}/{uf}",
-        flush=True
-    )
-
-    marcar_descoberta(
-        uf,
-        "processando"
-    )
-
-    consultas = [
-
-        f'"Nutrição" '
-        f'"{estado_nome}" '
-        f'universidade faculdade graduação',
-
-        f'"curso de Nutrição" '
-        f'"{estado_nome}"',
-
-        f'"bacharelado em Nutrição" '
-        f'"{estado_nome}"',
-
-        f'"Nutrição" '
-        f'"{estado_nome}" '
-        f'"Universidade Federal" '
-        f'OR "Centro Universitário"',
-    ]
-
-    candidatos = {}
-
-    buscas_executadas = 0
-
-    for consulta in consultas:
-
-        print(
-            f"   🔎 {consulta}",
-            flush=True
-        )
-
-        resultados = buscar_ddgs(
-            ddgs,
-            consulta,
-            max_results=40
-        )
-
-        if resultados is None:
-            continue
-
-        buscas_executadas += 1
-
-        for resultado in resultados:
-
-            url = (
-                resultado.get(
-                    "href"
-                )
-                or
-                resultado.get(
-                    "url"
-                )
-                or
-                ""
-            )
-
-            instituicoes = (
-                extrair_instituicoes_resultado(
-                    resultado
-                )
-            )
-
-            for instituicao in instituicoes:
-
-                candidatos[
-                    normalizar(
-                        instituicao
-                    )
-                ] = (
-                    instituicao,
-                    url
-                )
-
-        pausa()
-
-    if buscas_executadas == 0:
-
-        marcar_descoberta(
-            uf,
-            "erro",
-            erro=(
-                "Nenhuma busca externa "
-                "conseguiu executar"
-            )
-        )
-
-        stats[
-            "estados_descoberta_falhou"
-        ] += 1
-
-        print(
-            f"❌ {uf}: busca externa "
-            f"indisponível; ficará pendente "
-            f"para próxima execução.",
-            flush=True
-        )
-
-        return False
-
-    gravadas = 0
-
-    candidatos_ordenados = sorted(
-        candidatos.values(),
-        key=lambda x:
-            normalizar(
-                x[0]
-            )
-    )
-
-    for (
-        instituicao,
-        url
-    ) in candidatos_ordenados:
-
-        if salvar_ou_reabrir_instituicao(
-            uf,
-            instituicao,
-            url
-        ):
-
-            gravadas += 1
-
-    total_no_banco = (
-        quantidade_instituicoes_estado(
-            uf
-        )
-    )
-
-    if (
-        gravadas == 0
-        and
-        total_no_banco == 0
-    ):
-
-        marcar_descoberta(
-            uf,
-            "erro",
-            erro=(
-                "Nenhuma instituição válida "
-                "encontrada nesta passagem"
-            )
-        )
-
-        stats[
-            "estados_descoberta_falhou"
-        ] += 1
-
-        print(
-            f"❌ {uf}: nenhuma instituição "
-            f"válida encontrada; "
-            f"ficará pendente.",
-            flush=True
-        )
-
-        return False
-
-    marcar_descoberta(
-        uf,
-        "concluido",
-        total=total_no_banco
-    )
-
-    stats[
-        "estados_descobertos"
-    ] += 1
-
-    print(
-        f"✅ {uf}: "
-        f"{total_no_banco} "
-        f"instituição(ões) "
-        f"na fila/banco.",
-        flush=True
-    )
-
-    return True
-
-
 # ============================================================
-# CAPTAÇÃO DE LEADS
+# CAPTACAO / CHECKPOINT
 # ============================================================
 
-BLOQUEIOS_PESSOA = [
-    "universidade",
-    "faculdade",
-    "centro universitario",
-    "vestibular",
-    "curso",
-    "campus",
-    "evento",
-    "congresso",
-    "encontro cientifico",
-    "google docs",
-    "pos ead",
-    "pos-graduacao",
-    "pos graduacao",
-    "programa",
-    "secretaria",
-    "reitoria",
-    "inscricoes",
-    "edital",
-    "processo seletivo",
-    "portal do aluno",
-    "noticia",
-    "noticias",
-    "experiencia transformadora",
-    "projeto pedagogico",
-    "matriz curricular",
-    "grade curricular",
-    "revista",
-    "anais",
-    " pdf",
-]
-
-
-def nome_parece_pessoa(
-    nome
-):
-
-    nome = limpar_espacos(
-        nome
-    ).strip(
-        " -–—|:,.;"
-    )
-
-    if (
-        len(nome) < 6
-        or
-        len(nome) > 90
-        or
-        re.search(
-            r"\d",
-            nome
-        )
-    ):
-        return False
-
-    n = normalizar(
-        nome
-    )
-
-    if any(
-        b in n
-        for b in BLOQUEIOS_PESSOA
-    ):
-        return False
-
-    partes = [
-        p.strip(
-            ".,;:()[]{}"
-        )
-        for p in nome.split()
-    ]
-
-    if (
-        len(partes) < 2
-        or
-        len(partes) > 7
-    ):
-        return False
-
-    conectores = {
-        "de",
-        "da",
-        "do",
-        "das",
-        "dos",
-        "e",
-    }
-
-    principais = [
-        p
-        for p in partes
-        if normalizar(
-            p
-        )
-        not in conectores
-    ]
-
-    if len(principais) < 2:
-        return False
-
-    inicio_bloqueado = {
-        "estudante",
-        "aluno",
-        "aluna",
-        "nutricao",
-        "nutricionista",
-        "trabalho",
-        "mostra",
-        "semana",
-        "palestra",
-        "projeto",
-        "tcc",
-    }
-
-    if (
-        normalizar(
-            partes[0]
-        )
-        in inicio_bloqueado
-    ):
-        return False
-
-    return True
-
-
-def limpar_nome_titulo(
-    titulo
-):
-
-    titulo = limpar_espacos(
-        titulo
-    )
-
-    titulo = re.sub(
-        r"(?i)\s*[|\-–—]\s*LinkedIn.*$",
-        "",
-        titulo
-    )
-
-    titulo = re.sub(
-        r"(?i)\s*[|\-–—]\s*Instagram.*$",
-        "",
-        titulo
-    )
-
-    titulo = re.sub(
-        r"\s*\(@[A-Za-z0-9._]+\).*$",
-        "",
-        titulo
-    )
-
-    titulo = re.sub(
-        r"(?i)\s*[-–—|]\s*"
-        r"(estudante|graduanda|graduando|"
-        r"acad[eê]mica|acad[eê]mico|"
-        r"nutricionista|nutri[cç][aã]o|"
-        r"tcc|universidade|faculdade).*$",
-        "",
-        titulo,
-    )
-
-    return limpar_espacos(
-        titulo
-    ).strip(
-        " -–—|:,.;"
-    )
-
-
-def extrair_instagram(
-    resultado
-):
-
-    texto = " ".join(
-        str(
-            resultado.get(
-                k,
-                ""
-            )
-            or
-            ""
-        )
-        for k in (
-            "href",
-            "url",
-            "body",
-            "title"
-        )
-    )
-
-    m = re.search(
-        r"instagram\.com/"
-        r"([A-Za-z0-9._]+)",
-        texto,
-        flags=re.I
-    )
-
-    if not m:
-        return None
-
-    usuario = (
-        m.group(
-            1
-        ).lower()
-    )
-
-    bloqueados = {
-        "p",
-        "reel",
-        "reels",
-        "stories",
-        "explore",
-        "accounts",
-        "direct",
-        "tv",
-    }
-
-    if usuario in bloqueados:
-        return None
-
-    return (
-        "@"
-        + usuario
-    )
-
-
-def identificar_ano(
-    texto
-):
-
-    n = normalizar(
-        texto
-    )
-
-    if "2026" in n:
-        return 2026
-
-    if "2025" in n:
-        return 2025
-
-    return None
-
-
-def identificar_periodo(
-    texto
-):
-
-    n = normalizar(
-        texto
-    )
-
-    grupos = [
-
-        (
-            "8º período/semestre",
-            [
-                "8º periodo",
-                "8o periodo",
-                "8 periodo",
-                "8º semestre",
-                "8o semestre",
-                "8 semestre",
-                "8/8",
-                "8 de 8",
-            ]
-        ),
-
-        (
-            "7º período/semestre",
-            [
-                "7º periodo",
-                "7o periodo",
-                "7 periodo",
-                "7º semestre",
-                "7o semestre",
-                "7 semestre",
-                "7/8",
-                "7 de 8",
-            ]
-        ),
-
-        (
-            "TCC",
-            [
-                "tcc",
-                "trabalho de conclusao",
-            ]
-        ),
-
-        (
-            "estágio final/obrigatório",
-            [
-                "estagio obrigatorio",
-                "estagio supervisionado",
-                "estagio curricular",
-                "estagio final",
-            ]
-        ),
-
-        (
-            "formando",
-            [
-                "formanda",
-                "formando",
-                "formandas",
-                "formandos",
-                "concluinte",
-                "concluintes",
-            ]
-        ),
-
-        (
-            "recém-formado",
-            [
-                "recem formada",
-                "recem formado",
-                "recem-formada",
-                "recem-formado",
-                "colacao de grau",
-                "formatura 2025",
-                "formatura 2026",
-            ]
-        ),
-    ]
-
-    for (
-        rotulo,
-        sinais
-    ) in grupos:
-
-        if any(
-            s in n
-            for s in sinais
-        ):
-            return rotulo
-
-    return None
-
-
-def lead_qualificado(
-    texto
-):
-
-    n = normalizar(
-        texto
-    )
-
-    sinais_nutricao = [
-        "nutricao",
-        "nutricionista",
-        "estudante de nutricao",
-        "graduanda em nutricao",
-        "graduando em nutricao",
-    ]
-
-    if not any(
-        s in n
-        for s in sinais_nutricao
-    ):
-        return False
-
-    return (
-        identificar_ano(
-            texto
-        ) in (
-            2025,
-            2026
-        )
-        or
-        identificar_periodo(
-            texto
-        ) is not None
-    )
-
-
-def relacionado_a_instituicao(
-    texto,
-    instituicao
-):
-
-    ntexto = normalizar(
-        texto
-    )
-
-    palavras = [
-        p
-        for p in normalizar(
-            instituicao
-        ).split()
-        if (
-            len(p) >= 5
-            and
-            p not in {
-                "universidade",
-                "faculdade",
-                "centro",
-                "universitario",
-                "instituto",
-                "federal",
-            }
-        )
-    ]
-
-    if not palavras:
-        return True
-
-    return any(
-        p in ntexto
-        for p in palavras
-    )
-
-
-def lead_existe(
-    nome,
-    instituicao
-):
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "leds"
-            )
-            .select(
-                "id"
-            )
-            .eq(
-                "instituicao",
-                instituicao
-            )
-            .ilike(
-                "nome",
-                nome
-            )
-            .limit(1)
-            .execute()
-        )
-
-        return bool(
-            r.data
-        )
-
-    except Exception as exc:
-
-        print(
-            f"      ⚠️ Erro verificando "
-            f"duplicidade: {exc}",
-            flush=True
-        )
-
-        stats[
-            "erros"
-        ] += 1
-
-        return True
-
-
-def instagram_ja_usado(
-    instagram
-):
-
-    if not instagram:
-        return False
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "leds"
-            )
-            .select(
-                "id"
-            )
-            .eq(
-                "instagram",
-                instagram
-            )
-            .limit(1)
-            .execute()
-        )
-
-        return bool(
-            r.data
-        )
-
-    except Exception:
-
-        return True
-
-
-def salvar_lead(
-    nome,
-    instituicao,
-    cidade,
-    uf,
-    texto,
-    url,
-    instagram
-):
-
-    if lead_existe(
-        nome,
-        instituicao
-    ):
-
-        stats[
-            "duplicados"
-        ] += 1
-
-        print(
-            f"      ♻️ DUPLICADO: "
-            f"{nome}",
-            flush=True
-        )
-
-        return False
-
-    if (
-        instagram
-        and
-        instagram_ja_usado(
-            instagram
-        )
-    ):
-
-        print(
-            f"      ⚠️ {instagram} "
-            f"já usado; salvando este "
-            f"lead sem Instagram.",
-            flush=True
-        )
-
-        instagram = None
-
-    ano = identificar_ano(
-        texto
-    )
-
-    periodo = identificar_periodo(
-        texto
-    )
-
-    dados = {
-
-        "nome":
-            nome,
-
-        "instagram":
-            instagram,
-
-        "linkedin":
-            None,
-
-        "whatsapp":
-            None,
-
-        "nicho":
-            "nutricionista",
-
-        "origem":
-            "captacao_nacional_fila_v4",
-
-        "status":
-            "novo",
-
-        "app_baixado":
-            False,
-
-        "nao_contatar":
-            False,
-
-        "qualificado":
-            True,
-
-        "data_primeiro_contato":
-            None,
-
-        "data_ultimo_contato":
-            None,
-
-        "proxima_acao":
-            (
-                "primeiro_contato_instagram"
-                if instagram
-                else
-                "buscar_instagram"
-            ),
-
-        "tentativas_contato":
-            0,
-
-        "cliente":
-            False,
-
-        "funil_destino":
-            None,
-
-        "cidade":
-            cidade
-            or
-            "Não identificado",
-
-        "estado":
-            uf,
-
-        "instituicao":
-            instituicao,
-
-        "pontuacao":
-            10,
-
-        "evidencia":
-            limpar_espacos(
-                texto
-            )[:1500],
-
-        "fonte_url":
-            url or None,
-
-        "ano_alvo":
-            ano,
-
-        "periodo_alvo":
-            (
-                periodo
-                or
-                (
-                    "2025/2026"
-                    if ano
-                    else None
-                )
-            ),
-
-        "origem_lead":
-            "captacao_academica",
-
-        "rede_processada":
-            False,
-
-        "nivel_rede":
-            0,
-
-        "fonte_validacao":
-            "busca_web_2025_2026_fase_final_v4",
-    }
-
-    try:
-
-        (
-            supabase
-            .table(
-                "leds"
-            )
-            .insert(
-                dados
-            )
-            .execute()
-        )
-
-        stats[
-            "leads_salvos"
-        ] += 1
-
-        extra = (
-            f" | {instagram}"
-            if instagram
-            else
-            " | Instagram pendente"
-        )
-
-        print(
-            f"      ✅ SALVO: "
-            f"{nome}{extra}",
-            flush=True
-        )
-
-        return True
-
-    except Exception as exc:
-
-        stats[
-            "erros"
-        ] += 1
-
-        print(
-            f"      ❌ Erro salvando "
-            f"{nome}: {exc}",
-            flush=True
-        )
-
-        return False
-
-
-def consultas_leads(
-    instituicao
-):
-
-    return [
-
-        f'"{instituicao}" '
-        f'"Nutrição" "TCC" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "TCC" "2025"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "formanda" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "formando" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "recém-formada" "2025"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "recém-formado" "2025"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "7º período" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "8º período" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "7/8" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" "8/8" "2026"',
-
-        f'"{instituicao}" '
-        f'"Nutrição" '
-        f'"estágio obrigatório" "2026"',
-
-        f'site:linkedin.com/in '
-        f'"{instituicao}" '
-        f'"Nutrição" "2026"',
-
-        f'site:linkedin.com/in '
-        f'"{instituicao}" '
-        f'"Nutrição" "2025"',
-
-        f'site:instagram.com '
-        f'"{instituicao}" '
-        f'"Nutrição" "2026"',
-
-        f'site:instagram.com '
-        f'"{instituicao}" '
-        f'"Nutrição" "2025"',
-    ]
-
-
-def atualizar_instituicao(
-    id_instituicao,
-    status
-):
-
-    try:
-
-        (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .update(
-                {
-                    "status":
-                        status,
-
-                    "ultima_verificacao":
-                        agora()
-                }
-            )
-            .eq(
-                "id",
-                id_instituicao
-            )
-            .execute()
-        )
-
-    except Exception as exc:
-
-        print(
-            f"   ⚠️ Falha atualizando "
-            f"instituição: {exc}",
-            flush=True
-        )
-
-
-def salvar_checkpoint_captacao(
-    uf,
-    cidade,
-    instituicao,
-    status,
-    encontrados=0,
-    salvos=0,
-    erro=None
-):
-
-    dados = {
-
-        "estado":
-            uf,
-
-        "cidade":
-            cidade or None,
-
-        "instituicao":
-            instituicao,
-
-        "etapa":
-            ETAPA_CAPTACAO,
-
-        "status":
-            status,
-
-        "leads_encontrados":
-            encontrados,
-
-        "leads_salvos":
-            salvos,
-
-        "ultimo_erro":
-            erro,
-
-        "atualizado_em":
-            agora(),
-    }
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "controle_busca"
-            )
-            .select(
-                "id"
-            )
-            .eq(
-                "etapa",
-                ETAPA_CAPTACAO
-            )
-            .limit(1)
-            .execute()
-        )
-
-        if r.data:
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .update(
-                    dados
-                )
-                .eq(
-                    "id",
-                    r.data[0]["id"]
-                )
-                .execute()
-            )
-
-        else:
-
-            dados[
-                "tentativas"
-            ] = 0
-
-            dados[
-                "iniciado_em"
-            ] = agora()
-
-            (
-                supabase
-                .table(
-                    "controle_busca"
-                )
-                .insert(
-                    dados
-                )
-                .execute()
-            )
-
-    except Exception as exc:
-
-        print(
-            f"   ⚠️ Falha salvando "
-            f"checkpoint: {exc}",
-            flush=True
-        )
-
-
-def processar_instituicao(
-    ddgs,
-    item
-):
-
-    iid = item[
-        "id"
-    ]
-
-    uf = item[
-        "estado"
-    ]
-
-    cidade = (
-        item.get(
-            "cidade"
-        )
-        or
-        "Não identificado"
-    )
-
-    instituicao = item[
-        "instituicao"
-    ]
-
-    print(
-        "\n"
-        + "=" * 72,
-        flush=True
-    )
-
-    print(
-        f"🏫 {uf} | "
-        f"{instituicao}",
-        flush=True
-    )
-
-    print(
-        "=" * 72,
-        flush=True
-    )
-
-    atualizar_instituicao(
-        iid,
-        "processando"
-    )
-
-    salvar_checkpoint_captacao(
-        uf,
-        cidade,
-        instituicao,
-        "processando"
-    )
-
-    vistos = set()
-
-    encontrados = 0
-
-    salvos_antes = stats[
-        "leads_salvos"
-    ]
-
-    buscas_ok = 0
-
-    consultas = (
-        consultas_leads(
-            instituicao
-        )
-    )
-
-    for consulta in consultas:
-
-        print(
-            f"   🔎 {consulta}",
-            flush=True
-        )
-
-        resultados = buscar_ddgs(
-            ddgs,
-            consulta,
-            max_results=MAX_RESULTADOS
-        )
-
+def etapa_captacao_item(item):
+    return f"{ETAPA_CAPTACAO}_{item['id']}"
+
+
+def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=None, encontrados=0, salvos=0):
+    repo.controle_salvar(etapa_captacao_item(item), {
+        "estado": item.get("estado"),
+        "cidade": item.get("cidade"),
+        "instituicao": item.get("instituicao"),
+        "status": status,
+        "indice_pesquisa": indice,
+        "total_pesquisas": total,
+        "consulta_atual": consulta,
+        "ultimo_erro": erro,
+        "leads_encontrados": encontrados,
+        "leads_salvos": salvos,
+        "finalizado_em": agora() if status == "concluido" else None,
+    })
+
+
+def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar_adaptadores_oficiais):
+    iid = item["id"]
+    instituicao = item["instituicao"]
+    cidade = item.get("cidade") or "Não identificado"
+    uf = item["estado"]
+    consultas = consultas_leads(instituicao)
+    total = len(consultas)
+
+    cp = repo.controle_get(etapa_captacao_item(item))
+    inicio = 0
+    if cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
+        try:
+            inicio = max(0, min(int(cp.get("indice_pesquisa") or 0), total - 1))
+        except Exception:
+            inicio = 0
+
+    print("\n" + "=" * 72, flush=True)
+    print(f"🏫 {uf} | {cidade} | {instituicao}", flush=True)
+    print("=" * 72, flush=True)
+
+    repo.atualizar_instituicao(iid, status="processando")
+    checkpoint_captacao(repo, item, "processando", inicio, total, consulta=consultas[inicio])
+
+    salvos_antes = stats["leads_salvos"]
+    encontrados_local = 0
+
+    # Adaptadores oficiais sao idempotentes por causa da deduplicacao.
+    adapter_fn(repo, item)
+
+    for idx in range(inicio, total):
+        consulta = consultas[idx]
+        print(f"   🔎 [{idx + 1}/{total}] {consulta}", flush=True)
+        checkpoint_captacao(repo, item, "processando", idx, total, consulta=consulta, encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
+        resultados = search_fn(consulta, MAX_RESULTADOS)
         if resultados is None:
-            continue
-
-        buscas_ok += 1
+            repo.atualizar_instituicao(iid, status="erro")
+            stats["instituicoes_erro"] += 1
+            checkpoint_captacao(repo, item, "erro", idx, total, consulta=consulta, erro="Busca externa indisponível", encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
+            print("   ❌ Falha real de conexão. A próxima execução retoma exatamente desta consulta.", flush=True)
+            return False
 
         for resultado in resultados:
-
-            titulo = limpar_espacos(
-                resultado.get(
-                    "title",
-                    ""
-                )
-            )
-
-            corpo = limpar_espacos(
-                resultado.get(
-                    "body",
-                    ""
-                )
-            )
-
-            url = (
-                resultado.get(
-                    "href"
-                )
-                or
-                resultado.get(
-                    "url"
-                )
-                or
-                ""
-            )
-
-            texto_real = (
-                f"{titulo} "
-                f"{corpo} "
-                f"{url}"
-            )
-
-            # IMPORTANTE:
-            # NÃO usa a própria consulta
-            # para qualificar o lead.
-
-            if not lead_qualificado(
-                texto_real
-            ):
+            titulo = limpar_espacos(resultado.get("title", ""))
+            corpo = limpar_espacos(resultado.get("body", ""))
+            url = str(resultado.get("href") or resultado.get("url") or "")
+            texto_real = limpar_espacos(f"{titulo} {corpo} {url}")
+            if not lead_qualificado(texto_real):
                 continue
-
-            if not relacionado_a_instituicao(
-                texto_real,
-                instituicao
-            ):
+            if not relacionado_a_instituicao(texto_real, instituicao, cidade):
                 continue
-
-            nome = limpar_nome_titulo(
-                titulo
-            )
-
-            if not nome_parece_pessoa(
-                nome
-            ):
-
-                stats[
-                    "rejeitados"
-                ] += 1
-
+            nome = extrair_nome_resultado(resultado)
+            if not nome:
+                stats["rejeitados"] += 1
                 continue
-
-            chave = normalizar(
-                nome
-            )
-
-            if chave in vistos:
-                continue
-
-            vistos.add(
-                chave
-            )
-
-            instagram = (
-                extrair_instagram(
-                    resultado
-                )
-            )
-
-            encontrados += 1
-
-            stats[
-                "leads_encontrados"
-            ] += 1
-
+            encontrados_local += 1
+            stats["leads_encontrados"] += 1
+            linkedin = url if "linkedin.com/in/" in url.lower() else None
             salvar_lead(
-                nome,
-                instituicao,
-                cidade,
-                uf,
-                texto_real,
-                url,
-                instagram
+                repo, nome, instituicao, cidade, uf, texto_real, url,
+                extrair_instagram(resultado), linkedin=linkedin
             )
 
-        pausa()
+        checkpoint_captacao(repo, item, "processando", idx + 1, total, consulta=None, encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
+        time.sleep(PAUSA_ENTRE_BUSCAS)
 
-    minimo_ok = max(
-        8,
-        int(
-            len(consultas)
-            * 0.55
-        )
-    )
-
-    if buscas_ok < minimo_ok:
-
-        atualizar_instituicao(
-            iid,
-            "erro"
-        )
-
-        stats[
-            "instituicoes_erro"
-        ] += 1
-
-        salvar_checkpoint_captacao(
-            uf,
-            cidade,
-            instituicao,
-            "erro",
-            encontrados,
-            (
-                stats[
-                    "leads_salvos"
-                ]
-                -
-                salvos_antes
-            ),
-            (
-                f"Apenas "
-                f"{buscas_ok}/"
-                f"{len(consultas)} "
-                f"buscas executaram"
-            ),
-        )
-
-        print(
-            "   ❌ Busca incompleta; "
-            "instituição ficará para "
-            "nova tentativa.",
-            flush=True
-        )
-
-        return False
-
-    atualizar_instituicao(
-        iid,
-        "concluido"
-    )
-
-    stats[
-        "instituicoes_processadas"
-    ] += 1
-
-    stats[
-        "instituicoes_concluidas"
-    ] += 1
-
-    novos = (
-        stats[
-            "leads_salvos"
-        ]
-        -
-        salvos_antes
-    )
-
-    salvar_checkpoint_captacao(
-        uf,
-        cidade,
-        instituicao,
-        "concluido",
-        encontrados,
-        novos
-    )
-
-    print(
-        f"   ✅ CONCLUÍDA | "
-        f"candidatos: "
-        f"{encontrados} | "
-        f"novos: {novos}",
-        flush=True
-    )
-
+    repo.atualizar_instituicao(iid, status="concluido")
+    stats["instituicoes_processadas"] += 1
+    stats["instituicoes_concluidas"] += 1
+    novos = stats["leads_salvos"] - salvos_antes
+    checkpoint_captacao(repo, item, "concluido", total, total, encontrados=encontrados_local, salvos=novos)
+    print(f"   ✅ CONCLUÍDA | candidatos web: {encontrados_local} | novos totais: {novos}", flush=True)
     return True
-
-
-def fila_estado(
-    uf
-):
-
-    try:
-
-        r = (
-            supabase
-            .table(
-                "instituicoes_nutricao"
-            )
-            .select(
-                "*"
-            )
-            .eq(
-                "estado",
-                uf
-            )
-            .in_(
-                "status",
-                [
-                    "pendente",
-                    "processando",
-                    "erro",
-                ]
-            )
-            .order(
-                "instituicao"
-            )
-            .execute()
-        )
-
-        return (
-            r.data
-            or
-            []
-        )
-
-    except Exception as exc:
-
-        stats[
-            "erros"
-        ] += 1
-
-        print(
-            f"❌ Erro lendo fila "
-            f"de {uf}: {exc}",
-            flush=True
-        )
-
-        return None
 
 
 def resumo():
-
-    print(
-        "\n"
-        + "=" * 72,
-        flush=True
-    )
-
-    print(
-        "RESUMO MÁQUINA 1 V4",
-        flush=True
-    )
-
-    print(
-        "=" * 72,
-        flush=True
-    )
-
-    itens = [
-        (
-            "Estados descobertos nesta execução",
-            "estados_descobertos"
-        ),
-        (
-            "Estados com descoberta pendente",
-            "estados_descoberta_falhou"
-        ),
-        (
-            "Novas faculdades descobertas",
-            "instituicoes_descobertas"
-        ),
-        (
-            "Faculdades reabertas",
-            "instituicoes_reabertas"
-        ),
-        (
-            "Faculdades processadas",
-            "instituicoes_processadas"
-        ),
-        (
-            "Faculdades concluídas",
-            "instituicoes_concluidas"
-        ),
-        (
-            "Faculdades com erro",
-            "instituicoes_erro"
-        ),
-        (
-            "Leads candidatos encontrados",
-            "leads_encontrados"
-        ),
-        (
-            "Novos leads salvos",
-            "leads_salvos"
-        ),
-        (
-            "Duplicados ignorados",
-            "duplicados"
-        ),
-        (
-            "Resultados rejeitados",
-            "rejeitados"
-        ),
-        (
-            "Erros",
-            "erros"
-        ),
-    ]
-
-    for (
-        rotulo,
-        chave
-    ) in itens:
-
-        print(
-            f"{rotulo}: "
-            f"{stats[chave]}",
-            flush=True
-        )
-
-    print(
-        "=" * 72,
-        flush=True
-    )
+    print("\n" + "=" * 72, flush=True)
+    print("RESUMO MÁQUINA 1 V5", flush=True)
+    print("=" * 72, flush=True)
+    for rotulo, chave in [
+        ("IES oficiais carregadas", "ies_carregadas"),
+        ("Instituições processadas", "instituicoes_processadas"),
+        ("Instituições concluídas", "instituicoes_concluidas"),
+        ("Instituições com erro", "instituicoes_erro"),
+        ("Leads candidatos encontrados", "leads_encontrados"),
+        ("Novos leads salvos", "leads_salvos"),
+        ("Duplicados ignorados", "duplicados"),
+        ("Resultados rejeitados", "rejeitados"),
+        ("Erros", "erros"),
+    ]:
+        print(f"{rotulo}: {stats[chave]}", flush=True)
+    print("=" * 72, flush=True)
 
 
 def executar():
+    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5", flush=True)
+    print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
+    repo = SupabaseRepo.from_env()
 
-    print(
-        "=" * 72,
-        flush=True
-    )
-
-    print(
-        "🇧🇷 FILA NACIONAL V4 | "
-        "NUTRIÇÃO | "
-        "2025/2026 | "
-        "FASE FINAL",
-        flush=True
-    )
-
-    print(
-        "=" * 72,
-        flush=True
-    )
+    if not garantir_fila_oficial(repo):
+        resumo()
+        raise SystemExit(1)
 
     processadas = 0
+    for uf, estado_nome in ESTADOS:
+        print("\n" + "#" * 72, flush=True)
+        print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
+        print("#" * 72, flush=True)
+        try:
+            fila = repo.fila_estado(uf)
+        except Exception as exc:
+            stats["erros"] += 1
+            print(f"❌ Erro lendo fila de {uf}: {exc}", flush=True)
+            continue
 
-    with DDGS() as ddgs:
+        if not fila:
+            print(f"🏁 {uf}: nenhuma instituição V5 pendente.", flush=True)
+            continue
 
-        for (
-            uf,
-            estado_nome
-        ) in ESTADOS:
-
-            print(
-                "\n"
-                + "#" * 72,
-                flush=True
-            )
-
-            print(
-                f"📍 ESTADO: "
-                f"{estado_nome} "
-                f"({uf})",
-                flush=True
-            )
-
-            print(
-                "#" * 72,
-                flush=True
-            )
-
-            descoberta_ok = (
-                descobrir_instituicoes_estado(
-                    ddgs,
-                    uf,
-                    estado_nome
-                )
-            )
-
-            if not descoberta_ok:
-
-                print(
-                    f"⏭️ {uf}: descoberta pendente; "
-                    f"seguindo para outro estado "
-                    f"e tentando {uf} novamente "
-                    f"no próximo ciclo.",
-                    flush=True
-                )
-
-                continue
-
-            fila = fila_estado(
-                uf
-            )
-
-            if fila is None:
-                continue
-
-            if not fila:
-
-                print(
-                    f"🏁 {uf}: nenhuma "
-                    f"faculdade pendente. "
-                    f"Próximo estado.",
-                    flush=True
-                )
-
-                continue
-
-            print(
-                f"📚 {uf}: "
-                f"{len(fila)} "
-                f"faculdade(s) pendente(s).",
-                flush=True
-            )
-
-            for item in fila:
-
-                if (
-                    processadas
-                    >=
-                    MAX_INSTITUICOES_POR_EXECUCAO
-                ):
-
-                    print(
-                        "\n⏸️ Limite seguro "
-                        "desta execução atingido.",
-                        flush=True
-                    )
-
-                    print(
-                        "➡️ Próxima execução "
-                        "retoma pelas "
-                        "pendentes/processando/erro.",
-                        flush=True
-                    )
-
-                    resumo()
-
-                    return
-
-                processar_instituicao(
-                    ddgs,
-                    item
-                )
-
-                processadas += 1
-
-                pausa()
-
-            restante = fila_estado(
-                uf
-            )
-
-            if restante == []:
-
-                print(
-                    f"🏁 ESTADO {uf} "
-                    f"CONCLUÍDO → "
-                    f"próximo estado.",
-                    flush=True
-                )
+        print(f"📚 {uf}: {len(fila)} instituição(ões) pendente(s).", flush=True)
+        for item in fila:
+            if processadas >= MAX_INSTITUICOES_POR_EXECUCAO:
+                print("\n⏸️ Limite seguro desta execução atingido.", flush=True)
+                print("➡️ A próxima execução retoma a fila V5.", flush=True)
+                resumo()
+                return
+            ok = processar_instituicao(repo, item)
+            processadas += 1
+            if not ok:
+                print("⏸️ Busca externa instável. Encerrando este ciclo para evitar excesso de requisições.", flush=True)
+                resumo()
+                return
 
     resumo()
-
-    print(
-        "✅ CICLO FINALIZADO",
-        flush=True
-    )
+    print("✅ CICLO V5 FINALIZADO", flush=True)
 
 
 if __name__ == "__main__":
