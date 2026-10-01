@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import re
 import tempfile
@@ -24,6 +25,14 @@ PAUSA_ENTRE_BUSCAS = 2.0
 INEP_FONTES = [
     (2024, "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"),
 ]
+
+# Espelho processado e versionado a partir dos microdados oficiais do INEP 2024.
+# É usado porque o servidor de download do INEP pode resetar conexões longas
+# no GitHub Actions. A carga é validada antes de tocar a fila.
+INEP_MIRROR_URL = (
+    "https://raw.githubusercontent.com/esidiao/"
+    "observatorio-educacao-superior/main/data/instituicoes.json"
+)
 
 MACKENZIE_TCC_URL = (
     "https://www.mackenzie.br/universidade/unidades-academicas/"
@@ -108,136 +117,118 @@ def localizar_membro(zf, trecho):
     return None
 
 
-def extrair_instituicoes_inep(caminho_zip, ano):
-    """Retorna uma linha por IES/UF que oferta graduação em Nutrição no Censo Superior."""
-    ufs_validas = {x[0] for x in ESTADOS}
-    with zipfile.ZipFile(caminho_zip) as zf:
-        arq_cursos = localizar_membro(zf, f"MICRODADOS_CADASTRO_CURSOS_{ano}")
-        arq_ies = localizar_membro(zf, f"MICRODADOS_ED_SUP_IES_{ano}")
-        if not arq_cursos or not arq_ies:
-            raise RuntimeError(
-                f"Arquivos esperados do Censo {ano} nao encontrados no ZIP. "
-                f"Cursos={bool(arq_cursos)} IES={bool(arq_ies)}"
+def formatar_nome_instituicao(nome):
+    partes = limpar_espacos(nome).lower().split()
+    conectores = {"de", "da", "do", "das", "dos", "e", "em"}
+    out = []
+    for i, p in enumerate(partes):
+        if i > 0 and p in conectores:
+            out.append(p)
+        else:
+            out.append(p[:1].upper() + p[1:])
+    return " ".join(out)
+
+
+def carregar_instituicoes_mirror_inep():
+    """Carrega fila estruturada de IES de Nutrição a partir de espelho reproduzível.
+
+    O JSON é gerado publicamente a partir dos microdados oficiais do Censo da
+    Educação Superior 2024. Validamos ano, volume e presença de uma referência
+    conhecida antes de aceitar a carga.
+    """
+    import requests
+
+    print("📥 Carregando espelho estruturado do Censo INEP 2024...", flush=True)
+    ultimo = None
+
+    for tentativa in range(1, 5):
+        try:
+            r = requests.get(
+                INEP_MIRROR_URL,
+                timeout=(20, 90),
+                headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"},
             )
+            r.raise_for_status()
+            data = r.json()
 
-        ies_por_codigo = {}
-        texto_ies, leitor_ies = leitor_csv_zip(zf, arq_ies)
-        try:
-            for row in leitor_ies:
-                co_ies = valor(row, "CO_IES")
-                if not co_ies:
+            if str(data.get("ano_censo")) != "2024":
+                raise RuntimeError(f"ano inesperado no espelho: {data.get('ano_censo')}")
+
+            ies = data.get("instituicoes") or {}
+            if len(ies) < 2000:
+                raise RuntimeError(f"espelho incompleto: apenas {len(ies)} IES totais")
+
+            registros = []
+            vistos = set()
+            nutricao_ies = 0
+
+            for item in ies.values():
+                oferta = item.get("oferta") or {}
+                nutricao = oferta.get("nutricao")
+                if not nutricao:
                     continue
-                ies_por_codigo[co_ies] = {
-                    "instituicao": valor(row, "NO_IES"),
-                    "sigla": valor(row, "SG_IES"),
-                    "estado": valor(row, "SG_UF_IES", "SG_UF"),
-                    "cidade": valor(row, "NO_MUNICIPIO_IES", "NO_MUNICIPIO"),
-                }
-        finally:
-            texto_ies.close()
 
-        # Uma IES pode aparecer muitas vezes (campi/polos/linhas do mesmo curso).
-        # Para a máquina de leads basta uma fila por IES+UF; pesquisar a mesma IES
-        # dezenas de vezes por polo só gera carga e duplicidade.
-        unicos = {}
-        texto_cursos, leitor_cursos = leitor_csv_zip(zf, arq_cursos)
-        try:
-            for row in leitor_cursos:
-                cine = valor(row, "NO_CINE_ROTULO")
-                nome_curso = valor(row, "NO_CURSO")
-                # O rótulo CINE é a classificação canônica do Censo. Só usamos
-                # NO_CURSO como fallback para arquivos que eventualmente não o tragam.
-                if cine:
-                    if normalizar(cine) != "nutricao":
-                        continue
-                else:
-                    nome_norm = normalizar(nome_curso)
-                    if not (nome_norm == "nutricao" or nome_norm.startswith("nutricao ")):
-                        continue
+                # Ignora registros sem qualquer atividade observada em Nutrição.
+                if not any(int(nutricao.get(k) or 0) > 0 for k in ("vagas", "matriculas", "concluintes", "cursos")):
+                    continue
 
-                co_ies = valor(row, "CO_IES")
-                ies = ies_por_codigo.get(co_ies, {})
-                instituicao = ies.get("instituicao", "")
+                nutricao_ies += 1
+                instituicao = formatar_nome_instituicao(item.get("nome") or "")
                 if not instituicao:
                     continue
 
-                uf = (valor(row, "SG_UF", "SG_UF_CURSO") or ies.get("estado", "")).strip().upper()
-                if uf not in ufs_validas:
-                    continue
+                uf_sede = str(item.get("uf_sede") or "").strip().upper()
+                cidade_sede = limpar_espacos(item.get("municipio_sede") or "")
+                ufs = [str(x).strip().upper() for x in (item.get("ufs") or []) if str(x).strip()]
+                if not ufs and uf_sede:
+                    ufs = [uf_sede]
 
-                cidade_curso = valor(row, "NO_MUNICIPIO", "NO_MUNICIPIO_CURSO")
-                cidade_sede = ies.get("cidade", "")
-                cidade = limpar_espacos(cidade_curso or cidade_sede) or "Não identificado"
-                instituicao = limpar_espacos(instituicao)
-                modalidade = valor(row, "TP_MODALIDADE_ENSINO")
+                for uf in ufs:
+                    if uf not in {x[0] for x in ESTADOS}:
+                        continue
+                    cidade = cidade_sede if uf == uf_sede and cidade_sede else "Não identificado"
+                    chave = (uf, normalizar(instituicao))
+                    if chave in vistos:
+                        continue
+                    vistos.add(chave)
+                    registros.append({
+                        "estado": uf,
+                        "cidade": cidade,
+                        "instituicao": instituicao,
+                        "curso": "Nutrição",
+                        "origem": ORIGEM_IES,
+                        "fonte_url": INEP_FONTES[0][1],
+                        "status": "pendente",
+                        "fonte_validacao": "INEP Censo Superior 2024 - espelho processado validado",
+                        "validada": True,
+                        "tentativa_descoberta": 0,
+                    })
 
-                # Presencial com município identificado é a melhor representação.
-                # Depois vem qualquer linha com município, e por último a sede da IES.
-                prioridade = (2 if modalidade == "1" else 0) + (1 if cidade_curso else 0)
-                chave = (uf, normalizar(instituicao))
-                atual = unicos.get(chave)
-                if atual is None or prioridade > atual[0]:
-                    unicos[chave] = (
-                        prioridade,
-                        {
-                            "estado": uf,
-                            "cidade": cidade,
-                            "instituicao": instituicao,
-                            "curso": "Nutrição",
-                            "origem": ORIGEM_IES,
-                            "fonte_url": INEP_FONTES[0][1],
-                            "status": "pendente",
-                            "fonte_validacao": f"INEP Censo da Educação Superior {ano}",
-                            "validada": True,
-                            "tentativa_descoberta": 0,
-                        },
-                    )
-        finally:
-            texto_cursos.close()
+            if nutricao_ies < 500:
+                raise RuntimeError(f"carga de Nutrição suspeita: apenas {nutricao_ies} IES")
 
-    registros = [v[1] for v in unicos.values()]
-    return sorted(registros, key=lambda x: (x["estado"], normalizar(x["instituicao"])))
+            acre = [
+                x for x in registros
+                if x["estado"] == "AC"
+                and normalizar(x["instituicao"]) == "universidade federal do acre"
+            ]
+            if not acre:
+                raise RuntimeError("validação de referência falhou: UFAC não encontrada no Acre")
 
+            print(
+                f"✅ Espelho validado: {len(ies)} IES totais, "
+                f"{nutricao_ies} com Nutrição, {len(registros)} filas IES/UF.",
+                flush=True,
+            )
+            return 2024, registros
 
-def baixar_microdados_inep():
-    import requests
-
-    erros = []
-    for ano, url in INEP_FONTES:
-        destino = os.path.join(tempfile.gettempdir(), f"microdados_censo_superior_{ano}.zip")
-        try:
-            print(f"📥 Baixando base oficial do INEP {ano}...", flush=True)
-            with requests.get(
-                url,
-                stream=True,
-                timeout=(30, 300),
-                headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"},
-            ) as r:
-                r.raise_for_status()
-                total = 0
-                proximo_aviso = 25 * 1024 * 1024
-                with open(destino, "wb") as f:
-                    for bloco in r.iter_content(chunk_size=1024 * 1024):
-                        if not bloco:
-                            continue
-                        f.write(bloco)
-                        total += len(bloco)
-                        if total >= proximo_aviso:
-                            print(f"   ... {total // (1024 * 1024)} MB", flush=True)
-                            proximo_aviso += 25 * 1024 * 1024
-            if not zipfile.is_zipfile(destino):
-                raise RuntimeError("arquivo baixado nao e um ZIP valido")
-            return ano, destino
         except Exception as exc:
-            erros.append(f"{ano}: {exc}")
-            print(f"⚠️ Falha na fonte INEP {ano}: {exc}", flush=True)
-            try:
-                if os.path.exists(destino):
-                    os.remove(destino)
-            except OSError:
-                pass
+            ultimo = exc
+            print(f"   ⚠️ Tentativa {tentativa}/4 falhou: {exc}", flush=True)
+            if tentativa < 4:
+                time.sleep(2 * tentativa)
 
-    raise RuntimeError("Nenhuma fonte oficial do INEP ficou acessivel: " + " | ".join(erros))
+    raise RuntimeError(f"espelho estruturado indisponível após 4 tentativas: {ultimo}")
 
 
 # ============================================================
@@ -383,8 +374,7 @@ def garantir_fila_oficial(repo):
     })
 
     try:
-        ano, caminho = baixar_microdados_inep()
-        registros = extrair_instituicoes_inep(caminho, ano)
+        ano, registros = carregar_instituicoes_mirror_inep()
         if not registros:
             raise RuntimeError("o filtro oficial nao encontrou nenhum curso de Nutricao")
         repo.limpar_residuos_v4()
