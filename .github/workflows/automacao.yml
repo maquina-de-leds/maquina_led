@@ -16,12 +16,12 @@ jobs:
         with:
           python-version: '3.11'
 
-     - name: Instalar dependencias
-  run: |
-    pip install requests supabase ddgs beautifulsoup4
+      - name: Instalar dependencias
+        run: |
+          pip install requests supabase ddgs beautifulsoup4
 
       - name: Executar automacao
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scraper.py
+        run: python -u scraper.py
