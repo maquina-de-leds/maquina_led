@@ -1,17 +1,15 @@
-import os
+import osimport os
 import re
 import time
 import random
 import unicodedata
 from datetime import datetime, timezone
 
-import requests
-from bs4 import BeautifulSoup
 from ddgs import DDGS
 from supabase import create_client
 
 
-print("🚀 MÁQUINA 1 - CAPTAÇÃO DE LEADS", flush=True)
+print("🚀 MÁQUINA 1 - MOTOR DE CAPTAÇÃO", flush=True)
 
 
 # ============================================================
@@ -28,58 +26,117 @@ supabase = create_client(
 
 
 # ============================================================
-# CONFIGURAÇÃO ATUAL - MACKENZIE
+# CONFIGURAÇÃO
 # ============================================================
 
-INSTITUICAO = "Universidade Presbiteriana Mackenzie"
-ESTADO = "SP"
-CIDADE = "São Paulo"
+# PRIMEIRO TESTE REAL.
+# Depois que validarmos a passagem SP -> RJ,
+# mudaremos somente isto para False.
+MODO_TESTE = True
 
-ETAPA = "captacao_mackenzie_2025_2026_v3"
+
+NICHO = "nutricao"
+
+ETAPA = "motor_nacional_nutricao_v1"
+
+MAX_RESULTADOS = 12
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
 
-MAX_RESULTADOS = 15
+# Neste teste ele pode processar todas as 4.
+MAX_INSTITUICOES_POR_EXECUCAO = 10
 
 
-URL_TCC_2026 = (
-    "https://www.mackenzie.br/"
-    "universidade/unidades-academicas/"
-    "ccbs/tcc-e-pesquisa/mostra-de-tcc"
-)
+# ============================================================
+# ORDEM OFICIAL DA NOSSA FILA
+# ============================================================
 
-
-CONSULTAS = [
-
-    '"Mackenzie" "Nutrição" "2025"',
-
-    '"Mackenzie" "Nutrição" "2026"',
-
-    '"Mackenzie" "Nutrição" "formanda"',
-
-    '"Mackenzie" "Nutrição" "formando"',
-
-    '"Mackenzie" "Nutrição" "TCC"',
-
-    '"Mackenzie" "Nutrição" "7º semestre"',
-
-    '"Mackenzie" "Nutrição" "8º semestre"',
-
-    '"Mackenzie" "Nutrição" "estágio obrigatório"',
-
-    '"Mackenzie" "Nutrição" "colação de grau"',
-
-    '"Universidade Presbiteriana Mackenzie" nutricionista "2025"',
-
-    '"Universidade Presbiteriana Mackenzie" nutricionista "2026"',
+UFS_BRASIL = [
+    "AC",
+    "AL",
+    "AP",
+    "AM",
+    "BA",
+    "CE",
+    "DF",
+    "ES",
+    "GO",
+    "MA",
+    "MT",
+    "MS",
+    "MG",
+    "PA",
+    "PB",
+    "PR",
+    "PE",
+    "PI",
+    "RJ",
+    "RN",
+    "RS",
+    "RO",
+    "RR",
+    "SC",
+    "SP",
+    "SE",
+    "TO",
 ]
 
 
+# ============================================================
+# FILA DO TESTE
+# ============================================================
+
+FILA_TESTE = {
+
+    "SP": [
+        {
+            "instituicao":
+                "Universidade Presbiteriana Mackenzie",
+
+            "cidade":
+                "São Paulo",
+        },
+
+        {
+            "instituicao":
+                "Centro Universitário São Camilo",
+
+            "cidade":
+                "São Paulo",
+        },
+
+        {
+            "instituicao":
+                "Universidade Paulista",
+
+            "cidade":
+                "São Paulo",
+        },
+    ],
+
+    "RJ": [
+        {
+            "instituicao":
+                "Universidade Federal do Rio de Janeiro",
+
+            "cidade":
+                "Rio de Janeiro",
+        },
+    ],
+}
+
+
+# ============================================================
+# ESTATÍSTICAS
+# ============================================================
+
 stats = {
-    "oficiais": 0,
-    "complementares": 0,
-    "salvos": 0,
+    "instituicoes_processadas": 0,
+    "instituicoes_concluidas": 0,
+    "instituicoes_com_erro": 0,
+    "leads_encontrados": 0,
+    "leads_salvos": 0,
     "duplicados": 0,
     "rejeitados": 0,
     "erros": 0,
@@ -97,9 +154,19 @@ def agora():
     ).isoformat()
 
 
+def pausa():
+
+    time.sleep(
+        random.uniform(
+            PAUSA_MIN,
+            PAUSA_MAX
+        )
+    )
+
+
 def normalizar(texto):
 
-    if not texto:
+    if texto is None:
         return ""
 
     texto = str(texto).lower()
@@ -110,9 +177,9 @@ def normalizar(texto):
     )
 
     texto = "".join(
-        c
-        for c in texto
-        if not unicodedata.combining(c)
+        caractere
+        for caractere in texto
+        if not unicodedata.combining(caractere)
     )
 
     texto = re.sub(
@@ -124,21 +191,11 @@ def normalizar(texto):
     return texto.strip()
 
 
-def pausa():
-
-    time.sleep(
-        random.uniform(
-            PAUSA_MIN,
-            PAUSA_MAX
-        )
-    )
-
-
 # ============================================================
-# VALIDAR NOME
+# VERIFICAÇÃO DE NOME
 # ============================================================
 
-def nome_valido(nome):
+def nome_parece_pessoa(nome):
 
     if not nome:
         return False
@@ -149,12 +206,6 @@ def nome_valido(nome):
         nome
     ).strip()
 
-    if len(nome) < 7:
-        return False
-
-    if len(nome) > 90:
-        return False
-
     partes = nome.split()
 
     if len(partes) < 2:
@@ -163,27 +214,35 @@ def nome_valido(nome):
     if len(partes) > 8:
         return False
 
+    if len(nome) < 7:
+        return False
+
+    if len(nome) > 90:
+        return False
+
     texto = normalizar(
         nome
     )
 
     proibidos = [
         "universidade",
-        "mackenzie",
-        "nutricao",
         "faculdade",
+        "centro universitario",
+        "vestibular",
         "curso",
+        "nutricao",
         "campus",
         "evento",
-        "professor",
-        "professora",
-        "coordenador",
-        "coordenadora",
-        "mostra",
-        "trabalho de conclusao",
-        "centro academico",
+        "congresso",
+        "encontro cientifico",
+        "pos graduacao",
+        "programa",
         "secretaria",
         "reitoria",
+        "turma",
+        "coordenacao",
+        "inscricoes",
+        "processo seletivo",
     ]
 
     for termo in proibidos:
@@ -191,14 +250,246 @@ def nome_valido(nome):
         if termo in texto:
             return False
 
+    # nome de pessoa normalmente não contém vários números
+    numeros = re.findall(
+        r"\d",
+        nome
+    )
+
+    if len(numeros) >= 2:
+        return False
+
     return True
 
 
 # ============================================================
-# VERIFICAR DUPLICIDADE
+# IDENTIFICAR ANO
 # ============================================================
 
-def buscar_lead(nome):
+def identificar_ano(texto):
+
+    t = normalizar(
+        texto
+    )
+
+    if "2026" in t:
+        return 2026
+
+    if "2025" in t:
+        return 2025
+
+    return None
+
+
+# ============================================================
+# IDENTIFICAR FASE
+# ============================================================
+
+def identificar_periodo(texto):
+
+    t = normalizar(
+        texto
+    )
+
+    sinais = [
+
+        (
+            "8º semestre/período",
+            [
+                "8º semestre",
+                "8o semestre",
+                "8 semestre",
+                "8º periodo",
+                "8o periodo",
+                "8 periodo",
+            ]
+        ),
+
+        (
+            "7º semestre/período",
+            [
+                "7º semestre",
+                "7o semestre",
+                "7 semestre",
+                "7º periodo",
+                "7o periodo",
+                "7 periodo",
+            ]
+        ),
+
+        (
+            "TCC",
+            [
+                "tcc",
+                "trabalho de conclusao",
+            ]
+        ),
+
+        (
+            "estágio obrigatório",
+            [
+                "estagio obrigatorio",
+                "estagio supervisionado",
+                "estagio curricular",
+            ]
+        ),
+
+        (
+            "formanda/o",
+            [
+                "formanda",
+                "formando",
+                "formandos",
+                "formandas",
+            ]
+        ),
+
+        (
+            "formada/o",
+            [
+                "formatura",
+                "colacao de grau",
+                "colacao",
+                "graduada",
+                "graduado",
+                "recem-formada",
+                "recem-formado",
+            ]
+        ),
+    ]
+
+    for periodo, termos in sinais:
+
+        for termo in termos:
+
+            if termo in t:
+                return periodo
+
+    return None
+
+
+# ============================================================
+# RESULTADO É DO NOSSO PÚBLICO?
+# ============================================================
+
+def resultado_valido(
+    texto,
+    instituicao
+):
+
+    t = normalizar(
+        texto
+    )
+
+    instituicao_n = normalizar(
+        instituicao
+    )
+
+    # precisa estar na área
+    if (
+        "nutricao"
+        not in t
+        and
+        "nutricionista"
+        not in t
+    ):
+        return False
+
+    # instituição precisa aparecer de alguma forma.
+    # também usamos palavras significativas do nome.
+    palavras_inst = [
+        palavra
+        for palavra
+        in instituicao_n.split()
+        if len(palavra) >= 5
+    ]
+
+    bate_instituicao = any(
+        palavra in t
+        for palavra in palavras_inst
+    )
+
+    if not bate_instituicao:
+        return False
+
+    ano = identificar_ano(
+        texto
+    )
+
+    periodo = identificar_periodo(
+        texto
+    )
+
+    # nosso público atual
+    if ano in [2025, 2026]:
+        return True
+
+    if periodo:
+        return True
+
+    return False
+
+
+# ============================================================
+# EXTRAIR NOME DE RESULTADO DE BUSCA
+# ============================================================
+
+def extrair_nome_resultado(resultado):
+
+    titulo = str(
+        resultado.get(
+            "title",
+            ""
+        )
+    ).strip()
+
+    if not titulo:
+        return None
+
+    # remove sufixos conhecidos
+    titulo = re.sub(
+        r"\s*\|\s*LinkedIn.*$",
+        "",
+        titulo,
+        flags=re.I
+    )
+
+    titulo = re.sub(
+        r"\s*-\s*LinkedIn.*$",
+        "",
+        titulo,
+        flags=re.I
+    )
+
+    titulo = re.sub(
+        r"\s*[-–]\s*(Nutricionista|Nutrição|Graduanda|Graduando).*$",
+        "",
+        titulo,
+        flags=re.I
+    )
+
+    titulo = re.sub(
+        r"\s+",
+        " ",
+        titulo
+    ).strip()
+
+    if not nome_parece_pessoa(
+        titulo
+    ):
+        return None
+
+    return titulo
+
+
+# ============================================================
+# DUPLICIDADE DE LEAD
+# ============================================================
+
+def buscar_lead_existente(
+    nome,
+    instituicao
+):
 
     try:
 
@@ -206,11 +497,11 @@ def buscar_lead(nome):
             supabase
             .table("leds")
             .select(
-                "id,nome,instagram,linkedin"
+                "id,nome,instituicao"
             )
             .eq(
                 "instituicao",
-                INSTITUICAO
+                instituicao
             )
             .ilike(
                 "nome",
@@ -228,7 +519,7 @@ def buscar_lead(nome):
     except Exception as erro:
 
         print(
-            f"⚠️ Erro verificando duplicidade: {erro}",
+            f"      ⚠️ Erro verificando duplicidade: {erro}",
             flush=True
         )
 
@@ -243,27 +534,32 @@ def buscar_lead(nome):
 
 def salvar_lead(
     nome,
+    instituicao,
+    cidade,
+    estado,
     ano,
     periodo,
     evidencia,
-    fonte_url,
-    origem
+    fonte_url
 ):
 
-    existente = buscar_lead(
-        nome
+    existente = buscar_lead_existente(
+        nome,
+        instituicao
     )
 
     if existente:
 
-        stats["duplicados"] += 1
+        stats[
+            "duplicados"
+        ] += 1
 
         print(
-            f"♻️ Já existe: {nome}",
+            f"      ♻️ Já existe: {nome}",
             flush=True
         )
 
-        return existente["id"]
+        return False
 
     dados = {
 
@@ -283,7 +579,7 @@ def salvar_lead(
             "nutricionista",
 
         "origem":
-            origem,
+            "motor_nacional_web",
 
         "origem_lead":
             "captacao_academica",
@@ -307,31 +603,31 @@ def salvar_lead(
             0,
 
         "cidade":
-            CIDADE,
+            cidade,
 
         "estado":
-            ESTADO,
+            estado,
 
         "instituicao":
-            INSTITUICAO,
+            instituicao,
 
         "ano_alvo":
             ano,
 
         "periodo_alvo":
-            periodo,
+            periodo or "2025/2026",
 
         "pontuacao":
             10,
 
         "evidencia":
-            evidencia,
+            evidencia[:1500],
 
         "fonte_url":
             fonte_url,
 
         "fonte_validacao":
-            origem,
+            "busca_publica",
 
         "proxima_acao":
             "buscar_instagram",
@@ -345,534 +641,298 @@ def salvar_lead(
 
     try:
 
-        resposta = (
+        (
             supabase
             .table("leds")
-            .insert(dados)
+            .insert(
+                dados
+            )
             .execute()
         )
 
-        stats["salvos"] += 1
+        stats[
+            "leads_salvos"
+        ] += 1
 
         print(
-            f"✅ NOVO LEAD SALVO: {nome}",
+            f"      ✅ NOVO LEAD: {nome}",
             flush=True
         )
 
-        if resposta.data:
-            return resposta.data[0]["id"]
+        return True
 
     except Exception as erro:
 
         print(
-            f"❌ Erro salvando {nome}: {erro}",
+            f"      ❌ Erro salvando {nome}: {erro}",
             flush=True
         )
 
         stats["erros"] += 1
 
-    return None
+        return False
 
 
 # ============================================================
-# FONTE OFICIAL - MACKENZIE 2026.1
+# FILA DE INSTITUIÇÕES
 # ============================================================
 
-def extrair_tcc_2026():
-
-    print("")
-    print(
-        "📚 Buscando fonte oficial Mackenzie...",
-        flush=True
-    )
+def instituicao_na_fila(
+    estado,
+    instituicao
+):
 
     try:
 
-        resposta = requests.get(
-            URL_TCC_2026,
-            timeout=40,
-            headers={
-                "User-Agent":
-                    "Mozilla/5.0"
-            }
+        resposta = (
+            supabase
+            .table(
+                "instituicoes_nutricao"
+            )
+            .select(
+                "id,status"
+            )
+            .eq(
+                "estado",
+                estado
+            )
+            .eq(
+                "instituicao",
+                instituicao
+            )
+            .limit(1)
+            .execute()
         )
 
-        resposta.raise_for_status()
+        if resposta.data:
+            return resposta.data[0]
+
+        return None
 
     except Exception as erro:
 
         print(
-            f"❌ Fonte oficial falhou: {erro}",
+            f"⚠️ Erro consultando fila: {erro}",
             flush=True
         )
 
         stats["erros"] += 1
 
-        return []
-
-    soup = BeautifulSoup(
-        resposta.text,
-        "html.parser"
-    )
-
-    texto = soup.get_text(
-        "\n",
-        strip=True
-    )
-
-    inicio = texto.find(
-        "NUTRIÇÃO 2026.1"
-    )
-
-    if inicio == -1:
-
-        inicio = texto.find(
-            "Nutrição 2026.1"
-        )
-
-    if inicio == -1:
-
-        print(
-            "❌ Seção Nutrição 2026.1 não encontrada",
-            flush=True
-        )
-
-        return []
-
-    trecho = texto[
-        inicio:
-        inicio + 18000
-    ]
-
-    padrao = re.compile(
-        r"\d{2}\s*-\s*([A-ZÁÀÂÃÉÈÊÍÌÓÒÔÕÚÙÇ\s]+)",
-        re.MULTILINE
-    )
-
-    encontrados = padrao.findall(
-        trecho
-    )
-
-    nomes = []
-
-    for bloco in encontrados:
-
-        bloco = re.sub(
-            r"\s+",
-            " ",
-            bloco
-        ).strip()
-
-        pessoas = re.split(
-            r"\s+E\s+",
-            bloco
-        )
-
-        for nome in pessoas:
-
-            nome = (
-                nome
-                .strip()
-                .title()
-            )
-
-            nome = re.sub(
-                r"\s+[A-ZÀ-Ú]$",
-                "",
-                nome
-            ).strip()
-
-            if nome_valido(
-                nome
-            ):
-
-                nomes.append(
-                    nome
-                )
-
-    nomes = list(
-        dict.fromkeys(
-            nomes
-        )
-    )
-
-    print(
-        f"👥 Pessoas oficiais encontradas: {len(nomes)}",
-        flush=True
-    )
-
-    stats[
-        "oficiais"
-    ] += len(
-        nomes
-    )
-
-    return nomes
-
-
-# ============================================================
-# IDENTIFICAR ANO
-# ============================================================
-
-def identificar_ano(texto):
-
-    t = normalizar(
-        texto
-    )
-
-    # 2026 tem prioridade
-    if "2026" in t:
-        return 2026
-
-    if "2025" in t:
-        return 2025
-
-    return None
-
-
-# ============================================================
-# IDENTIFICAR FASE
-# ============================================================
-
-def identificar_periodo(texto):
-
-    t = normalizar(
-        texto
-    )
-
-    if (
-        "8º semestre" in t
-        or
-        "8o semestre" in t
-        or
-        "8 semestre" in t
-        or
-        "8º periodo" in t
-        or
-        "8o periodo" in t
-    ):
-        return "8º semestre/período"
-
-    if (
-        "7º semestre" in t
-        or
-        "7o semestre" in t
-        or
-        "7 semestre" in t
-        or
-        "7º periodo" in t
-        or
-        "7o periodo" in t
-    ):
-        return "7º semestre/período"
-
-    if "tcc" in t:
-        return "TCC"
-
-    if "trabalho de conclusao" in t:
-        return "TCC"
-
-    if "estagio obrigatorio" in t:
-        return "estágio obrigatório"
-
-    if "estagio supervisionado" in t:
-        return "estágio supervisionado"
-
-    if (
-        "formanda" in t
-        or
-        "formando" in t
-    ):
-        return "formanda/o"
-
-    if (
-        "formatura" in t
-        or
-        "colacao" in t
-    ):
-        return "formada/o"
-
-    if (
-        "graduada" in t
-        or
-        "graduado" in t
-    ):
-        return "graduada/o"
-
-    return "2025/2026"
-
-
-# ============================================================
-# VERIFICAR SE RESULTADO É DO NOSSO PÚBLICO
-# ============================================================
-
-def resultado_valido(texto):
-
-    t = normalizar(
-        texto
-    )
-
-    if "nutricao" not in t:
-        return False
-
-    if "mackenzie" not in t:
-        return False
-
-    ano = identificar_ano(
-        texto
-    )
-
-    fase_final = any(
-        termo in t
-        for termo in [
-            "7º semestre",
-            "7o semestre",
-            "7 semestre",
-            "8º semestre",
-            "8o semestre",
-            "8 semestre",
-            "7º periodo",
-            "7o periodo",
-            "8º periodo",
-            "8o periodo",
-            "tcc",
-            "trabalho de conclusao",
-            "formanda",
-            "formando",
-            "formatura",
-            "colacao",
-            "estagio obrigatorio",
-            "estagio supervisionado",
-            "graduada",
-            "graduado",
-        ]
-    )
-
-    if (
-        ano in [
-            2025,
-            2026
-        ]
-        or
-        fase_final
-    ):
-        return True
-
-    return False
-
-
-# ============================================================
-# EXTRAIR NOME DO RESULTADO
-# ============================================================
-
-def extrair_nome_resultado(
-    resultado
-):
-
-    titulo = (
-        resultado
-        .get(
-            "title",
-            ""
-        )
-        .strip()
-    )
-
-    if not titulo:
         return None
 
-    # LinkedIn costuma retornar:
-    # "Nome Sobrenome - descrição | LinkedIn"
-
-    titulo = re.sub(
-        r"\s*\|\s*LinkedIn.*$",
-        "",
-        titulo,
-        flags=re.I
-    )
-
-    titulo = re.sub(
-        r"\s*[-–]\s*(Nutrição|Nutricionista|Universidade|Mackenzie).*$",
-        "",
-        titulo,
-        flags=re.I
-    )
-
-    titulo = re.sub(
-        r"\s+",
-        " ",
-        titulo
-    ).strip()
-
-    if nome_valido(
-        titulo
-    ):
-        return titulo
-
-    return None
-
 
 # ============================================================
-# BUSCA COMPLEMENTAR
+# CRIAR FILA DE TESTE
 # ============================================================
 
-def buscar_complementares():
+def preparar_fila_teste():
 
     print("")
     print(
-        "🌐 Iniciando busca complementar...",
+        "🧪 Preparando fila do teste...",
         flush=True
     )
 
-    candidatos = {}
+    for estado in ["SP", "RJ"]:
 
-    with DDGS() as ddgs:
+        itens = FILA_TESTE.get(
+            estado,
+            []
+        )
 
-        for consulta in CONSULTAS:
+        for item in itens:
 
-            print("")
-            print(
-                f"🔎 {consulta}",
-                flush=True
+            existente = instituicao_na_fila(
+                estado,
+                item["instituicao"]
             )
+
+            if existente:
+                continue
+
+            dados = {
+
+                "estado":
+                    estado,
+
+                "cidade":
+                    item["cidade"],
+
+                "instituicao":
+                    item["instituicao"],
+
+                "curso":
+                    "Nutrição",
+
+                "origem":
+                    "teste_motor_nacional",
+
+                "fonte_validacao":
+                    "fila_teste",
+
+                "validada":
+                    True,
+
+                "status":
+                    "pendente",
+
+                "tentativa_descoberta":
+                    0,
+            }
 
             try:
 
-                resultados = list(
-                    ddgs.text(
-                        consulta,
-                        max_results=
-                            MAX_RESULTADOS
+                (
+                    supabase
+                    .table(
+                        "instituicoes_nutricao"
                     )
+                    .insert(
+                        dados
+                    )
+                    .execute()
+                )
+
+                print(
+                    f"   ➕ {estado} | "
+                    f"{item['instituicao']}",
+                    flush=True
                 )
 
             except Exception as erro:
 
                 print(
-                    f"⚠️ Busca indisponível: {erro}",
+                    f"   ⚠️ Não foi possível inserir "
+                    f"{item['instituicao']}: {erro}",
                     flush=True
                 )
 
-                pausa()
 
-                continue
+# ============================================================
+# ORDEM DOS ESTADOS NO TESTE
+# ============================================================
 
-            print(
-                f"   Resultados: {len(resultados)}",
-                flush=True
+def estados_da_execucao():
+
+    if MODO_TESTE:
+
+        return [
+            "SP",
+            "RJ",
+        ]
+
+    return UFS_BRASIL
+
+
+# ============================================================
+# PEGAR INSTITUIÇÕES DO ESTADO
+# ============================================================
+
+def buscar_fila_estado(estado):
+
+    try:
+
+        resposta = (
+            supabase
+            .table(
+                "instituicoes_nutricao"
             )
+            .select("*")
+            .eq(
+                "estado",
+                estado
+            )
+            .in_(
+                "status",
+                [
+                    "pendente",
+                    "processando",
+                    "erro",
+                ]
+            )
+            .order(
+                "instituicao"
+            )
+            .execute()
+        )
 
-            for resultado in resultados:
+        return resposta.data or []
 
-                titulo = (
-                    resultado.get(
-                        "title",
-                        ""
-                    )
-                )
+    except Exception as erro:
 
-                corpo = (
-                    resultado.get(
-                        "body",
-                        ""
-                    )
-                )
+        print(
+            f"❌ Erro lendo fila de {estado}: {erro}",
+            flush=True
+        )
 
-                url = (
-                    resultado.get(
-                        "href"
-                    )
-                    or
-                    resultado.get(
-                        "url"
-                    )
-                    or
-                    ""
-                )
+        stats["erros"] += 1
 
-                texto = (
-                    titulo
-                    + " "
-                    + corpo
-                )
+        return []
 
-                if not resultado_valido(
-                    texto
-                ):
-                    continue
 
-                nome = extrair_nome_resultado(
-                    resultado
-                )
+# ============================================================
+# ATUALIZAR INSTITUIÇÃO
+# ============================================================
 
-                if not nome:
+def atualizar_instituicao(
+    instituicao_id,
+    status,
+    erro=None
+):
 
-                    stats[
-                        "rejeitados"
-                    ] += 1
+    dados = {
 
-                    continue
+        "status":
+            status,
 
-                chave = normalizar(
-                    nome
-                )
+        "ultima_verificacao":
+            agora(),
+    }
 
-                if chave in candidatos:
-                    continue
+    if status == "erro":
 
-                ano = identificar_ano(
-                    texto
-                )
+        dados[
+            "tentativa_descoberta"
+        ] = 1
 
-                periodo = identificar_periodo(
-                    texto
-                )
+    try:
 
-                candidatos[
-                    chave
-                ] = {
-                    "nome":
-                        nome,
+        (
+            supabase
+            .table(
+                "instituicoes_nutricao"
+            )
+            .update(
+                dados
+            )
+            .eq(
+                "id",
+                instituicao_id
+            )
+            .execute()
+        )
 
-                    "ano":
-                        ano or 2026,
+    except Exception as exc:
 
-                    "periodo":
-                        periodo,
-
-                    "evidencia":
-                        texto[:1000],
-
-                    "fonte_url":
-                        url,
-                }
-
-            pausa()
-
-    resultado = list(
-        candidatos.values()
-    )
-
-    stats[
-        "complementares"
-    ] += len(
-        resultado
-    )
-
-    print("")
-    print(
-        f"👥 Complementares encontrados: {len(resultado)}",
-        flush=True
-    )
-
-    return resultado
+        print(
+            f"⚠️ Falha atualizando instituição: {exc}",
+            flush=True
+        )
 
 
 # ============================================================
 # CHECKPOINT
 # ============================================================
 
-def salvar_checkpoint():
+def salvar_checkpoint(
+    estado,
+    cidade,
+    instituicao,
+    status,
+    leads_encontrados=0,
+    leads_salvos=0,
+    erro=None
+):
 
     try:
 
@@ -881,7 +941,9 @@ def salvar_checkpoint():
             .table(
                 "controle_busca"
             )
-            .select("id")
+            .select(
+                "id,tentativas"
+            )
             .eq(
                 "etapa",
                 ETAPA
@@ -893,34 +955,30 @@ def salvar_checkpoint():
         dados = {
 
             "estado":
-                ESTADO,
+                estado,
 
             "cidade":
-                CIDADE,
+                cidade,
 
             "instituicao":
-                INSTITUICAO,
+                instituicao,
 
             "etapa":
                 ETAPA,
 
             "status":
-                "concluido",
+                status,
 
             "leads_encontrados":
-                (
-                    stats["oficiais"]
-                    +
-                    stats["complementares"]
-                ),
+                leads_encontrados,
 
             "leads_salvos":
-                stats["salvos"],
+                leads_salvos,
+
+            "ultimo_erro":
+                erro,
 
             "atualizado_em":
-                agora(),
-
-            "finalizado_em":
                 agora(),
         }
 
@@ -947,6 +1005,10 @@ def salvar_checkpoint():
                 "iniciado_em"
             ] = agora()
 
+            dados[
+                "tentativas"
+            ] = 0
+
             (
                 supabase
                 .table(
@@ -958,81 +1020,295 @@ def salvar_checkpoint():
                 .execute()
             )
 
-    except Exception as erro:
+    except Exception as erro_checkpoint:
 
         print(
-            f"⚠️ Erro no checkpoint: {erro}",
+            f"⚠️ Checkpoint falhou: {erro_checkpoint}",
             flush=True
         )
 
 
 # ============================================================
-# EXECUÇÃO
+# CONSULTAS DE UMA INSTITUIÇÃO
 # ============================================================
 
-def executar():
+def montar_consultas(
+    instituicao,
+    estado
+):
+
+    return [
+
+        f'"{instituicao}" Nutrição 2026 estudante',
+
+        f'"{instituicao}" Nutrição 2025 formada',
+
+        f'"{instituicao}" Nutrição 2026 formando',
+
+        f'"{instituicao}" Nutrição TCC',
+
+        f'"{instituicao}" Nutrição "7º semestre"',
+
+        f'"{instituicao}" Nutrição "8º semestre"',
+
+        f'"{instituicao}" Nutrição estágio obrigatório',
+
+        f'"{instituicao}" nutricionista 2025',
+
+        f'"{instituicao}" nutricionista 2026',
+    ]
+
+
+# ============================================================
+# PROCESSAR UMA INSTITUIÇÃO
+# ============================================================
+
+def processar_instituicao(item):
+
+    instituicao = item[
+        "instituicao"
+    ]
+
+    cidade = (
+        item.get("cidade")
+        or ""
+    )
+
+    estado = item[
+        "estado"
+    ]
+
+    id_instituicao = item[
+        "id"
+    ]
 
     print("")
     print(
-        "=" * 65,
+        "=" * 70,
         flush=True
     )
 
     print(
-        "MÁQUINA 1 - CAPTAÇÃO",
+        f"🏫 {estado} | {instituicao}",
         flush=True
     )
 
     print(
-        "MACKENZIE - NUTRIÇÃO 2025/2026",
+        "=" * 70,
         flush=True
     )
 
-    print(
-        "=" * 65,
-        flush=True
+    atualizar_instituicao(
+        id_instituicao,
+        "processando"
     )
 
-    # ========================================================
-    # FONTE OFICIAL
-    # ========================================================
+    salvar_checkpoint(
+        estado,
+        cidade,
+        instituicao,
+        "processando"
+    )
 
-    nomes = extrair_tcc_2026()
+    consultas = montar_consultas(
+        instituicao,
+        estado
+    )
 
-    for nome in nomes:
+    candidatos = {}
 
-        salvar_lead(
-            nome=
-                nome,
+    try:
 
-            ano=
-                2026,
+        with DDGS() as ddgs:
 
-            periodo=
-                "TCC 2026.1",
+            for consulta in consultas:
 
-            evidencia=
-                "Mostra de TCC Nutrição 2026.1 - Mackenzie",
+                print(
+                    f"   🔎 {consulta}",
+                    flush=True
+                )
 
-            fonte_url=
-                URL_TCC_2026,
+                try:
 
-            origem=
-                "fonte_oficial_mackenzie_tcc_2026"
+                    resultados = list(
+                        ddgs.text(
+                            consulta,
+                            max_results=
+                                MAX_RESULTADOS
+                        )
+                    )
+
+                except Exception as erro:
+
+                    print(
+                        f"      ⚠️ Busca indisponível: {erro}",
+                        flush=True
+                    )
+
+                    pausa()
+
+                    continue
+
+                for resultado in resultados:
+
+                    titulo = str(
+                        resultado.get(
+                            "title",
+                            ""
+                        )
+                    )
+
+                    corpo = str(
+                        resultado.get(
+                            "body",
+                            ""
+                        )
+                    )
+
+                    url = (
+                        resultado.get(
+                            "href"
+                        )
+                        or
+                        resultado.get(
+                            "url"
+                        )
+                        or
+                        ""
+                    )
+
+                    texto = (
+                        titulo
+                        + " "
+                        + corpo
+                    )
+
+                    if not resultado_valido(
+                        texto,
+                        instituicao
+                    ):
+
+                        continue
+
+                    nome = extrair_nome_resultado(
+                        resultado
+                    )
+
+                    if not nome:
+
+                        stats[
+                            "rejeitados"
+                        ] += 1
+
+                        continue
+
+                    chave = normalizar(
+                        nome
+                    )
+
+                    if chave in candidatos:
+                        continue
+
+                    ano = identificar_ano(
+                        texto
+                    )
+
+                    periodo = identificar_periodo(
+                        texto
+                    )
+
+                    candidatos[
+                        chave
+                    ] = {
+
+                        "nome":
+                            nome,
+
+                        "ano":
+                            ano or 2026,
+
+                        "periodo":
+                            periodo,
+
+                        "evidencia":
+                            texto,
+
+                        "fonte_url":
+                            url,
+                    }
+
+                pausa()
+
+    except Exception as erro_geral:
+
+        stats[
+            "instituicoes_com_erro"
+        ] += 1
+
+        stats[
+            "erros"
+        ] += 1
+
+        atualizar_instituicao(
+            id_instituicao,
+            "erro",
+            str(erro_geral)
         )
 
+        salvar_checkpoint(
+            estado,
+            cidade,
+            instituicao,
+            "erro",
+            erro=str(
+                erro_geral
+            )
+        )
+
+        print(
+            f"❌ Erro na instituição: {erro_geral}",
+            flush=True
+        )
+
+        return False
+
     # ========================================================
-    # BUSCA COMPLEMENTAR
+    # SALVAR CANDIDATOS
     # ========================================================
 
-    complementares = buscar_complementares()
+    total_encontrados = len(
+        candidatos
+    )
 
-    for candidato in complementares:
+    stats[
+        "leads_encontrados"
+    ] += total_encontrados
+
+    salvos_antes = stats[
+        "leads_salvos"
+    ]
+
+    print(
+        f"   👥 Leads válidos encontrados: "
+        f"{total_encontrados}",
+        flush=True
+    )
+
+    for candidato in candidatos.values():
 
         salvar_lead(
 
             nome=
                 candidato["nome"],
+
+            instituicao=
+                instituicao,
+
+            cidade=
+                cidade,
+
+            estado=
+                estado,
 
             ano=
                 candidato["ano"],
@@ -1045,59 +1321,395 @@ def executar():
 
             fonte_url=
                 candidato["fonte_url"],
-
-            origem=
-                "busca_publica_mackenzie_2025_2026"
         )
 
-    salvar_checkpoint()
+    salvos_nesta = (
+        stats["leads_salvos"]
+        -
+        salvos_antes
+    )
 
     # ========================================================
-    # RESUMO
+    # CONCLUIR INSTITUIÇÃO
     # ========================================================
+
+    atualizar_instituicao(
+        id_instituicao,
+        "concluido"
+    )
+
+    salvar_checkpoint(
+        estado,
+        cidade,
+        instituicao,
+        "concluido",
+        leads_encontrados=
+            total_encontrados,
+        leads_salvos=
+            salvos_nesta
+    )
+
+    stats[
+        "instituicoes_processadas"
+    ] += 1
+
+    stats[
+        "instituicoes_concluidas"
+    ] += 1
+
+    print(
+        f"   ✅ INSTITUIÇÃO CONCLUÍDA | "
+        f"Encontrados: {total_encontrados} | "
+        f"Novos: {salvos_nesta}",
+        flush=True
+    )
+
+    return True
+
+
+# ============================================================
+# ESTADO TERMINOU?
+# ============================================================
+
+def estado_tem_pendencia(
+    estado
+):
+
+    fila = buscar_fila_estado(
+        estado
+    )
+
+    return len(
+        fila
+    ) > 0
+
+
+# ============================================================
+# DESCOBERTA NACIONAL
+#
+# ESTÁ DESLIGADA NO PRIMEIRO TESTE.
+# Depois do teste SP -> RJ, esta função será usada.
+# ============================================================
+
+def descobrir_instituicoes_estado(
+    estado
+):
+
+    print(
+        f"🌎 Descoberta automática de instituições: {estado}",
+        flush=True
+    )
+
+    consultas = [
+
+        f'"curso de Nutrição" "{estado}" universidade',
+
+        f'"Nutrição" "{estado}" faculdade',
+
+        f'"Nutrição" "{estado}" "em atividade" e-MEC',
+    ]
+
+    descobertas = {}
+
+    try:
+
+        with DDGS() as ddgs:
+
+            for consulta in consultas:
+
+                try:
+
+                    resultados = list(
+                        ddgs.text(
+                            consulta,
+                            max_results=20
+                        )
+                    )
+
+                except Exception:
+
+                    continue
+
+                for resultado in resultados:
+
+                    titulo = str(
+                        resultado.get(
+                            "title",
+                            ""
+                        )
+                    ).strip()
+
+                    corpo = str(
+                        resultado.get(
+                            "body",
+                            ""
+                        )
+                    )
+
+                    texto = normalizar(
+                        titulo
+                        + " "
+                        + corpo
+                    )
+
+                    if "nutricao" not in texto:
+                        continue
+
+                    # Neste primeiro código nacional,
+                    # descobertas web são candidatas.
+                    # Não salvamos nomes de pessoas aqui.
+                    if len(titulo) < 5:
+                        continue
+
+                    descobertas[
+                        normalizar(titulo)
+                    ] = titulo
+
+                pausa()
+
+    except Exception as erro:
+
+        print(
+            f"⚠️ Descoberta de {estado} falhou: {erro}",
+            flush=True
+        )
+
+    print(
+        f"   Instituições/fontes candidatas: "
+        f"{len(descobertas)}",
+        flush=True
+    )
+
+    return list(
+        descobertas.values()
+    )
+
+
+# ============================================================
+# EXECUÇÃO PRINCIPAL
+# ============================================================
+
+def executar():
 
     print("")
     print(
-        "=" * 65,
+        "=" * 70,
+        flush=True
+    )
+
+    if MODO_TESTE:
+
+        print(
+            "🧪 TESTE REAL DA FILA AUTOMÁTICA",
+            flush=True
+        )
+
+    else:
+
+        print(
+            "🇧🇷 CAPTAÇÃO NACIONAL AUTOMÁTICA",
+            flush=True
+        )
+
+    print(
+        "=" * 70,
+        flush=True
+    )
+
+    # ========================================================
+    # PREPARA O TESTE
+    # ========================================================
+
+    if MODO_TESTE:
+
+        preparar_fila_teste()
+
+    estados = estados_da_execucao()
+
+    quantidade_processada = 0
+
+    # ========================================================
+    # PERCORRER ESTADOS
+    # ========================================================
+
+    for estado in estados:
+
+        print("")
+        print(
+            "#" * 70,
+            flush=True
+        )
+
+        print(
+            f"📍 ESTADO: {estado}",
+            flush=True
+        )
+
+        print(
+            "#" * 70,
+            flush=True
+        )
+
+        fila = buscar_fila_estado(
+            estado
+        )
+
+        # ====================================================
+        # NO MODO NACIONAL:
+        # se ainda não houver fila, descobrir instituições
+        # ====================================================
+
+        if (
+            not fila
+            and
+            not MODO_TESTE
+        ):
+
+            descobrir_instituicoes_estado(
+                estado
+            )
+
+            fila = buscar_fila_estado(
+                estado
+            )
+
+        # ====================================================
+        # ESTADO SEM PENDÊNCIAS
+        # ====================================================
+
+        if not fila:
+
+            print(
+                f"✅ {estado}: nenhuma instituição pendente.",
+                flush=True
+            )
+
+            continue
+
+        print(
+            f"📚 Instituições pendentes: "
+            f"{len(fila)}",
+            flush=True
+        )
+
+        # ====================================================
+        # PROCESSAR FACULDADE POR FACULDADE
+        # ====================================================
+
+        for item in fila:
+
+            if (
+                quantidade_processada
+                >=
+                MAX_INSTITUICOES_POR_EXECUCAO
+            ):
+
+                print("")
+                print(
+                    "⏸️ Limite desta execução atingido.",
+                    flush=True
+                )
+
+                print(
+                    "Na próxima execução continuará "
+                    "da instituição pendente.",
+                    flush=True
+                )
+
+                resumo()
+
+                return
+
+            processar_instituicao(
+                item
+            )
+
+            quantidade_processada += 1
+
+            pausa()
+
+        # ====================================================
+        # ACABOU O ESTADO
+        # ====================================================
+
+        if not estado_tem_pendencia(
+            estado
+        ):
+
+            print("")
+            print(
+                f"🏁 ESTADO {estado} CONCLUÍDO",
+                flush=True
+            )
+
+            print(
+                "➡️ Indo automaticamente para o próximo estado...",
+                flush=True
+            )
+
+    resumo()
+
+
+# ============================================================
+# RESUMO
+# ============================================================
+
+def resumo():
+
+    print("")
+    print(
+        "=" * 70,
         flush=True
     )
 
     print(
-        "RESUMO DA CAPTAÇÃO",
+        "RESUMO DA MÁQUINA 1",
         flush=True
     )
 
     print(
-        "=" * 65,
+        "=" * 70,
         flush=True
     )
 
     print(
-        f"Fonte oficial: "
-        f"{stats['oficiais']}",
+        f"Instituições processadas: "
+        f"{stats['instituicoes_processadas']}",
         flush=True
     )
 
     print(
-        f"Complementares: "
-        f"{stats['complementares']}",
+        f"Instituições concluídas: "
+        f"{stats['instituicoes_concluidas']}",
         flush=True
     )
 
     print(
-        f"Novos salvos: "
-        f"{stats['salvos']}",
+        f"Instituições com erro: "
+        f"{stats['instituicoes_com_erro']}",
         flush=True
     )
 
     print(
-        f"Já existentes: "
+        f"Leads encontrados: "
+        f"{stats['leads_encontrados']}",
+        flush=True
+    )
+
+    print(
+        f"Novos leads salvos: "
+        f"{stats['leads_salvos']}",
+        flush=True
+    )
+
+    print(
+        f"Duplicados ignorados: "
         f"{stats['duplicados']}",
         flush=True
     )
 
     print(
-        f"Rejeitados: "
+        f"Resultados rejeitados: "
         f"{stats['rejeitados']}",
         flush=True
     )
@@ -1109,10 +1721,14 @@ def executar():
     )
 
     print(
-        "=" * 65,
+        "=" * 70,
         flush=True
     )
 
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
 
