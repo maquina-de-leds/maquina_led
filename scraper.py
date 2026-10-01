@@ -855,11 +855,18 @@ def executar():
 
     processadas = 0
     for uf, estado_nome in ESTADOS:
+        # Smoke de integração: validar fonte oficial com Mackenzie/SP.
+        if uf != "SP":
+            continue
         print("\n" + "#" * 72, flush=True)
         print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
         print("#" * 72, flush=True)
         try:
             fila = repo.fila_estado(uf)
+            fila = [
+                x for x in fila
+                if normalizar(x.get("instituicao")) == "universidade presbiteriana mackenzie"
+            ]
         except Exception as exc:
             stats["erros"] += 1
             print(f"❌ Erro lendo fila de {uf}: {exc}", flush=True)
