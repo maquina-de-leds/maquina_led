@@ -14,12 +14,12 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.4"
-ETAPA_CARGA_IES = "carga_inep_nutricao_v54"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v54"
-ORIGEM_IES = "inep_censo_superior_v54"
+VERSAO = "v5.5"
+ETAPA_CARGA_IES = "carga_inep_nutricao_v55"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v55"
+ORIGEM_IES = "inep_censo_superior_v55"
 MAX_RESULTADOS = 12
-MAX_INSTITUICOES_POR_EXECUCAO = 8
+MAX_INSTITUICOES_POR_EXECUCAO = 1
 PAUSA_ENTRE_BUSCAS = 2.0
 
 INEP_FONTES = [
@@ -482,20 +482,24 @@ def alias_instituicao(item):
 
 
 def consultas_leads(instituicao, alias=None):
-    # A sigla/alias serve para DESCOBERTA porque o buscador encontra muito mais
-    # perfis por UFAC/CESMAC/etc. A validação posterior continua exigindo prova
-    # de vínculo com a instituição correta.
+    # Máquina 1 procura NOMES. Instagram fica para a Máquina 2.
+    # As buscas são deliberadamente mais amplas e a qualificação é feita
+    # depois, usando apenas a evidência real do perfil retornado.
     termo = limpar_espacos(alias or instituicao)
-    return [
+    consultas = [
         f'site:linkedin.com/in {termo} "graduanda em Nutrição"',
         f'site:linkedin.com/in {termo} "graduanda de Nutrição"',
-        f'site:linkedin.com/in {termo} "Nutrição" "7º semestre"',
-        f'site:linkedin.com/in {termo} "Nutrição" "8º semestre"',
-        f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
-        f'site:linkedin.com/in {termo} Nutrição "2021 - 2025"',
-        f'site:linkedin.com/in {termo} Nutrição "2022 - 2026"',
-        f'site:linkedin.com/in {termo} Nutrição TCC 2026',
+        f'site:linkedin.com/in {termo} Nutrição "formatura prevista"',
+        f'site:linkedin.com/in {termo} Nutrição TCC',
     ]
+
+    # Quando há sigla oficial, fazemos uma única busca adicional por período,
+    # porque perfis de 7º/8º semestre frequentemente não trazem o ano no snippet.
+    if alias:
+        consultas.append(
+            f'site:linkedin.com/in {termo} Nutrição "7º semestre" OR "8º semestre"'
+        )
+    return consultas
 
 
 SINAIS_FASE_FINAL = [
@@ -914,7 +918,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
 
 def resumo():
     print("\n" + "=" * 72, flush=True)
-    print("RESUMO MÁQUINA 1 V5.4", flush=True)
+    print("RESUMO MÁQUINA 1 V5.5", flush=True)
     print("=" * 72, flush=True)
     for rotulo, chave in [
         ("IES oficiais carregadas", "ies_carregadas"),
@@ -932,7 +936,7 @@ def resumo():
 
 
 def executar():
-    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5.4", flush=True)
+    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5.5", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
     repo = SupabaseRepo.from_env()
 
@@ -942,11 +946,18 @@ def executar():
 
     processadas = 0
     for uf, estado_nome in ESTADOS:
+        # TESTE ISOLADO: valida Mackenzie/SP antes de promover à main.
+        if uf != "SP":
+            continue
         print("\n" + "#" * 72, flush=True)
         print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
         print("#" * 72, flush=True)
         try:
             fila = repo.fila_estado(uf)
+            fila = [
+                x for x in fila
+                if normalizar(x.get("instituicao")) == "universidade presbiteriana mackenzie"
+            ]
         except Exception as exc:
             stats["erros"] += 1
             print(f"❌ Erro lendo fila de {uf}: {exc}", flush=True)
@@ -971,7 +982,7 @@ def executar():
                 return
 
     resumo()
-    print("✅ CICLO V5.4 FINALIZADO", flush=True)
+    print("✅ CICLO V5.5 FINALIZADO", flush=True)
 
 
 if __name__ == "__main__":
