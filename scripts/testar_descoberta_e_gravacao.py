@@ -1,4 +1,6 @@
-"""Teste curto de descoberta e gravação real, sem alterar a fila nacional."""
+"""Teste curto de descoberta e gravação real, sem alterar a fila nacional.
+Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
+"""
 import json,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))

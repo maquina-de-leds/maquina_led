@@ -301,6 +301,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
         return []
     if re.search(r'exemplos? de curriculo|modelos? de curriculo|personagem fictici|caso hipotetic',n):
         return []
+    if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',norm(titulo)):
+        return []
     vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
     if re.search(PAPEL,n) or re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
         return []
@@ -310,6 +312,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     nome=pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0])
     aluno_citado=re.search(r'\b(?:alun[oa]|estudante)\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição[^.!?]{0,160}?,\s*([A-ZÀ-Ý][^,.;]{2,80}),',trecho)
     if aluno_citado: nome=pessoa(aluno_citado.group(1))
+    formada_citada=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,90}?)(?=,|\s+(?:foi|celebra|compartilha|conquistou)\b)',trecho)
+    if formada_citada: nome=pessoa(formada_citada.group(1))
     if not nome:
         m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
         nome=pessoa(m.group(1)) if m else None

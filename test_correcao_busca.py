@@ -5,6 +5,13 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_post_institucional_identifica_recem_formada_no_corpo(self):
+        resultado={'title':'UniFil - Instagram','body':'February 20, 2026: Recém-formada em Nutrição, Thais Camargo Prestes foi aprovada na Residência Multiprofissional em Oncologia.'}
+        r=f.extrair_resultado_busca(resultado,'Mackenzie')
+        self.assertEqual([x['nome'] for x in r],['Thais Camargo Prestes'])
+        self.assertEqual(r[0]['ano'],2026)
+        self.assertIsNone(r[0]['instituicao'])
+
     def test_post_de_terceiro_extrai_aluna_e_nao_autora_do_post(self):
         r=f.extrair_resultado_busca({'title':'Beatriz Moreti - LinkedIn','body':'A aluna do Curso de Nutrição da Universidade Presbiteriana Mackenzie, Un Hwa Moreira, foi premiada no Ganepão 2026.'},'Universidade Presbiteriana Mackenzie','Mackenzie')
         self.assertEqual([x['nome'] for x in r],['Un Hwa Moreira'])
