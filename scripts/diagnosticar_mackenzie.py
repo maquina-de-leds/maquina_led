@@ -15,7 +15,7 @@ for r in q:
     print('FALSO POSITIVO BLOQUEADO:',r['nome'],flush=True)
 urls=[
 'https://www.mackenzie.br/universidade/unidades-academicas/ccbs/tcc-e-pesquisa/mostra-de-tcc',
-'https://www.mackenzie.br/noticias/artigo/n/a/i/alunos-de-nutricao-criam-e-book-de-receitas-saudaveis-e-praticas',
+'https://www.mackenzie.br/memorias/150-anos/acontece/arquivo/n/a/i/alunos-de-nutricao-criam-e-book-de-receitas-saudaveis-e-praticas',
 'https://eventoscopq.mackenzie.br/jornada/pt_BR/article/view/317',
 'https://www.mackenzie.br/fileadmin/ARQUIVOS/Public/pesquisa-inovacao/incubadora/Vitrine_2024/Lista_unificada_projetos_aprovador.23.06.25.pdf'
 ]
@@ -31,4 +31,4 @@ for url in urls:
         erros.append(url)
         print('LEITURA PENDENTE:',url,str(exc)[:250],flush=True)
 print('DIAGNOSTICO FINAL:',json.dumps({'nomes_unicos':len(vistos),'nomes':list(vistos.values()),'novos':novos,'fontes_pendentes':erros},ensure_ascii=False),flush=True)
-if erros or len(vistos)<22: raise SystemExit(2)
+if erros or len(vistos)<34: raise SystemExit(2)

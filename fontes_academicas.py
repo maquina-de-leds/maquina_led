@@ -154,7 +154,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         context_lines = [t for t,tag in linhas[:20] if tag == 'pdf']
     context = ' '.join(context_lines)
     default_year, default_period = periodo_academico(context)
-    publication_year, publication_period = periodo_academico(' '.join(metas.get('article:published_time', []) + metas.get('date', [])))
+    publication_year, publication_period = periodo_academico(' '.join(metas.get('article:published_time', []) + metas.get('date', []) + metas.get('citation_publication_date', []) + metas.get('citation_date', [])))
     if not publication_year:
         publication_year, publication_period = periodo_academico(' '.join(t for t,tag in linhas[:30]))
     single_course = not re.search(OUTROS_CURSOS, norm(context))
@@ -169,6 +169,11 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
             out.append(dict(nome=name, ano=y, periodo=per, instagram=instagram_associado(evidence,name),
                             evidencia=f'{instituicao} | Nutrição | {per} | {phase} | {evidence}',
                             contexto_academico=context))
+    if re.search(r'nome completo do aluno.*curso.*nome do orientador',norm(full)):
+        table_year, table_period = periodo_academico(' '.join(t for t,tag in linhas[:20]))
+        for line,tag in linhas:
+            match=re.match(r'^(.+?)\s+CCBS\s+Higienópolis\s+Nutrição\b',line,re.I)
+            if match: add(pessoa(match.group(1)),line,table_year,table_period)
     # Repositórios institucionais com metadados de autor/data acadêmica.
     meta_text = ' '.join(metas.get('citation_title', []) + metas.get('dc.title', []) + metas.get('dc.description', []))
     dates = metas.get('dc.date.issued', []) + metas.get('citation_date', []) + metas.get('citation_publication_date', [])
@@ -187,7 +192,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         # Biografia de autor explicitamente aluno, sem incluir coautores docentes.
         if re.match(r'^(?:graduand[oa]s?|estudante|alun[oa]|academic[oa]|discente)\b',n) and 'nutricao' in n and i:
             previous = linhas[i-1][0].split(instituicao)[0].strip(' ,|-')
-            add(pessoa(previous),previous+' | '+line,default_year,default_period)
+            add(pessoa(previous),previous+' | '+line,default_year or publication_year,default_period or publication_period)
         if tag == 'pdf' and pessoa(line):
             seguinte = norm(' '.join(t for t, _ in linhas[i+1:i+4]))
             if re.match(r'(?:'+PAPEL+r')\b',seguinte):
