@@ -861,39 +861,32 @@ def resumo():
 
 
 def executar():
-    print("🔬 DIAGNÓSTICO DE QUALIFICAÇÃO V5.2", flush=True)
+    print("🔬 DIAGNÓSTICO DE REJEIÇÃO V5.3", flush=True)
     alvos = [
-        ("Universidade Presbiteriana Mackenzie", "Mackenzie", "São Paulo"),
-        ("Universidade Federal do Acre", "UFAC", "Rio Branco"),
-        ("Centro Universitário Cesmac", "CESMAC", "Maceió"),
+        ("Universidade Presbiteriana Mackenzie", "Mackenzie", "São Paulo", 'site:linkedin.com/in Mackenzie "graduanda em Nutrição"'),
+        ("Universidade Federal do Acre", "UFAC", "Rio Branco", 'site:linkedin.com/in UFAC "graduanda em Nutrição"'),
+        ("Centro Universitário Cesmac", "CESMAC", "Maceió", 'site:linkedin.com/in CESMAC "graduanda em Nutrição"'),
     ]
-    for instituicao, alias, cidade in alvos:
+    for instituicao, alias, cidade, consulta in alvos:
         print("\n" + "#" * 72, flush=True)
-        print(f"ALVO: {instituicao} | ALIAS: {alias}", flush=True)
-        vistos = set()
-        aprovados = []
-        for consulta in consultas_leads(instituicao, alias):
-            print("CONSULTA:", consulta, flush=True)
-            resultados = buscar_web(consulta, max_results=10)
-            if resultados is None:
-                print("  INDISPONÍVEL", flush=True)
-                continue
-            print("  RESULTADOS:", len(resultados), flush=True)
-            for r in resultados:
-                titulo = limpar_espacos(r.get("title", ""))
-                corpo = limpar_espacos(r.get("body", ""))
-                url = str(r.get("href") or r.get("url") or "")
-                texto = limpar_espacos(f"{titulo} {corpo} {url}")
-                nome = extrair_nome_resultado(r)
-                if not nome or not lead_qualificado(texto) or not relacionado_a_instituicao(texto, instituicao, cidade):
-                    continue
-                chave = normalizar(nome)
-                if chave in vistos:
-                    continue
-                vistos.add(chave)
-                aprovados.append((nome, identificar_periodo(texto), identificar_ano(texto), url))
-                print(f"  ✅ {nome} | {identificar_periodo(texto)} | {identificar_ano(texto)} | {url}", flush=True)
-        print(f"TOTAL_APROVADOS_{alias}: {len(aprovados)}", flush=True)
+        print(f"ALVO: {instituicao} | {consulta}", flush=True)
+        resultados = buscar_web(consulta, max_results=10)
+        if resultados is None:
+            print("INDISPONÍVEL", flush=True)
+            continue
+        for i, r in enumerate(resultados, 1):
+            titulo = limpar_espacos(r.get("title",""))
+            corpo = limpar_espacos(r.get("body",""))
+            url = str(r.get("href") or r.get("url") or "")
+            texto = limpar_espacos(f"{titulo} {corpo} {url}")
+            nome = extrair_nome_resultado(r)
+            q = lead_qualificado(texto)
+            rel = relacionado_a_instituicao(texto, instituicao, cidade)
+            print(f"[{i}] {titulo}", flush=True)
+            print(f"  URL={url}", flush=True)
+            print(f"  NOME={nome}", flush=True)
+            print(f"  QUAL={q} PER={identificar_periodo(texto)} ANO={identificar_ano(texto)} REL={rel}", flush=True)
+            print(f"  BODY={corpo[:700]}", flush=True)
 
 
 if __name__ == "__main__":
