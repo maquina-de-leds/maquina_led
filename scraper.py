@@ -14,10 +14,10 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5"
-ETAPA_CARGA_IES = "carga_inep_nutricao_v5"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v5"
-ORIGEM_IES = "inep_censo_superior_v5"
+VERSAO = "v5.4"
+ETAPA_CARGA_IES = "carga_inep_nutricao_v54"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v54"
+ORIGEM_IES = "inep_censo_superior_v54"
 MAX_RESULTADOS = 12
 MAX_INSTITUICOES_POR_EXECUCAO = 8
 PAUSA_ENTRE_BUSCAS = 2.0
@@ -177,6 +177,7 @@ def carregar_instituicoes_mirror_inep():
                 if not instituicao:
                     continue
 
+                sigla = limpar_espacos(item.get("sigla") or "")
                 uf_sede = str(item.get("uf_sede") or "").strip().upper()
                 cidade_sede = limpar_espacos(item.get("municipio_sede") or "")
                 ufs = [str(x).strip().upper() for x in (item.get("ufs") or []) if str(x).strip()]
@@ -199,7 +200,10 @@ def carregar_instituicoes_mirror_inep():
                         "origem": ORIGEM_IES,
                         "fonte_url": INEP_FONTES[0][1],
                         "status": "pendente",
-                        "fonte_validacao": "INEP Censo Superior 2024 - espelho processado validado",
+                        "fonte_validacao": (
+                            "INEP Censo Superior 2024 - espelho processado validado"
+                            + (f" | SIGLA={sigla}" if sigla else "")
+                        ),
                         "validada": True,
                         "tentativa_descoberta": 0,
                     })
@@ -468,14 +472,29 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
     return None
 
 
-def consultas_leads(instituicao):
+def alias_instituicao(item):
+    fonte = str(item.get("fonte_validacao") or "")
+    m = re.search(r"(?:^|\|)\s*SIGLA=([^|]+)", fonte, flags=re.I)
+    if not m:
+        return None
+    alias = limpar_espacos(m.group(1))
+    return alias if 2 <= len(alias) <= 30 else None
+
+
+def consultas_leads(instituicao, alias=None):
+    # A sigla/alias serve para DESCOBERTA porque o buscador encontra muito mais
+    # perfis por UFAC/CESMAC/etc. A validação posterior continua exigindo prova
+    # de vínculo com a instituição correta.
+    termo = limpar_espacos(alias or instituicao)
     return [
-        f'"{instituicao}" "Nutrição" "TCC" "2026"',
-        f'"{instituicao}" "Nutrição" "TCC" "2025"',
-        f'"{instituicao}" "Nutrição" "formanda" "2026"',
-        f'"{instituicao}" "Nutrição" "formatura" "2025"',
-        f'site:linkedin.com/in "{instituicao}" "Nutrição" "2026"',
-        f'site:instagram.com "{instituicao}" "Nutrição" "2026"',
+        f'site:linkedin.com/in {termo} "graduanda em Nutrição"',
+        f'site:linkedin.com/in {termo} "graduanda de Nutrição"',
+        f'site:linkedin.com/in {termo} "Nutrição" "7º semestre"',
+        f'site:linkedin.com/in {termo} "Nutrição" "8º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
+        f'site:linkedin.com/in {termo} Nutrição "2021 - 2025"',
+        f'site:linkedin.com/in {termo} Nutrição "2022 - 2026"',
+        f'site:linkedin.com/in {termo} Nutrição TCC 2026',
     ]
 
 
@@ -526,10 +545,25 @@ def lead_qualificado(texto):
     n = normalizar(texto)
     if "nutricao" not in n and "nutricionista" not in n:
         return False
-    ano = identificar_ano(texto)
-    if ano not in (2025, 2026):
-        return False
-    return any(s in n for s in SINAIS_FASE_FINAL)
+
+    # 7º/8º semestre ou período já prova a fase acadêmica desejada.
+    if any(s in n for s in [
+        "7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8",
+        "8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8",
+    ]):
+        return True
+
+    # Nos demais casos, o ano precisa estar ligado ao curso/conclusão da pessoa,
+    # não apenas aparecer solto em uma data da página.
+    padroes = [
+        r"(?:formatura|conclusao|concluir|formando|formanda|concluinte)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda|concluinte)",
+        r"(?:tcc|trabalho de conclusao)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:tcc|trabalho de conclusao)",
+        r"(?:nutricao)[^.!;]{0,120}20\d{2}\s*[-–—]\s*202[56]",
+        r"20\d{2}\s*[-–—]\s*202[56][^.!;]{0,120}(?:nutricao)",
+    ]
+    return any(re.search(p, n, flags=re.I) for p in padroes)
 
 
 def nome_parece_pessoa(nome):
@@ -579,6 +613,40 @@ def extrair_nome_resultado(resultado):
     return candidato if nome_parece_pessoa(candidato) else None
 
 
+def contexto_resultado_perfil(resultado, nome=None):
+    """Isola o primeiro perfil do resultado.
+
+    Alguns buscadores agregam vários perfis do LinkedIn no mesmo snippet.
+    Sem este corte, evidência de uma segunda pessoa poderia qualificar a primeira.
+    """
+    titulo = limpar_espacos(resultado.get("title", ""))
+    corpo = limpar_espacos(resultado.get("body", ""))
+    url = str(resultado.get("href") or resultado.get("url") or "")
+
+    # O primeiro "LinkedIn" normalmente encerra o título do primeiro perfil.
+    idx_t = titulo.lower().find("linkedin")
+    if idx_t > 0:
+        titulo = titulo[:idx_t]
+
+    # O texto útil do primeiro perfil vem antes do convite "Veja/View/Mira...".
+    corpo_n = normalizar(corpo)
+    cortes = [
+        "veja o perfil de",
+        "veja ",
+        "view ",
+        "mira el perfil de",
+    ]
+    indices = []
+    for marcador in cortes:
+        i = corpo_n.find(marcador)
+        if i > 40:
+            indices.append(i)
+    if indices:
+        corpo = corpo[:min(indices)]
+
+    return limpar_espacos(f"{titulo} {corpo} {url}")
+
+
 def extrair_instagram(resultado):
     url = str(resultado.get("href") or resultado.get("url") or "")
     m = re.search(r"instagram\.com/([A-Za-z0-9._]+)", url, flags=re.I)
@@ -590,18 +658,36 @@ def extrair_instagram(resultado):
     return "@" + usuario
 
 
-def relacionado_a_instituicao(texto, instituicao, cidade=""):
+def relacionado_a_instituicao(texto, instituicao, cidade="", alias=None):
     ntexto = normalizar(texto)
     inst = normalizar(instituicao)
+
     if inst and inst in ntexto:
         return True
-    ignorar = {"universidade", "faculdade", "centro", "universitario", "instituto", "federal", "estadual", "de", "da", "do", "das", "dos", "e"}
+
+    ignorar = {
+        "universidade", "faculdade", "centro", "universitario", "instituto",
+        "federal", "estadual", "de", "da", "do", "das", "dos", "e"
+    }
     tokens = [p for p in inst.split() if len(p) >= 4 and p not in ignorar]
     matches = sum(1 for p in tokens if p in ntexto)
     if matches >= min(2, max(1, len(tokens))):
         return True
+
+    # A sigla é aceita somente como palavra/frase inteira e quando não é apenas
+    # uma palavra já presente no nome da instituição (ex.: "Mackenzie").
+    alias_n = normalizar(alias or "")
+    if alias_n and alias_n not in set(inst.split()):
+        if re.search(rf"(?<!\w){re.escape(alias_n)}(?!\w)", ntexto, flags=re.I):
+            return True
+
     ncidade = normalizar(cidade)
-    return bool(ncidade and ncidade != "nao identificado" and ncidade in ntexto and matches >= 1)
+    return bool(
+        ncidade
+        and ncidade != "nao identificado"
+        and ncidade in ntexto
+        and matches >= 1
+    )
 
 
 def formatar_nome_pessoa(nome):
@@ -756,7 +842,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
     instituicao = item["instituicao"]
     cidade = item.get("cidade") or "Não identificado"
     uf = item["estado"]
-    consultas = consultas_leads(instituicao)
+    alias = alias_instituicao(item)
+    consultas = consultas_leads(instituicao, alias)
     total = len(consultas)
 
     cp = repo.controle_get(etapa_captacao_item(item))
@@ -793,18 +880,18 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
             return False
 
         for resultado in resultados:
-            titulo = limpar_espacos(resultado.get("title", ""))
-            corpo = limpar_espacos(resultado.get("body", ""))
             url = str(resultado.get("href") or resultado.get("url") or "")
-            texto_real = limpar_espacos(f"{titulo} {corpo} {url}")
-            if not lead_qualificado(texto_real):
-                continue
-            if not relacionado_a_instituicao(texto_real, instituicao, cidade):
-                continue
             nome = extrair_nome_resultado(resultado)
             if not nome:
                 stats["rejeitados"] += 1
                 continue
+
+            texto_real = contexto_resultado_perfil(resultado, nome)
+            if not lead_qualificado(texto_real):
+                continue
+            if not relacionado_a_instituicao(texto_real, instituicao, cidade, alias):
+                continue
+
             encontrados_local += 1
             stats["leads_encontrados"] += 1
             linkedin = url if "linkedin.com/in/" in url.lower() else None
@@ -827,7 +914,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
 
 def resumo():
     print("\n" + "=" * 72, flush=True)
-    print("RESUMO MÁQUINA 1 V5", flush=True)
+    print("RESUMO MÁQUINA 1 V5.4", flush=True)
     print("=" * 72, flush=True)
     for rotulo, chave in [
         ("IES oficiais carregadas", "ies_carregadas"),
@@ -845,7 +932,7 @@ def resumo():
 
 
 def executar():
-    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5", flush=True)
+    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5.4", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
     repo = SupabaseRepo.from_env()
 
@@ -884,7 +971,7 @@ def executar():
                 return
 
     resumo()
-    print("✅ CICLO V5 FINALIZADO", flush=True)
+    print("✅ CICLO V5.4 FINALIZADO", flush=True)
 
 
 if __name__ == "__main__":
