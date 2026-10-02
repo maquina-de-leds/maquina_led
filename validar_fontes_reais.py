@@ -3,7 +3,10 @@ from scraper import ler_fila_inep_zip, ESTADOS
 from fontes_academicas import ler_html
 url="https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"
 import subprocess
-print(subprocess.run(["openssl","s_client","-connect","download.inep.gov.br:443","-servername","download.inep.gov.br","-showcerts"],input="",capture_output=True,text=True,timeout=25).stdout)
+try:
+    d=subprocess.run(["openssl","s_client","-connect","download.inep.gov.br:443","-servername","download.inep.gov.br","-showcerts"],input="",capture_output=True,text=True,timeout=12)
+    print("TLS",d.stdout,d.stderr,flush=True)
+except subprocess.TimeoutExpired as e: print("TLS TIMEOUT",e.stdout,e.stderr,flush=True)
 ok=False
 for ca in [True, "/etc/ssl/certs/ca-certificates.crt"]:
     try:
@@ -31,7 +34,7 @@ for url,inst in [
         r=requests.get(url,timeout=30); r.raise_for_status()
         from fontes_academicas import Pagina
         page=Pagina(); page.feed(r.text)
-        for i,(text,tag) in enumerate(page.linhas):
+        for text,tag in page.linhas:
             if any(w in text.lower() for w in ["nutri","melissa","giovanna","semestre"]):
                 print("CONTEXTO",tag,text,flush=True)
         result=ler_html(r.text,url,inst)
