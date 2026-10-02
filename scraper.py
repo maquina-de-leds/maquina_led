@@ -936,6 +936,18 @@ def executar():
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
     repo = SupabaseRepo.from_env()
 
+    # TESTE ISOLADO: reabre CESMAC para validar a nova captura sem afetar outras IES.
+    try:
+        (
+            repo.client.table("instituicoes_nutricao")
+            .update({"status": "pendente", "ultima_verificacao": agora()})
+            .eq("origem", ORIGEM_IES)
+            .ilike("instituicao", "%Cesmac%")
+            .execute()
+        )
+    except Exception as exc:
+        print(f"⚠️ Não foi possível reabrir CESMAC no smoke: {exc}", flush=True)
+
     if not garantir_fila_oficial(repo):
         resumo()
         raise SystemExit(1)
