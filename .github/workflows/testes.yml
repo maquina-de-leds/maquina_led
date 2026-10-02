@@ -1,0 +1,24 @@
+name: Testes de qualificacao de leads
+
+on:
+  push:
+    paths:
+      - 'scraper.py'
+      - 'test_scraper.py'
+      - '.github/workflows/testes.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validar qualificacao e retomada sem acesso ao Supabase
+        run: python -m unittest discover -p 'test_*.py' -v

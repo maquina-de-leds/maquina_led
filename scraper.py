@@ -14,10 +14,10 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.6"
+VERSAO = "v5.7"
 ETAPA_CARGA_IES = "carga_inep_nutricao_v54"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v56"
-ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v56"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v57"
+ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v57"
 ORIGEM_IES = "inep_censo_superior_v54"
 MAX_RESULTADOS = 12
 MAX_INSTITUICOES_POR_EXECUCAO = 4
@@ -62,6 +62,7 @@ stats = {
     "duplicados": 0,
     "rejeitados": 0,
     "erros": 0,
+    "revisao_necessaria": 0,
 }
 
 
@@ -77,6 +78,7 @@ def normalizar(texto):
     texto = limpar_espacos(texto).lower()
     texto = unicodedata.normalize("NFKD", texto)
     texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = re.sub(r"[‐‑‒–—−]", "-", texto)
     return texto
 
 
@@ -414,26 +416,16 @@ def garantir_fila_oficial(repo):
         return False
 
 
-def preparar_varredura_v56(repo):
-    """Reabre uma única vez a fila V5.4 para usar o motor V5.6.
+def preparar_varredura_v57(repo):
+    """Reabre a fila uma única vez para aplicar buscas e filtros V5.7.
 
-    As primeiras instituições processadas pela V5.4 foram concluídas com o
-    buscador antigo e precisam ser varridas novamente. Também removemos apenas
-    as linhas de fila criadas pela branch de smoke V5.5; os leads válidos
-    encontrados nos testes permanecem na tabela leds.
+    Os leads existentes são preservados; a deduplicação impede reinserção.
     """
     cp = repo.controle_get(ETAPA_MIGRACAO_BUSCA)
     if cp and cp.get("status") == "concluido":
         return True
 
     try:
-        (
-            repo.client.table("instituicoes_nutricao")
-            .delete()
-            .eq("origem", "inep_censo_superior_v55")
-            .execute()
-        )
-
         (
             repo.client.table("instituicoes_nutricao")
             .update({
@@ -448,13 +440,13 @@ def preparar_varredura_v56(repo):
         repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
             "estado": "BR",
             "cidade": "Nacional",
-            "instituicao": "Reabertura da fila V5.4 para V5.6",
+            "instituicao": "Reabertura da fila para V5.7",
             "status": "concluido",
             "ultimo_erro": None,
             "finalizado_em": agora(),
         })
 
-        print("🔄 Fila oficial reaberta uma vez para a varredura V5.6.", flush=True)
+        print("🔄 Fila oficial reaberta uma vez para a varredura V5.7.", flush=True)
         return True
 
     except Exception as exc:
@@ -462,11 +454,11 @@ def preparar_varredura_v56(repo):
         repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
             "estado": "BR",
             "cidade": "Nacional",
-            "instituicao": "Reabertura da fila V5.4 para V5.6",
+            "instituicao": "Reabertura da fila para V5.7",
             "status": "erro",
             "ultimo_erro": str(exc)[:1000],
         })
-        print(f"❌ Falha preparando a fila V5.6: {exc}", flush=True)
+        print(f"❌ Falha preparando a fila V5.7: {exc}", flush=True)
         return False
 
 
@@ -511,6 +503,8 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
                 time.sleep(4.0)
                 continue
 
+            if ultimo_erro is not None:
+                return None
             return []
 
         except Exception as exc:
@@ -522,7 +516,12 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
                 continue
 
             if "No results found" in msg:
-                return []
+                try:
+                    saude = fetch_fn("Brasil", "auto", 1)
+                    if list(saude or []):
+                        return []
+                except Exception:
+                    pass
 
     print(f"      ⚠️ Busca externa indisponível: {ultimo_erro}", flush=True)
     return None
@@ -538,25 +537,19 @@ def alias_instituicao(item):
 
 
 def consultas_leads(instituicao, alias=None):
-    """Consultas que refletem diretamente o público desejado.
-
-    A Máquina 1 procura nomes de estudantes/concluintes. Instagram continua
-    sendo enriquecimento da Máquina 2.
-    """
-    termo = limpar_espacos(alias or instituicao)
-    return [
-        f'site:linkedin.com/in {termo} Nutrição "último período"',
-        f'site:linkedin.com/in {termo} Nutrição "último semestre"',
-        f'site:linkedin.com/in {termo} Nutrição "8º semestre"',
-        f'site:linkedin.com/in {termo} Nutrição "7º semestre"',
-        f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
-        f'site:linkedin.com/in {termo} Nutrição TCC 2026',
-        f'site:linkedin.com/in {termo} Nutrição "recém-formada"',
-        f'site:linkedin.com/in {termo} Nutrição "recém-formado"',
-        f'site:linkedin.com/in {termo} "aluno de Nutrição"',
-        f'site:linkedin.com/in {termo} "estudante de Nutrição"',
+    # Descoberta ampla; aprovação depende exclusivamente da evidência do perfil.
+    termos = list(dict.fromkeys(limpar_espacos(t) for t in (alias, instituicao) if t))
+    sinais = [
+        '"último período"', '"último semestre"', '"7º semestre"',
+        '"8º semestre"', '"7º período"', '"8º período"',
+        '"recém-formada"', '"recém-formado"', 'concluinte',
+        '"estágio final"', '"graduanda em Nutrição"',
+        '"estudante de Nutrição"',
     ]
-
+    sinais += [f'{sinal} {ano}' for ano in (2025, 2026)
+               for sinal in ('"formatura prevista"', 'TCC', '"colação de grau"')]
+    return [f'site:linkedin.com/in "{termo}" Nutrição {sinal}'
+            for sinal in sinais for termo in termos]
 
 SINAIS_FASE_FINAL = [
     "tcc", "trabalho de conclusao", "formanda", "formando", "formandas", "formandos",
@@ -576,63 +569,68 @@ BLOQUEIOS_PESSOA = [
 ]
 
 
+# Uma decisão reúne motivo, ano e período da mesma evidência.
+PADRAO_FINAL = r"\b(?:[78](?:o|º)?\s+(?:periodo|semestre)|[78]/8|ultimo\s+(?:periodo|semestre)|recem[- ]formad[oa]|concluinte|formand[oa]|formatura|colacao de grau|conclusao|concluir|concluid[oa]|graduad[oa]|tcc|trabalho de conclusao|estagio final)\b"
+PADRAO_ANO = r"\b(20\d{2})(?:[./][12])?\b"
+
+
+def avaliar_lead(texto):
+    n = normalizar(re.sub(r"https?://\S+", "", str(texto or "")))
+    def decisao(status, motivo, ano=None, periodo=None, evidencia=None):
+        return dict(status=status, motivo=motivo, ano=ano,
+                    periodo=periodo, evidencia=evidencia)
+    if not re.search(r"\b(?:nutricao|nutricionista)\b", n):
+        return decisao("rejeitado", "curso_ausente")
+    # Outro curso ou papel de orientação exige confirmação humana.
+    if re.search(r"\b(?:psicologia|enfermagem|fisioterapia|medicina|direito|engenharia)\b", n):
+        return decisao("revisao", "mais_de_um_curso")
+    if re.search(r"\b(?:orientador[a]?|coorientador[a]?|professor[a]?|docente)\b", n):
+        return decisao("revisao", "papel_academico_ambiguo")
+    if re.search(r"\b(?:nao|nunca|ainda nao)\b.{0,70}" + PADRAO_FINAL, n):
+        return decisao("revisao", "negacao_da_fase_final")
+    if re.search(r"\b[1-6](?:o|º)?\s+(?:periodo|semestre)\b", n):
+        return decisao("revisao", "periodo_inicial_ou_contraditorio")
+    # Pontos nas datas semestrais não encerram a evidência.
+    blocos = re.split(r"[!;|]|(?<!\d)\.(?!\d)", n)
+    for bloco in blocos:
+        curso = re.search(r"\b(?:nutricao|nutricionista)\b", bloco)
+        intervalo = re.search(r"\b(20\d{2})(?:[./][12])?\s*-\s*(20\d{2})(?:[./][12])?\b", bloco)
+        if curso and intervalo:
+            inicio, fim = map(int, intervalo.groups())
+            if fim < inicio:
+                return decisao("rejeitado", "intervalo_invertido")
+            if fim in (2025, 2026):
+                return decisao("qualificado", "formacao_com_data", fim, "conclusão", bloco.strip())
+            return decisao("rejeitado", "formacao_fora_da_janela", fim)
+    for bloco in blocos:
+        for sinal in re.finditer(PADRAO_FINAL, bloco):
+            # O ano deve estar perto do sinal, sem atravessar outra sentença.
+            anos = [(abs(m.start()-sinal.start()), int(m.group(1)))
+                    for m in re.finditer(PADRAO_ANO, bloco)
+                    if abs(m.start()-sinal.start()) <= 100]
+            if not anos:
+                continue
+            _, ano = min(anos)
+            if ano not in (2025, 2026):
+                return decisao("rejeitado", "fase_fora_da_janela", ano)
+            # Ano de emprego/publicação não prova data acadêmica.
+            if re.search(r"\b(?:emprego|contratad[oa]|publicacao|atualizad[oa])\b", bloco):
+                continue
+            periodo = sinal.group(0)
+            return decisao("qualificado", "fase_final_com_data", ano, periodo, bloco.strip())
+    return decisao("revisao", "sem_evidencia_academica_datada")
+
+
 def identificar_ano(texto):
-    n = normalizar(texto)
-    if "2026" in n:
-        return 2026
-    if "2025" in n:
-        return 2025
-    return None
+    return avaliar_lead(texto)["ano"]
 
 
 def identificar_periodo(texto):
-    n = normalizar(texto)
-    grupos = [
-        ("8º período/semestre", ["8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8"]),
-        ("7º período/semestre", ["7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8"]),
-        ("último período/semestre", ["ultimo periodo", "ultimo semestre"]),
-        ("TCC", ["tcc", "trabalho de conclusao"]),
-        ("estágio final/obrigatório", ["estagio obrigatorio", "estagio supervisionado", "estagio final"]),
-        ("formando", ["formanda", "formando", "concluinte", "colacao de grau", "formatura"]),
-        ("recém-formado", ["recem-formada", "recem-formado"]),
-    ]
-    for rotulo, sinais in grupos:
-        if any(s in n for s in sinais):
-            return rotulo
-    return None
+    return avaliar_lead(texto)["periodo"]
 
 
 def lead_qualificado(texto):
-    n = normalizar(texto)
-    if "nutricao" not in n and "nutricionista" not in n:
-        return False
-
-    # Sinais diretos de fase final ou recém-formado.
-    # Nesses casos o próprio texto do perfil já prova o estágio desejado,
-    # mesmo quando o snippet não mostra o ano explicitamente.
-    sinais_diretos = [
-        "7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8",
-        "8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8",
-        "ultimo periodo", "ultimo semestre",
-        "recem formada", "recem-formada", "recem formado", "recem-formado",
-        "concluinte",
-    ]
-    if any(s in n for s in sinais_diretos):
-        return True
-
-    # Para TCC, estágio ou formatura genéricos exigimos 2025/2026 no contexto,
-    # evitando que uma página acadêmica antiga seja aceita como lead atual.
-    padroes = [
-        r"(?:formatura|conclusao|concluir|formando|formanda)[^.!;]{0,100}202[56]",
-        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda)",
-        r"(?:tcc|trabalho de conclusao)[^.!;]{0,100}202[56]",
-        r"202[56][^.!;]{0,100}(?:tcc|trabalho de conclusao)",
-        r"(?:estagio obrigatorio|estagio supervisionado|estagio final)[^.!;]{0,100}202[56]",
-        r"202[56][^.!;]{0,100}(?:estagio obrigatorio|estagio supervisionado|estagio final)",
-        r"(?:nutricao)[^.!;]{0,120}20\d{2}\s*[-–—]\s*202[56]",
-        r"20\d{2}\s*[-–—]\s*202[56][^.!;]{0,120}(?:nutricao)",
-    ]
-    return any(re.search(p, n, flags=re.I) for p in padroes)
+    return avaliar_lead(texto)["status"] == "qualificado"
 
 
 def nome_parece_pessoa(nome):
@@ -665,10 +663,10 @@ def extrair_nome_resultado(resultado):
     url = str(resultado.get("href") or resultado.get("url") or "")
     host = urlparse(url).netloc.lower()
 
-    if "linkedin.com" in host and "/in/" in url.lower():
+    if (host == "linkedin.com" or host.endswith(".linkedin.com")) and urlparse(url).path.lower().startswith("/in/"):
         titulo = re.sub(r"(?i)\s*[|\-–—•]\s*LinkedIn.*$", "", titulo)
         candidato = re.split(r"\s+[\-–—|•]\s+", titulo, maxsplit=1)[0]
-    elif "instagram.com" in host:
+    elif host == "instagram.com" or host.endswith(".instagram.com"):
         caminho = urlparse(url).path.strip("/").split("/")[0].lower()
         if not caminho or caminho in {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}:
             return None
@@ -697,6 +695,9 @@ def contexto_resultado_perfil(resultado, nome=None):
     if idx_t > 0:
         titulo = titulo[:idx_t]
 
+    # Um convite inicial pertence ao perfil atual; os próximos iniciam outro.
+    corpo = re.sub(r"(?i)^(?:veja o perfil de|view|mira el perfil de)\s+", "", corpo)
+
     # O texto útil do primeiro perfil vem antes do convite "Veja/View/Mira...".
     corpo_n = normalizar(corpo)
     cortes = [
@@ -708,7 +709,7 @@ def contexto_resultado_perfil(resultado, nome=None):
     indices = []
     for marcador in cortes:
         i = corpo_n.find(marcador)
-        if i > 40:
+        if i >= 0:
             indices.append(i)
     if indices:
         corpo = corpo[:min(indices)]
@@ -728,36 +729,14 @@ def extrair_instagram(resultado):
 
 
 def relacionado_a_instituicao(texto, instituicao, cidade="", alias=None):
-    ntexto = normalizar(texto)
-    inst = normalizar(instituicao)
-
-    if inst and inst in ntexto:
+    ntexto, inst = normalizar(texto), normalizar(instituicao)
+    # UFMT e UFMS não são intercambiáveis.
+    if inst == "universidade federal de mato grosso":
+        ntexto = ntexto.replace("universidade federal de mato grosso do sul", "")
+    if inst and re.search(rf"(?<!\w){re.escape(inst)}(?!\w)", ntexto):
         return True
-
-    ignorar = {
-        "universidade", "faculdade", "centro", "universitario", "instituto",
-        "federal", "estadual", "de", "da", "do", "das", "dos", "e"
-    }
-    tokens = [p for p in inst.split() if len(p) >= 4 and p not in ignorar]
-    matches = sum(1 for p in tokens if p in ntexto)
-    if matches >= min(2, max(1, len(tokens))):
-        return True
-
-    # A sigla é aceita somente como palavra/frase inteira e quando não é apenas
-    # uma palavra já presente no nome da instituição (ex.: "Mackenzie").
     alias_n = normalizar(alias or "")
-    if alias_n and alias_n not in set(inst.split()):
-        if re.search(rf"(?<!\w){re.escape(alias_n)}(?!\w)", ntexto, flags=re.I):
-            return True
-
-    ncidade = normalizar(cidade)
-    return bool(
-        ncidade
-        and ncidade != "nao identificado"
-        and ncidade in ntexto
-        and matches >= 1
-    )
-
+    return bool(alias_n and re.search(rf"(?<!\w){re.escape(alias_n)}(?!\w)", ntexto))
 
 def formatar_nome_pessoa(nome):
     partes = limpar_espacos(nome).lower().split()
@@ -788,7 +767,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "linkedin": linkedin,
         "whatsapp": None,
         "nicho": "nutricionista",
-        "origem": "captacao_nacional_fila_v56",
+        "origem": "captacao_nacional_fila_v57",
         "status": "novo",
         "app_baixado": False,
         "nao_contatar": False,
@@ -810,7 +789,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
-        "fonte_validacao": "fonte_publica_validada_v56",
+        "fonte_validacao": "fonte_publica_validada_v57",
     }
     repo.inserir_lead(dados)
     stats["leads_salvos"] += 1
@@ -917,7 +896,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
 
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
-    if cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
+    nova_varredura = bool(cp and cp.get("status") == "erro"
+                         and cp.get("ultimo_erro") == "Nenhum candidato encontrado; programada segunda varredura")
+    if not nova_varredura and cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
         try:
             inicio = max(0, min(int(cp.get("indice_pesquisa") or 0), total - 1))
         except Exception:
@@ -956,7 +937,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
                 continue
 
             texto_real = contexto_resultado_perfil(resultado, nome)
-            if not lead_qualificado(texto_real):
+            avaliacao = avaliar_lead(texto_real)
+            if avaliacao["status"] != "qualificado":
+                stats["rejeitados"] += 1
+                if avaliacao["status"] == "revisao":
+                    stats["revisao_necessaria"] += 1
+                print(f"      FILTRO: {nome} | {avaliacao['status']} | {avaliacao['motivo']}", flush=True)
                 continue
             if not relacionado_a_instituicao(texto_real, instituicao, cidade, alias):
                 continue
@@ -1030,6 +1016,7 @@ def resumo():
         ("Novos leads salvos", "leads_salvos"),
         ("Duplicados ignorados", "duplicados"),
         ("Resultados rejeitados", "rejeitados"),
+        ("Candidatos que exigem revisão", "revisao_necessaria"),
         ("Erros", "erros"),
     ]:
         print(f"{rotulo}: {stats[chave]}", flush=True)
@@ -1045,7 +1032,7 @@ def executar():
         resumo()
         raise SystemExit(1)
 
-    if not preparar_varredura_v56(repo):
+    if not preparar_varredura_v57(repo):
         resumo()
         raise SystemExit(1)
 
