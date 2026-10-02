@@ -5,6 +5,19 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_lista_indexada_separa_alunas_das_professoras(self):
+        r={'title':'Alunos de Nutrição criam e-book','body':'19 de maio de 2025. As alunas Ana Silva, Beatriz Santos e as professoras Maria Souza, do curso de Nutrição da Mackenzie, desenvolveram o livro.'}
+        self.assertEqual([x['nome'] for x in f.extrair_resultado_busca(r,'Mackenzie')],['Ana Silva','Beatriz Santos'])
+        r['body']=r['body'].replace('19 de maio de 2025. ','')
+        self.assertEqual(f.extrair_resultado_busca(r,'Mackenzie'),[])
+
+    def test_recuperacao_indexada_exige_mesma_materia(self):
+        u='https://example.org/noticias/alunos-de-nutricao-criam-livro'
+        r={'href':u,'title':'Nutrição','body':'2025. As alunas Ana Silva e as professoras Maria Souza, do curso de Nutrição, desenvolveram o livro.'}
+        self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,lambda *a:[r])[0][0]['nome'],'Ana Silva')
+        r['href']='https://outra.org/noticias/alunos-de-nutricao-criam-livro'
+        self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,lambda *a:[r])[0],[])
+
     @patch.object(s.time,'sleep')
     def test_interrupcao_runner_retoma_consulta_sem_repetir_inicio(self,sleep):
         repo=Repo(); repo.cp={**repo.item,'status':'processando','indice_pesquisa':2,'total_pesquisas':3,'ultimo_erro':None,'leads_encontrados':4,'leads_salvos':2}

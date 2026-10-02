@@ -714,7 +714,7 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
 
 
 def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False):
-    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca
+    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
@@ -802,7 +802,13 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 falhas_fontes += 1
                 stats["erros"] += 1
                 print(f"      ⚠️ FONTE PENDENTE: {url} | {str(exc)[:250]}",flush=True)
-                continue
+                try:
+                    registros,links=recuperar_fonte_na_busca(url,instituicao,alias,search_fn)
+                except Exception as recuperacao:
+                    print(f"      ÍNDICE INDISPONÍVEL: {str(recuperacao)[:150]}",flush=True)
+                    registros,links=[],[]
+                if not registros: continue
+                print(f"      RECUPERADO NO ÍNDICE: {len(registros)} nomes; acesso direto ainda pendente",flush=True)
             print(f"      📄 FONTE: {url} | pessoas: {len(registros)}",flush=True)
             if depth == 0:
                 fila.extend((link,1) for link in links if url_permitida(link))
@@ -812,7 +818,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 contexto = normalizar(registro.get("contexto_academico", ""))
                 cidade_confirmada = bool(cidade and re.search(r'(?<!\w)'+re.escape(normalizar(cidade))+r'(?!\w)',contexto))
                 salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),cidade if cidade_confirmada else None,
-                            uf if cidade_confirmada else None,registro["evidencia"],url,
+                            uf if cidade_confirmada else None,registro["evidencia"],registro.get("fonte_url",url),
                             instagram=registro.get("instagram"),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
         checkpoint_captacao(repo,item,"processando",idx+1,total,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,

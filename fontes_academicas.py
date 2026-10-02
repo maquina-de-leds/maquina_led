@@ -316,11 +316,19 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',norm(titulo)):
         return []
     vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
-    if re.search(PAPEL,n) or re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
+    if re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
         return []
     ano,periodo=periodo_academico(texto)
     fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
     if ano not in ANOS and not fase: return []
+    # Lista explicitamente delimitada: alunos antes dos orientadores.
+    lista=re.search(r'\bas alunas\s+(.+?)\s+e as professoras',trecho,re.I)
+    if lista and 'curso de nutricao' in n and ano in ANOS:
+        return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
+                     instituicao=instituicao if vinculada else None,
+                     evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Semestre pendente de confirmação',
+                     contexto_academico=texto) for nome in nomes_da_lista(lista.group(1))]
+    if re.search(PAPEL,n): return []
     nome=pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0])
     aluno_citado=re.search(r'\b(?:alun[oa]|estudante)\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição[^.!?]{0,160}?,\s*([A-ZÀ-Ý][^,.;]{2,80}),',trecho)
     if aluno_citado: nome=pessoa(aluno_citado.group(1))
@@ -483,3 +491,24 @@ def carregar_fonte(url, instituicao, alias=None):
     if resposta is not None: return resposta
     if ultimo: raise ultimo
     return [],[]
+
+
+def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
+    """Alternativa indexada da mesma matéria; requer data e nomes no resultado."""
+    p=urlparse(url)
+    titulo=p.path.rstrip('/').split('/')[-1]
+    if not url_permitida(url) or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+){4,}',titulo):
+        return [],[]
+    consulta='site:'+p.hostname+' "'+titulo.replace('-',' ')+'"'
+    resultados=search_fn(consulta,6)
+    if resultados is None: raise RuntimeError('Buscador indisponível na recuperação da fonte')
+    registros=[]
+    for resultado in resultados:
+        origem=resultado.get('href') or resultado.get('url') or ''
+        original=urlparse(origem)
+        if original.hostname!=p.hostname or original.path.rstrip('/').split('/')[-1]!=titulo: continue
+        for r in extrair_resultado_busca(resultado,instituicao,alias):
+            r['fonte_url']=origem
+            r['evidencia']+=' | Recuperado do índice público; página original indisponível'
+            registros.append(r)
+    return list({norm(r['nome']):r for r in registros}.values()),[]
