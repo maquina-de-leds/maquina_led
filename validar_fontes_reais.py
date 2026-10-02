@@ -9,6 +9,23 @@ bundle="inep-ca.pem"
 with open(bundle,"w") as dest:
     dest.write(open(certifi.where()).read()+"\n"+pem.text)
 ok=False
+import ssl, time
+for attempt in range(3):
+    try:
+        leaf=ssl.get_server_certificate(("download.inep.gov.br",443),timeout=10)
+        with open("leaf.pem","w") as out: out.write(leaf)
+        info=ssl._ssl._test_decode_cert("leaf.pem")
+        print("LEAF:",info,flush=True)
+        for issuer_url in info.get("caIssuers",[]):
+            from urllib.parse import urlparse
+            if urlparse(issuer_url).hostname not in {"secure.globalsign.com","crt.globalsign.com"}:
+                print("EMISSOR NÃO PREVISTO:",issuer_url); continue
+            issuer_url=issuer_url.replace("http://","https://",1)
+            cert=requests.get(issuer_url,timeout=20);cert.raise_for_status()
+            pem2=cert.text if b"BEGIN CERTIFICATE" in cert.content else ssl.DER_cert_to_PEM_cert(cert.content)
+            with open(bundle,"a") as out: out.write("\n"+pem2)
+        break
+    except Exception as e: print("LEAF FALHA",str(e),flush=True)
 for ca in [bundle,bundle,bundle]:
     try:
         print("DOWNLOAD CA:",ca,flush=True)
@@ -36,9 +53,9 @@ for url,inst in [
         from fontes_academicas import Pagina
         page=Pagina(); page.feed(r.text)
         for text,tag in page.linhas:
-            if any(w in text.lower() for w in ["nutri","melissa","giovanna","semestre","2026","2025"]):
+            if any(w in text.lower() for w in ["nutri","melissa","giovanna","semestre"]):
                 print("CONTEXTO",tag,text,flush=True)
         result=ler_html(r.text,url,inst)
-        print("PAGINA REAL:",url,"CONTAGEM:",len(result[0]),"NOMES:",[(x["nome"],x["periodo"]) for x in result[0]],flush=True)
+        print("PAGINA REAL:",url,"CONTAGEM:",len(result[0]),"PERIODOS:",sorted({x["periodo"] for x in result[0]}),flush=True)
     except Exception as e: print("FALHA PAGINA:",url,str(e),flush=True)
 if not ok: raise SystemExit(1)

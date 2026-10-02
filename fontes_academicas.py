@@ -77,6 +77,7 @@ def periodo_academico(text):
     patterns = [
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?([12])o?\s*semestre(?:\s+letivo)?\s*(?:de|/)?\s*(202[56])',
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?(202[56])[./-]([12])\b',
+        r'\bsemestre\s+(202[56])[./-]([12])\b',
     ]
     for i, pattern in enumerate(patterns):
         m = re.search(pattern, n)
