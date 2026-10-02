@@ -567,7 +567,11 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     sinais = ('"formandos"', '"colação de grau"', '"TCC"', '"concluintes"',
               '"turma"', '"recém-formados"', '"recém-formadas"',
               '"último semestre"', '"último período"', '"estágio final"',
-              '"alunos" "conclusão"', '"mostra" "autores"')
+              '"alunos" "conclusão"', '"mostra" "autores"',
+              '"defesa" "TCC"', '"apresentação" "trabalho de conclusão"',
+              '"repositório"', '"lista de formandos"',
+              '"cerimônia de formatura"', '"concluíram"',
+              '"jornada acadêmica" "trabalhos"', '"entrega" "TCC"')
     consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
@@ -690,7 +694,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
     total = len(consultas)
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
-    if cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
+    if cp and cp.get("instituicao") == instituicao and cp.get("estado") == (uf or "BR") and cp.get("status") in {"processando", "erro"}:
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
         if cp.get("ultimo_erro") == "Busca externa indisponível":
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1)

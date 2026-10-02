@@ -231,3 +231,12 @@ class FilaFaculdadesTests(unittest.TestCase):
         self.assertEqual(len(repo.saved),1)
         self.assertEqual(repo.saved[0]["nome"],"Ana Silva")
         self.assertEqual(repo.cp["status"],"concluido")
+
+class ConsultasDiversificadasTests(unittest.TestCase):
+    def test_fontes_academicas_alem_de_turma(self):
+        consultas = s.consultas_leads("Universidade Teste", "UT")
+        for sinal in ["TCC", "defesa", "apresentação", "repositório", "colação", "estágio final", "último período", "lista de formandos", "entrega"]:
+            self.assertTrue(any(sinal in q for q in consultas), sinal)
+        self.assertTrue(all("Nutrição" in q and "-site:linkedin.com" in q for q in consultas))
+        self.assertTrue(any("2025" in q for q in consultas))
+        self.assertTrue(any("2026" in q for q in consultas))
