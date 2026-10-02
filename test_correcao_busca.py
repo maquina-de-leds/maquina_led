@@ -5,6 +5,13 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_data_editorial_apos_menu_permite_noticia_recente(self):
+        linhas=[('Navegação '+str(i),'p') for i in range(35)]
+        linhas += [('28 Jan 2025','div'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação.','p')]
+        r=f.extrair_documento(linhas,None)
+        self.assertEqual([x['nome'] for x in r],['Júlia Parpineli Bernini Silva'])
+        self.assertEqual(r[0]['ano'],2025)
+
     def test_post_institucional_identifica_recem_formada_no_corpo(self):
         resultado={'title':'UniFil - Instagram','body':'February 20, 2026: Recém-formada em Nutrição, Thais Camargo Prestes foi aprovada na Residência Multiprofissional em Oncologia.'}
         r=f.extrair_resultado_busca(resultado,'Mackenzie')

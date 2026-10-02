@@ -158,6 +158,13 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     publication_year, publication_period = periodo_academico(' '.join(metas.get('article:published_time', []) + metas.get('date', []) + metas.get('citation_publication_date', []) + metas.get('citation_date', [])))
     if not publication_year:
         publication_year, publication_period = periodo_academico(' '.join(t for t,tag in linhas[:30]))
+    if not publication_year:
+        # Datas editoriais isoladas podem aparecer depois do menu da página.
+        # Nunca usa copyright, referências ou uma data arbitrária do texto.
+        for texto,_ in linhas:
+            if re.fullmatch(r'\s*\d{1,2}\s+(?:de\s+)?(?:jan(?:eiro)?|fev(?:ereiro)?|feb(?:ruary)?|mar(?:ço|ch)?|abr(?:il)?|apr(?:il)?|mai(?:o)?|may|jun(?:ho|e)?|jul(?:ho|y)?|ago(?:sto)?|aug(?:ust)?|set(?:embro)?|sep(?:tember)?|out(?:ubro)?|oct(?:ober)?|nov(?:embro|ember)?|dez(?:embro)?|dec(?:ember)?)\s*(?:de\s*|[•,/-]\s*)?202[56]\s*',texto,re.I):
+                publication_year,publication_period=periodo_academico(texto)
+                break
     edition=re.search(r'\bv\.?\s*\d+\s*n\.?\s*\d+\s*\((20\d{2})\)',norm(full))
     if edition and int(edition.group(1)) not in ANOS:
         publication_year, publication_period = None, None
