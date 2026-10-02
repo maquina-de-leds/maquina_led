@@ -210,6 +210,28 @@ class SupabaseRepo:
         ordem = {"pendente": 0, "processando": 1, "erro": 2}
         return sorted(dados, key=lambda x: (ordem.get(x.get("status"), 9), normalizar(x.get("instituicao"))))
 
+    def fila_nacional(self):
+        # Todas as ofertas, inclusive concluídas, preservadas como origem.
+        dados = []
+        offset = 0
+        while True:
+            r = (self.client.table("instituicoes_nutricao").select("*")
+                 .eq("origem", ORIGEM_IES).order("id")
+                 .range(offset, offset + 999).execute())
+            lote = r.data or []
+            dados.extend(lote)
+            if len(lote) < 1000:
+                break
+            offset += 1000
+        fila = []
+        for item in agrupar_faculdades(dados):
+            cp = self.controle_get(etapa_captacao_item(item))
+            if cp and cp.get("status") == "concluido":
+                continue
+            item["tentativa_descoberta"] = int(item.get("tentativa_descoberta") or 0) if cp else 0
+            fila.append(item)
+        return fila
+
     def contar_pendentes_uf(self, uf):
         r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
            .eq("origem",ORIGEM_IES).eq("estado",uf)
@@ -625,8 +647,21 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
 # CAPTACAO / CHECKPOINT
 # ============================================================
 
+def agrupar_faculdades(dados):
+    """Uma pesquisa nacional por instituição; polos não são novas faculdades."""
+    grupos = {}
+    for registro in sorted(dados, key=lambda x: x["id"]):
+        chave = normalizar(registro["instituicao"])
+        if chave not in grupos:
+            item = dict(registro)
+            item.update(cidade=None, estado=None, escopo_faculdade=True,
+                        tentativa_descoberta=registro.get("tentativa_descoberta", 0))
+            grupos[chave] = item
+    return sorted(grupos.values(), key=lambda x: normalizar(x["instituicao"]))
+
+
 def etapa_captacao_item(item):
-    return f"{ETAPA_CAPTACAO}_{item['id']}"
+    return f"{ETAPA_CAPTACAO}_{'faculdade_' if item.get('escopo_faculdade') else ''}{item['id']}"
 
 
 def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=None, encontrados=0, salvos=0):
@@ -651,7 +686,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
     alias = alias_instituicao(item)
-    consultas = consultas_leads(instituicao, alias, cidade, uf)
+    consultas = consultas_leads(instituicao, alias, None if item.get("escopo_faculdade") else cidade, uf)
     total = len(consultas)
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
@@ -709,6 +744,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
     tentativas = int(item.get("tentativa_descoberta") or 0)
     repetir_zero = encontrados_local == 0 and tentativas < 1
     if falhas_fontes or repetir_zero:
+        item["tentativa_descoberta"] = tentativas + 1
         repo.atualizar_instituicao(iid,status="erro",tentativa_descoberta=tentativas+1)
         stats["instituicoes_erro"] += 1
         motivo = (f"Fontes inacessíveis: {falhas_fontes}; repetir varredura"
@@ -758,36 +794,14 @@ def executar():
         resumo()
         raise SystemExit(1)
 
-    processadas = 0
-    for uf, estado_nome in ESTADOS:
-        print("\n" + "#" * 72, flush=True)
-        print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
-        print("#" * 72, flush=True)
-        try:
-            fila = repo.fila_estado(uf)
-        except Exception as exc:
-            stats["erros"] += 1
-            print(f"❌ Erro lendo fila de {uf}: {exc}", flush=True)
-            continue
-
-        if not fila:
-            print(f"🏁 {uf}: nenhuma instituição V5 pendente.", flush=True)
-            continue
-
-        print(f"📚 {uf}: {len(fila)} instituição(ões) pendente(s).", flush=True)
-        for item in fila:
-            if processadas >= MAX_INSTITUICOES_POR_EXECUCAO:
-                print("\n⏸️ Limite seguro desta execução atingido.", flush=True)
-                print("➡️ A próxima execução retoma a fila V5.", flush=True)
-                resumo()
-                if stats["erros"]: raise SystemExit(2)
-                return
-            ok = processar_instituicao(repo, item)
-            processadas += 1
-            if not ok:
-                print("⏸️ Busca externa instável. Encerrando este ciclo para evitar excesso de requisições.", flush=True)
-                resumo()
-                raise SystemExit(2)
+    fila = repo.fila_nacional()
+    print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
+    for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
+        if not processar_instituicao(repo, item):
+            resumo()
+            raise SystemExit(2)
+    if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
+        print("⏸️ A próxima execução retoma por faculdade.", flush=True)
 
     resumo()
     if stats["erros"]: raise SystemExit(2)
@@ -798,9 +812,7 @@ def preparar_lista():
     repo = SupabaseRepo.from_env()
     if not garantir_fila_oficial(repo): raise SystemExit(1)
     print("LISTA CARREGADA: instituicoes_nutricao",flush=True)
-    print("Estados/DF, município da oferta, faculdade, curso, fonte e status.",flush=True)
-    for uf,nome in ESTADOS:
-        print(f"{uf} | {nome} | pendentes: {repo.contar_pendentes_uf(uf)}",flush=True)
+    print(f"Faculdades pendentes na pesquisa nacional: {len(repo.fila_nacional())}. Inclui EaD.",flush=True)
 
 
 if __name__ == "__main__":

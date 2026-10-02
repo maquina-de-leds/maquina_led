@@ -204,3 +204,30 @@ class MunicipiosTests(unittest.TestCase):
         self.assertEqual([r['nome'] for r in out],['Ana Silva','Bruna Souza'])
 
 if __name__=='__main__': unittest.main(verbosity=2)
+
+class FilaFaculdadesTests(unittest.TestCase):
+    def test_polos_estados_e_status_nao_repetem_faculdade(self):
+        dados = [dict(id=3,instituicao="Universidade Teste",estado="SP",cidade="A",status="pendente"),
+                 dict(id=1,instituicao="Universidade Teste",estado="AC",cidade="B",status="concluido"),
+                 dict(id=2,instituicao="Outra Faculdade",estado="DF",cidade="C",status="erro")]
+        fila = s.agrupar_faculdades(dados)
+        self.assertEqual(len(fila), 2)
+        item = next(x for x in fila if x["instituicao"] == "Universidade Teste")
+        self.assertEqual(item["id"], 1)
+        self.assertIsNone(item["cidade"])
+        self.assertIsNone(item["estado"])
+        self.assertIn("faculdade_1", s.etapa_captacao_item(item))
+        self.assertEqual(s.agrupar_faculdades(list(reversed(dados))), fila)
+
+    def test_pesquisa_nacional_salva_nome_sem_instagram(self):
+        repo = Repo()
+        item = s.agrupar_faculdades([repo.item])[0]
+        registro = dict(nome="Ana Silva",ano=2026,periodo="2026/1",
+                        evidencia="Nutrição turma 2026/1",contexto_academico="Nutrição turma 2026/1")
+        with patch.object(s,"consultas_leads",return_value=["Nutrição turma 2026"]), patch.object(s.time,"sleep"):
+            self.assertTrue(s.processar_instituicao(repo,item,
+                search_fn=lambda *args: [{"href":"https://universidade.edu.br/turma"}],
+                source_fn=lambda *args: ([registro],[])))
+        self.assertEqual(len(repo.saved),1)
+        self.assertEqual(repo.saved[0]["nome"],"Ana Silva")
+        self.assertEqual(repo.cp["status"],"concluido")
