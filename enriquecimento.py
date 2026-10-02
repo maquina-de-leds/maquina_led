@@ -4,6 +4,7 @@ import time
 import random
 import unicodedata
 from urllib.parse import urlparse
+from fontes_academicas import url_permitida
 
 from ddgs import DDGS
 from supabase import create_client
@@ -43,7 +44,6 @@ stats = {
     "ignorados_nao_pessoa": 0,
     "instagram_encontrado": 0,
     "instagram_repetido": 0,
-    "linkedin_encontrado": 0,
     "sem_contato": 0,
     "erros": 0,
 }
@@ -487,7 +487,7 @@ def buscar_instagram(
 
             resultados = list(
                 ddgs.text(
-                    consulta,
+                    consulta + " -site:linkedin.com",
                     max_results=
                         MAX_RESULTADOS
                 )
@@ -505,6 +505,8 @@ def buscar_instagram(
             continue
 
         for resultado in resultados:
+            if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
+                continue
 
             url = (
                 resultado.get("href")
@@ -557,7 +559,6 @@ def buscar_handle_em_texto(
     consultas = [
         f'"{nome}" Instagram Nutrição',
         f'"{nome}" "instagram.com/" Nutrição',
-        f'"{nome}" LinkedIn Instagram Nutrição',
     ]
 
     padroes = [
@@ -571,7 +572,7 @@ def buscar_handle_em_texto(
 
             resultados = list(
                 ddgs.text(
-                    consulta,
+                    consulta + " -site:linkedin.com",
                     max_results=8
                 )
             )
@@ -581,6 +582,8 @@ def buscar_handle_em_texto(
             continue
 
         for resultado in resultados:
+            if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
+                continue
 
             texto = (
                 str(
@@ -632,76 +635,7 @@ def buscar_handle_em_texto(
 
 
 # ============================================================
-# LINKEDIN COMO APOIO
-# ============================================================
-
-def buscar_linkedin(
-    ddgs,
-    lead
-):
-
-    nome = lead["nome"]
-
-    instituicao = (
-        lead.get("instituicao")
-        or ""
-    )
-
-    consultas = [
-        f'"{nome}" Nutrição LinkedIn',
-        f'"{nome}" site:linkedin.com/in',
-    ]
-
-    if instituicao:
-
-        consultas.insert(
-            0,
-            f'"{nome}" "{instituicao}" LinkedIn'
-        )
-
-    for consulta in consultas:
-
-        try:
-
-            resultados = list(
-                ddgs.text(
-                    consulta,
-                    max_results=8
-                )
-            )
-
-        except Exception:
-
-            continue
-
-        for resultado in resultados:
-
-            url = (
-                resultado.get("href")
-                or resultado.get("url")
-                or ""
-            )
-
-            if (
-                "linkedin.com/in/"
-                not in url.lower()
-            ):
-                continue
-
-            print(
-                f"      💼 LinkedIn encontrado: {url}",
-                flush=True
-            )
-
-            return url
-
-        pausa()
-
-    return None
-
-
-# ============================================================
-# ATUALIZAR LEAD
+# ATUALIZAR CONTATO DO LEAD
 # ============================================================
 
 def atualizar_lead(
@@ -891,50 +825,10 @@ def processar_lead(
 
         return
 
-    # ========================================================
-    # LINKEDIN AUXILIAR
-    # ========================================================
+    atualizar_lead(lead["id"])
+    stats["sem_contato"] += 1
+    print("   ⏳ Continua pendente de Instagram", flush=True)
 
-    linkedin = buscar_linkedin(
-        ddgs,
-        lead
-    )
-
-    if linkedin:
-
-        stats[
-            "linkedin_encontrado"
-        ] += 1
-
-        atualizar_lead(
-            lead["id"],
-            linkedin=linkedin
-        )
-
-        print(
-            "   ✅ LinkedIn salvo como fonte auxiliar",
-            flush=True
-        )
-
-    else:
-
-        atualizar_lead(
-            lead["id"]
-        )
-
-        stats[
-            "sem_contato"
-        ] += 1
-
-        print(
-            "   ⏳ Continua pendente de contato",
-            flush=True
-        )
-
-
-# ============================================================
-# EXECUÇÃO
-# ============================================================
 
 def executar():
 
@@ -950,7 +844,7 @@ def executar():
     )
 
     print(
-        "INSTAGRAM PRIORITÁRIO + LINKEDIN AUXILIAR",
+        "INSTAGRAM — ENRIQUECIMENTO DOS NOMES CAPTADOS",
         flush=True
     )
 
@@ -1028,11 +922,6 @@ def executar():
         flush=True
     )
 
-    print(
-        f"LinkedIn encontrados: "
-        f"{stats['linkedin_encontrado']}",
-        flush=True
-    )
 
     print(
         f"Continuam sem contato: "

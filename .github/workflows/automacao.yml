@@ -3,23 +3,25 @@ name: Automacao Maquina de Leads
 on:
   workflow_dispatch:
 
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+
 jobs:
   executar:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 90
     steps:
       - name: Baixar codigo
         uses: actions/checkout@v4
-
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Instalar dependencias
-        run: |
-          pip install requests supabase ddgs beautifulsoup4
-
+        run: pip install requests supabase ddgs pypdf
+      - name: Verificar extracao e fila antes da captura
+        run: python -m unittest discover -p 'test_*.py'
       - name: Executar automacao
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

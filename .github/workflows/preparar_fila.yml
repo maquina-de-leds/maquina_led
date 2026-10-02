@@ -1,0 +1,31 @@
+name: Preparar lista de faculdades
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/preparar_fila.yml'
+
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: pip install requests supabase pypdf
+      - name: Testar montagem da lista e extracao
+        run: python -m unittest discover -p 'test_*.py'
+      - name: Carregar lista por municipio no Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u scraper.py --preparar-fila

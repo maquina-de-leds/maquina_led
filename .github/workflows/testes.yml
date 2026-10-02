@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'scraper.py'
+      - 'fontes_academicas.py'
+      - 'enriquecimento.py'
       - 'test_scraper.py'
       - '.github/workflows/testes.yml'
   pull_request:
@@ -20,5 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Instalar leitor PDF
+        run: pip install pypdf
       - name: Validar qualificacao e retomada sem acesso ao Supabase
         run: python -m unittest discover -p 'test_*.py' -v

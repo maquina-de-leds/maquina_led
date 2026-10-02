@@ -1,115 +1,156 @@
-import contextlib
-import io
 import unittest
 from unittest.mock import patch
+import ast
+from pathlib import Path
 import scraper as s
+import fontes_academicas as f
 
 class Repo:
     def __init__(self):
-        self.cp = None
-        self.item = dict(id=1, instituicao='Universidade Teste', estado='SP')
-        self.saved = []
-    def controle_get(self, etapa): return self.cp
-    def controle_salvar(self, etapa, dados): self.cp = dados.copy()
-    def atualizar_instituicao(self, iid, **dados): self.item.update(dados)
-    def lead_existe(self, *args): return False
-    def instagram_usado(self, *args): return False
-    def inserir_lead(self, dados): self.saved.append(dados)
+        self.cp=None
+        self.item=dict(id=1,instituicao='Universidade Teste',estado='SP')
+        self.saved=[]
+    def controle_get(self,*args): return self.cp
+    def controle_salvar(self,etapa,data): self.cp=data.copy()
+    def atualizar_instituicao(self,iid,**data): self.item.update(data)
+    def lead_existe(self,*args): return False
+    def instagram_usado(self,*args): return False
+    def inserir_lead(self,data): self.saved.append(data)
 
-class QualificationTests(unittest.TestCase):
-    def test_invalid_or_unproven_profiles(self):
-        for text in [
-            'Nutrição, recém-formada em 2019',
-            'Nutrição. Não estou no último período: 2º semestre',
-            'Nutricionista desde 2010; concluinte de Psicologia 2026',
-            'Nutrição 2019–2023, orientadora de TCC 2026',
-            'Nutrição: estágio supervisionado no 3º semestre, 2026',
-            'Nutrição 2026–2025', 'Nutrição, TCC 2027',
-            'Nutrição, recém-formada',
-            'Nutrição; contratada em 2026 após TCC',
-            'Nutrição 2021–2024; emprego em 2026',
-        ]:
-            with self.subTest(text=text): self.assertFalse(s.lead_qualificado(text))
-    def test_valid_profiles_and_metadata(self):
-        for text, year in [
-            ('Nutrição, colação de grau em 2025', 2025),
-            ('Nutrição 2021.1–2025.2', 2025),
-            ('Nutrição, recém‑formada em 2026', 2026),
-            ('Nutrição, recém formada em 2025', 2025),
-            ('Nutrição, último período em 2026', 2026),
-            ('Nutrição, 8º semestre em 2026', 2026),
-            ('Nutrição, TCC 2025; emprego em 2026', 2025),
-            ('Nutrição, estágio final 2026', 2026),
-        ]:
-            with self.subTest(text=text):
-                self.assertTrue(s.lead_qualificado(text))
-                self.assertEqual(s.identificar_ano(text), year)
-                self.assertIsNotNone(s.identificar_periodo(text))
-    def test_snippet_does_not_borrow_second_person(self):
-        result=dict(title='Ana Silva | LinkedIn',body='Veja o perfil de Ana Silva. Nutrição UFAC. Veja o perfil de Maria Souza, recém-formada em Nutrição UFAC 2026.', href='https://linkedin.com/in/ana-silva')
-        text=s.contexto_resultado_perfil(result)
-        self.assertNotIn('Maria', text)
-        self.assertFalse(s.lead_qualificado(text))
-    def test_institution_overlap(self):
-        self.assertFalse(s.relacionado_a_instituicao('Universidade Federal de Mato Grosso do Sul', 'Universidade Federal de Mato Grosso',alias='UFMT'))
-        self.assertTrue(s.relacionado_a_instituicao('Nutrição UFMT 2026', 'Universidade Federal de Mato Grosso',alias='UFMT'))
-        self.assertFalse(s.relacionado_a_instituicao('Universidade Federal do Rio Grande do Sul', 'Universidade Federal do Rio Grande do Norte'))
-    def test_domain_and_person(self):
-        self.assertIsNone(s.extrair_nome_resultado(dict(title='Ana Silva',href='https://fake-linkedin.com/in/ana')))
-        self.assertEqual(s.extrair_nome_resultado(dict(title='Ana Silva | LinkedIn',href='https://br.linkedin.com/in/ana')), 'Ana Silva')
-    def test_searches_cover_both_names_and_years(self):
-        qs=s.consultas_leads('Universidade Teste','UT')
-        for term in ('"Universidade Teste"','"UT"'):
-            for signal in ('TCC 2025','TCC 2026','"7º período"','"estágio final"','"colação de grau" 2025'):
-                self.assertTrue(any(term in q and signal in q for q in qs))
+class FontesTests(unittest.TestCase):
+    def extract(self,html):
+        return f.ler_html(html,'https://universidade.edu.br/turmas','Universidade Teste')[0]
+    def test_lista_nutricao_exclui_professores_e_outro_curso(self):
+        html='''<title>Universidade Teste</title><h1>Formandos de Educação Física e Nutrição</h1>
+        <p>Colação de grau em abril de 2025.</p>
+        <p>Professora Maria Docente, paraninfa.</p>
+        <p>Os formandos de Educação Física são: Pedro Santos; João Lima.</p>
+        <p>Os formandos de Nutrição que irão colar grau são: Ana Silva; Bruna Souza; e Carla Ribeiro.</p>'''
+        out=self.extract(html)
+        self.assertEqual([x['nome'] for x in out],['Ana Silva','Bruna Souza','Carla Ribeiro'])
+        self.assertEqual({x['ano'] for x in out},{2025})
+    def test_ano_da_turma_prevalece_publicacao(self):
+        html='''<title>Universidade Teste — Formatura Nutrição</title><p>Publicado em 13/03/2026</p>
+        <p>Curso de Nutrição, referente ao 2º semestre de 2025.</p>
+        <p>São formandos desta turma: Ana Silva, Bruna Souza e Carla Ribeiro.</p>'''
+        out=self.extract(html)
+        self.assertEqual(len(out),3)
+        self.assertEqual({x['periodo'] for x in out},{'2025/2'})
+    def test_listas_por_secao_sem_contaminar_ano_ou_curso(self):
+        out=self.extract('''<title>Universidade Teste</title><h2>Formandos Nutrição 2025.1</h2><ul><li>Ana Silva</li></ul>
+        <h2>Formandos Nutrição 2024.2</h2><ul><li>Bruna Souza</li></ul>
+        <h2>Formandos Psicologia 2026.2</h2><ul><li>Carla Ribeiro</li></ul>
+        <h2>Formandos Nutrição 2026.2</h2><ul><li>Daniel Santos</li></ul>''')
+        self.assertEqual([(x['nome'],x['periodo']) for x in out],[('Ana Silva','2025/1'),('Daniel Santos','2026/2')])
+    def test_instagram_pessoal_apenas_quando_associado(self):
+        out=self.extract('''<title>Universidade Teste</title><h2>Formandos Nutrição 2026/1</h2>
+        <ul><li>Ana Silva <a href="https://instagram.com/ana.nutri">Instagram</a></li><li>Bruna Souza</li></ul>
+        <footer><a href="https://instagram.com/universidade">Instagram</a></footer>''')
+        self.assertEqual(out[0]['instagram'],'@ana.nutri')
+        self.assertIsNone(out[1]['instagram'])
+    def test_instagram_nao_e_compartilhado_por_lista(self):
+        self.assertIsNone(f.instagram_associado('Ana Silva; Bruna Souza @turma','Ana Silva'))
+    def test_tcc_autores_e_orientadores_separados(self):
+        out=self.extract('''<title>Universidade Teste</title><h1>TCC Nutrição 2026.1</h1>
+        <p>Autores: Ana Silva e Bruna Souza</p><p>Orientadora: Maria Docente</p>''')
+        self.assertEqual([x['nome'] for x in out],['Ana Silva','Bruna Souza'])
+        self.assertTrue(all('TCC' in x['evidencia'] for x in out))
+    def test_metadados_de_repositorio(self):
+        html='''<title>Universidade Teste — TCC Nutrição</title>
+        <meta name="dc.contributor.author" content="Silva, Ana">
+        <meta name="dc.date.issued" content="2025-09-10">'''
+        self.assertEqual([x['nome'] for x in self.extract(html)],['Ana Silva'])
+    def test_vinculo_ou_data_ausentes_nao_inventam_lead(self):
+        self.assertEqual(self.extract('<h1>Formandos Nutrição 2025</h1><li>Ana Silva</li>'),[])
+        self.assertEqual(self.extract('<title>Universidade Teste</title><h1>Formandos Nutrição</h1><li>Ana Silva</li>'),[])
+    def test_titulo_documento_nao_e_pessoa(self):
+        for title in ['Trabalho de Conclusão','Alimentação Saudável','Mostra De TCC','Consumo nutricional']:
+            self.assertIsNone(f.pessoa(title))
+    def test_pdf_texto_estruturado(self):
+        lines=[('Universidade Teste','pdf'),('Formandos Nutrição 2026.2','pdf'),('1 - Ana Silva','pdf'),('2 - Bruna Souza','pdf')]
+        self.assertEqual([x['nome'] for x in f.extrair_documento(lines,'Universidade Teste')],['Ana Silva','Bruna Souza'])
+    def test_pdf_parser(self):
+        from pypdf import PdfWriter
+        import io
+        pdf=PdfWriter(); pdf.add_blank_page(width=100,height=100)
+        data=io.BytesIO(); pdf.write(data)
+        self.assertEqual(f.ler_pdf(data.getvalue(),'Universidade Teste'),([],[]))
+    def test_links_pdf_e_bloqueio(self):
+        _, links=f.ler_html('<a href="/nutricao-2025.pdf">Lista</a><a href="https://linkedin.com/in/aluno">Pessoa</a>', 'https://universidade.edu.br/turma','Universidade Teste')
+        self.assertEqual(links,['https://universidade.edu.br/nutricao-2025.pdf'])
+        for url in ['https://linkedin.com/in/aluno','https://br.linkedin.com/in/aluno','http://127.0.0.1/x']:
+            self.assertFalse(f.url_permitida(url))
 
-class SearchTests(unittest.TestCase):
+class FluxoTests(unittest.TestCase):
     def setUp(self):
         for key in s.stats: s.stats[key]=0
+    def test_consultas_institucionais(self):
+        qs=s.consultas_leads('Universidade Teste','UT')
+        self.assertFalse(any('site:linkedin.com/in' in q for q in qs))
+        for year in (2025,2026):
+            for signal in ('"formandos"','"TCC"','"turma"'):
+                self.assertTrue(any(signal in q and str(year) in q for q in qs))
     @patch.object(s.time,'sleep')
-    def test_no_results_requires_health(self, sleep):
-        def unavailable(*args): raise Exception('No results found')
-        self.assertIsNone(s.buscar_web('test', fetch_fn=unavailable))
-        def healthy(query,*args):
-            if query=='Brasil': return [dict(title='Brasil')]
-            raise Exception('No results found')
-        self.assertEqual(s.buscar_web('test',fetch_fn=healthy), [])
-    @patch.object(s.time,'sleep')
-    def test_error_followed_by_empty_is_not_confirmed_empty(self, sleep):
-        count=0
-        def fetch(*args):
-            nonlocal count
-            count+=1
-            if count==1: raise RuntimeError('timeout')
-            return []
-        self.assertIsNone(s.buscar_web('test',fetch_fn=fetch))
-    @patch.object(s.time,'sleep')
-    def test_second_scan_repeats_all_queries(self,sleep):
+    def test_segunda_varredura_completa(self,sleep):
         repo=Repo(); calls=[]
-        def search(query,*args): calls.append(query); return []
-        adapter=lambda *args: 0
-        s.processar_instituicao(repo,repo.item.copy(),search,adapter)
+        def search(q,*args): calls.append(q); return []
+        s.processar_instituicao(repo,repo.item.copy(),search,lambda *args:([],[]))
         first=calls.copy(); calls.clear()
-        s.processar_instituicao(repo,repo.item.copy(),search,adapter)
+        s.processar_instituicao(repo,repo.item.copy(),search,lambda *args:([],[]))
         self.assertEqual(calls,first)
         self.assertEqual(repo.item['status'],'concluido')
     @patch.object(s.time,'sleep')
-    def test_connection_failure_resumes_interrupted_query(self,sleep):
-        repo=Repo(); calls=[]
-        def search(query,*args): calls.append(query); return [] if len(calls)==1 else None
-        s.processar_instituicao(repo,repo.item.copy(),search,lambda *args:0)
-        failed=calls[-1]; calls.clear()
-        s.processar_instituicao(repo,repo.item.copy(),lambda q,*args: calls.append(q) or [],lambda *args:0)
-        self.assertEqual(calls[0],failed)
-    @patch.object(s.time,'sleep')
-    def test_only_valid_person_is_saved(self,sleep):
+    def test_salva_nome_com_e_sem_instagram_e_fonte(self,sleep):
         repo=Repo()
-        def search(*args):
-            return [dict(title='Ana Silva | LinkedIn',body='Nutrição Universidade Teste, colação de grau em 2025',href='https://linkedin.com/in/ana'),dict(title='Maria Souza | LinkedIn',body='Nutrição Universidade Teste, recém-formada em 2019',href='https://linkedin.com/in/maria')]
+        def source(url,*args):
+            return [dict(nome='Ana Silva',ano=2025,periodo='2025/2',instagram='@ana.nutri',evidencia='Turma Nutrição 2025/2 Ana Silva'),dict(nome='Bruna Souza',ano=2026,periodo='2026/2',instagram=None,evidencia='TCC Nutrição 2026/2 Bruna Souza')],[]
+        results=[dict(href='https://universidade.edu.br/turma'),dict(href='https://linkedin.com/in/aluno')]
         with patch.object(s,'consultas_leads',return_value=['test']):
-            s.processar_instituicao(repo,repo.item.copy(),search,lambda *args:0)
-        self.assertEqual([x['nome'] for x in repo.saved],['Ana Silva'])
-        self.assertEqual(repo.saved[0]['ano_alvo'],2025)
+            s.processar_instituicao(repo,repo.item.copy(),lambda *args:results,source)
+        self.assertEqual(len(repo.saved),2)
+        self.assertEqual(repo.saved[0]['instagram'],'@ana.nutri')
+        self.assertIsNone(repo.saved[1]['instagram'])
+        self.assertEqual(repo.saved[1]['proxima_acao'],'buscar_instagram')
+        self.assertEqual(repo.saved[0]['fonte_url'],'https://universidade.edu.br/turma')
+    @patch.object(s.time,'sleep')
+    def test_fontes_inacessiveis_nao_concluem_instituicao(self,sleep):
+        repo=Repo()
+        def fail(*args): raise RuntimeError('403')
+        with patch.object(s,'consultas_leads',return_value=['test']):
+            s.processar_instituicao(repo,repo.item.copy(),lambda *args:[dict(href='https://universidade.edu.br/turma')],fail)
+        self.assertEqual(repo.item['status'],'erro')
+        self.assertEqual(repo.cp['indice_pesquisa'],0)
+    @patch.object(s.time,'sleep')
+    def test_busca_indisponivel(self,sleep):
+        def fail(*args): raise RuntimeError('No results found')
+        self.assertIsNone(s.buscar_web('test',fetch_fn=fail))
+    def test_maquina2_nao_chama_busca_linkedin(self):
+        tree=ast.parse(Path(__file__).with_name('enriquecimento.py').read_text())
+        self.assertFalse(any(isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='buscar_linkedin' for x in ast.walk(tree)))
 
-if __name__=='__main__':
-    with contextlib.redirect_stdout(io.StringIO()): unittest.main(verbosity=2)
+
+class MunicipiosTests(unittest.TestCase):
+    def test_fila_usa_municipio_do_curso_e_nao_sede(self):
+        import tempfile,zipfile
+        ies='CO_IES;NO_IES;SG_IES;NO_MUNICIPIO_IES\n1;Universidade Teste;UT;Capital\n'
+        cursos='CO_IES;SG_UF;NO_MUNICIPIO;NO_CINE_ROTULO;NU_ANO_CENSO\n1;SP;Itu;Nutrição;2024\n1;SP;Sorocaba;Nutrição;2024\n1;SP;Sorocaba;Nutrição;2024\n1;SP;Capital;Direito;2024\n'
+        with tempfile.NamedTemporaryFile(suffix='.zip') as tmp:
+            with zipfile.ZipFile(tmp.name,'w') as z:
+                z.writestr('MICRODADOS_ED_SUP_IES_2024.CSV',ies.encode('utf-8'))
+                z.writestr('MICRODADOS_CADASTRO_CURSOS_2024.CSV',cursos.encode('utf-8'))
+            rows=s.ler_fila_inep_zip(tmp.name)
+        self.assertEqual({r['cidade'] for r in rows},{'Itu','Sorocaba'})
+        self.assertEqual(len(rows),2)
+    def test_todos_estados_e_df_estao_no_planejamento(self):
+        self.assertEqual(len(s.ESTADOS),27)
+        self.assertIn(('DF','Distrito Federal'),s.ESTADOS)
+    def test_criterios_amplos_e_localizacao(self):
+        qs=s.consultas_leads('Universidade Teste','UT','Itu','SP')
+        self.assertTrue(any('"Itu" SP' in q for q in qs))
+        for signal in ('"recém-formados"','"último período"','"estágio final"','"mostra" "autores"'):
+            self.assertTrue(any(signal in q for q in qs))
+    def test_mackenzie_formato_numerado_generico(self):
+        out=f.ler_html('<title>Universidade Teste — Mostra de TCC</title><h2>Nutrição 2026.1</h2><p>1 - Ana Silva e Bruna Souza</p>', 'https://universidade.edu.br/tcc','Universidade Teste')[0]
+        self.assertEqual([r['nome'] for r in out],['Ana Silva','Bruna Souza'])
+
+if __name__=='__main__': unittest.main(verbosity=2)

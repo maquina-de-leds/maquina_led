@@ -14,11 +14,11 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.7"
-ETAPA_CARGA_IES = "carga_inep_nutricao_v54"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v57"
-ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v57"
-ORIGEM_IES = "inep_censo_superior_v54"
+VERSAO = "v5.8"
+ETAPA_CARGA_IES = "carga_inep_nutricao_municipal_v58"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v58"
+ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v58"
+ORIGEM_IES = "inep_censo_superior_municipal_v58"
 MAX_RESULTADOS = 12
 MAX_INSTITUICOES_POR_EXECUCAO = 4
 PAUSA_ENTRE_BUSCAS = 3.0
@@ -26,19 +26,6 @@ PAUSA_ENTRE_BUSCAS = 3.0
 INEP_FONTES = [
     (2024, "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"),
 ]
-
-# Espelho processado e versionado a partir dos microdados oficiais do INEP 2024.
-# É usado porque o servidor de download do INEP pode resetar conexões longas
-# no GitHub Actions. A carga é validada antes de tocar a fila.
-INEP_MIRROR_URL = (
-    "https://raw.githubusercontent.com/esidiao/"
-    "observatorio-educacao-superior/main/data/instituicoes.json"
-)
-
-MACKENZIE_TCC_URL = (
-    "https://www.mackenzie.br/universidade/unidades-academicas/"
-    "ccbs/tcc-e-pesquisa/mostra-de-tcc"
-)
 
 ESTADOS = [
     ("AC", "Acre"), ("AL", "Alagoas"), ("AP", "Amapá"), ("AM", "Amazonas"),
@@ -62,7 +49,8 @@ stats = {
     "duplicados": 0,
     "rejeitados": 0,
     "erros": 0,
-    "revisao_necessaria": 0,
+    "fontes_visitadas": 0,
+    "fontes_sem_nomes": 0,
 }
 
 
@@ -130,112 +118,6 @@ def formatar_nome_instituicao(nome):
         else:
             out.append(p[:1].upper() + p[1:])
     return " ".join(out)
-
-
-def carregar_instituicoes_mirror_inep():
-    """Carrega fila estruturada de IES de Nutrição a partir de espelho reproduzível.
-
-    O JSON é gerado publicamente a partir dos microdados oficiais do Censo da
-    Educação Superior 2024. Validamos ano, volume e presença de uma referência
-    conhecida antes de aceitar a carga.
-    """
-    import requests
-
-    print("📥 Carregando espelho estruturado do Censo INEP 2024...", flush=True)
-    ultimo = None
-
-    for tentativa in range(1, 5):
-        try:
-            r = requests.get(
-                INEP_MIRROR_URL,
-                timeout=(20, 90),
-                headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"},
-            )
-            r.raise_for_status()
-            data = r.json()
-
-            if str(data.get("ano_censo")) != "2024":
-                raise RuntimeError(f"ano inesperado no espelho: {data.get('ano_censo')}")
-
-            ies = data.get("instituicoes") or {}
-            if len(ies) < 2000:
-                raise RuntimeError(f"espelho incompleto: apenas {len(ies)} IES totais")
-
-            registros = []
-            vistos = set()
-            nutricao_ies = 0
-
-            for item in ies.values():
-                oferta = item.get("oferta") or {}
-                nutricao = oferta.get("nutricao")
-                if not nutricao:
-                    continue
-
-                # Ignora registros sem qualquer atividade observada em Nutrição.
-                if not any(int(nutricao.get(k) or 0) > 0 for k in ("vagas", "matriculas", "concluintes", "cursos")):
-                    continue
-
-                nutricao_ies += 1
-                instituicao = formatar_nome_instituicao(item.get("nome") or "")
-                if not instituicao:
-                    continue
-
-                sigla = limpar_espacos(item.get("sigla") or "")
-                uf_sede = str(item.get("uf_sede") or "").strip().upper()
-                cidade_sede = limpar_espacos(item.get("municipio_sede") or "")
-                ufs = [str(x).strip().upper() for x in (item.get("ufs") or []) if str(x).strip()]
-                if not ufs and uf_sede:
-                    ufs = [uf_sede]
-
-                for uf in ufs:
-                    if uf not in {x[0] for x in ESTADOS}:
-                        continue
-                    cidade = cidade_sede if uf == uf_sede and cidade_sede else "Não identificado"
-                    chave = (uf, normalizar(instituicao))
-                    if chave in vistos:
-                        continue
-                    vistos.add(chave)
-                    registros.append({
-                        "estado": uf,
-                        "cidade": cidade,
-                        "instituicao": instituicao,
-                        "curso": "Nutrição",
-                        "origem": ORIGEM_IES,
-                        "fonte_url": INEP_FONTES[0][1],
-                        "status": "pendente",
-                        "fonte_validacao": (
-                            "INEP Censo Superior 2024 - espelho processado validado"
-                            + (f" | SIGLA={sigla}" if sigla else "")
-                        ),
-                        "validada": True,
-                        "tentativa_descoberta": 0,
-                    })
-
-            if nutricao_ies < 500:
-                raise RuntimeError(f"carga de Nutrição suspeita: apenas {nutricao_ies} IES")
-
-            acre = [
-                x for x in registros
-                if x["estado"] == "AC"
-                and normalizar(x["instituicao"]) == "universidade federal do acre"
-            ]
-            if not acre:
-                raise RuntimeError("validação de referência falhou: UFAC não encontrada no Acre")
-
-            print(
-                f"✅ Espelho validado: {len(ies)} IES totais, "
-                f"{nutricao_ies} com Nutrição, {len(registros)} filas IES/UF.",
-                flush=True,
-            )
-            return 2024, registros
-
-        except Exception as exc:
-            ultimo = exc
-            print(f"   ⚠️ Tentativa {tentativa}/4 falhou: {exc}", flush=True)
-            if tentativa < 4:
-                time.sleep(2 * tentativa)
-
-    raise RuntimeError(f"espelho estruturado indisponível após 4 tentativas: {ultimo}")
 
 
 # ============================================================
@@ -355,6 +237,16 @@ class SupabaseRepo:
         )
         return bool(r.data)
 
+    def completar_instagram(self, nome, instituicao, instagram):
+        if self.instagram_usado(instagram): return False
+        rows = (self.client.table("leds").select("id,instagram")
+                .eq("instituicao",instituicao).ilike("nome",nome).limit(1).execute()).data
+        if rows and not rows[0].get("instagram"):
+            (self.client.table("leds").update({"instagram":instagram,"proxima_acao":"primeiro_contato_instagram"})
+             .eq("id",rows[0]["id"]).is_("instagram","null").execute())
+            return True
+        return False
+
     def inserir_lead(self, dados):
         self.client.table("leds").insert(dados).execute()
 
@@ -362,6 +254,77 @@ class SupabaseRepo:
 # ============================================================
 # CARGA DETERMINISTICA DA FILA DE INSTITUICOES
 # ============================================================
+
+def ler_fila_inep_zip(caminho, ano=2024):
+    """Cruza cadastro de cursos/IES pelo CO_IES, preservando município da oferta."""
+    with zipfile.ZipFile(caminho) as zf:
+        cursos_nome = localizar_membro(zf, "CADASTRO_CURSOS") or localizar_membro(zf, "DM_CURSO")
+        ies_nome = localizar_membro(zf, "ED_SUP_IES") or localizar_membro(zf, "DM_IES")
+        if not cursos_nome or not ies_nome:
+            raise RuntimeError("ZIP INEP sem cadastro de cursos e instituições")
+        ies = {}
+        texto, rows = leitor_csv_zip(zf, ies_nome)
+        try:
+            for row in rows:
+                cod = valor(row,"CO_IES")
+                nome = valor(row,"NO_IES")
+                if cod and nome:
+                    ies[cod] = (formatar_nome_instituicao(nome),valor(row,"SG_IES"))
+        finally: texto.close()
+        texto, rows = leitor_csv_zip(zf,cursos_nome)
+        required = {"CO_IES","SG_UF","NO_MUNICIPIO","NO_CINE_ROTULO"}
+        if not required.issubset({str(c).upper() for c in (rows.fieldnames or [])}):
+            texto.close()
+            raise RuntimeError("Cadastro INEP sem campos necessários para curso/município")
+        registros = {}; sem_vinculo = 0
+        try:
+            for row in rows:
+                if normalizar(valor(row,"NO_CINE_ROTULO")) != "nutricao": continue
+                if valor(row,"NU_ANO_CENSO") and valor(row,"NU_ANO_CENSO") != str(ano):
+                    raise RuntimeError("Ano divergente no cadastro de cursos")
+                cod = valor(row,"CO_IES")
+                uf, cidade = valor(row,"SG_UF").upper(),limpar_espacos(valor(row,"NO_MUNICIPIO"))
+                if cod not in ies or uf not in {e[0] for e in ESTADOS} or not cidade:
+                    sem_vinculo += 1; continue
+                nome, sigla = ies[cod]
+                key = (uf,normalizar(cidade),normalizar(nome))
+                registros[key] = dict(estado=uf,cidade=cidade,instituicao=nome,curso="Nutrição",
+                                      origem=ORIGEM_IES,fonte_url=INEP_FONTES[0][1],status="pendente",
+                                      fonte_validacao=f"INEP {ano} cadastro de cursos por município | CO_IES={cod} | SIGLA={sigla}",
+                                      validada=True,tentativa_descoberta=0)
+        finally: texto.close()
+        if sem_vinculo:
+            raise RuntimeError(f"{sem_vinculo} ofertas de Nutrição sem município/instituição; carga incompleta")
+        return list(registros.values())
+
+
+def carregar_instituicoes_municipais_inep():
+    import requests
+    ano, url = INEP_FONTES[0]
+    for tentativa in range(1,4):
+        try:
+            print(f"📥 INEP {ano}: preparando fila faculdade/município, tentativa {tentativa}/3",flush=True)
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp,"inep.zip")
+                with requests.get(url,stream=True,timeout=(20,90)) as response:
+                    response.raise_for_status()
+                    size = 0
+                    with open(path,"wb") as dest:
+                        for chunk in response.iter_content(1024*1024):
+                            size += len(chunk)
+                            if size > 1024*1024*1024: raise RuntimeError("ZIP INEP acima de 1 GB")
+                            dest.write(chunk)
+                registros = ler_fila_inep_zip(path,ano)
+            estados = {r["estado"] for r in registros}
+            if estados != {e[0] for e in ESTADOS} or len(registros) < 500:
+                raise RuntimeError("Fila municipal incompleta: conferir estados e quantidade")
+            print(f"✅ INEP: {len(registros)} combinações faculdade/município nos 26 estados e DF",flush=True)
+            return ano,registros
+        except Exception as exc:
+            print(f"⚠️ Carga municipal INEP: {exc}",flush=True)
+            if tentativa == 3: raise
+            time.sleep(3.0)
+
 
 def garantir_fila_oficial(repo):
     cp = repo.controle_get(ETAPA_CARGA_IES)
@@ -381,13 +344,13 @@ def garantir_fila_oficial(repo):
     })
 
     try:
-        ano, registros = carregar_instituicoes_mirror_inep()
+        ano, registros = carregar_instituicoes_municipais_inep()
         if not registros:
             raise RuntimeError("o filtro oficial nao encontrou nenhum curso de Nutricao")
         repo.limpar_residuos_v4()
         repo.upsert_ies(registros)
         total = repo.contar_ies_v5()
-        if total < 20:
+        if total < len(registros):
             raise RuntimeError(f"carga suspeita: apenas {total} registros de Nutricao")
         repo.controle_salvar(ETAPA_CARGA_IES, {
             "estado": None,
@@ -397,7 +360,7 @@ def garantir_fila_oficial(repo):
             "ultimo_erro": None,
             "leads_encontrados": len(registros),
             "leads_salvos": total,
-            "fonte_atual": f"INEP {ano}",
+            "fonte_atual": f"INEP {ano} cadastro de cursos por município",
             "finalizado_em": agora(),
         })
         stats["ies_carregadas"] = total
@@ -416,8 +379,8 @@ def garantir_fila_oficial(repo):
         return False
 
 
-def preparar_varredura_v57(repo):
-    """Reabre a fila uma única vez para aplicar buscas e filtros V5.7.
+def preparar_varredura_v58(repo):
+    """Reabre a fila uma única vez para aplicar buscas e filtros V5.8.
 
     Os leads existentes são preservados; a deduplicação impede reinserção.
     """
@@ -440,13 +403,13 @@ def preparar_varredura_v57(repo):
         repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
             "estado": "BR",
             "cidade": "Nacional",
-            "instituicao": "Reabertura da fila para V5.7",
+            "instituicao": "Reabertura da fila para V5.8",
             "status": "concluido",
             "ultimo_erro": None,
             "finalizado_em": agora(),
         })
 
-        print("🔄 Fila oficial reaberta uma vez para a varredura V5.7.", flush=True)
+        print("🔄 Fila oficial reaberta uma vez para a varredura V5.8.", flush=True)
         return True
 
     except Exception as exc:
@@ -454,11 +417,11 @@ def preparar_varredura_v57(repo):
         repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
             "estado": "BR",
             "cidade": "Nacional",
-            "instituicao": "Reabertura da fila para V5.7",
+            "instituicao": "Reabertura da fila para V5.8",
             "status": "erro",
             "ultimo_erro": str(exc)[:1000],
         })
-        print(f"❌ Falha preparando a fila V5.7: {exc}", flush=True)
+        print(f"❌ Falha preparando a fila V5.8: {exc}", flush=True)
         return False
 
 
@@ -536,207 +499,20 @@ def alias_instituicao(item):
     return alias if 2 <= len(alias) <= 30 else None
 
 
-def consultas_leads(instituicao, alias=None):
-    # Descoberta ampla; aprovação depende exclusivamente da evidência do perfil.
-    termos = list(dict.fromkeys(limpar_espacos(t) for t in (alias, instituicao) if t))
-    sinais = [
-        '"último período"', '"último semestre"', '"7º semestre"',
-        '"8º semestre"', '"7º período"', '"8º período"',
-        '"recém-formada"', '"recém-formado"', 'concluinte',
-        '"estágio final"', '"graduanda em Nutrição"',
-        '"estudante de Nutrição"',
-    ]
-    sinais += [f'{sinal} {ano}' for ano in (2025, 2026)
-               for sinal in ('"formatura prevista"', 'TCC', '"colação de grau"')]
-    return [f'site:linkedin.com/in "{termo}" Nutrição {sinal}'
-            for sinal in sinais for termo in termos]
+def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
+    # Mesma estratégia para toda IES/município; o nome e a sigla são alternativos.
+    termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
+    sinais = ('"formandos"', '"colação de grau"', '"TCC"', '"concluintes"',
+              '"turma"', '"recém-formados"', '"recém-formadas"',
+              '"último semestre"', '"último período"', '"estágio final"',
+              '"alunos" "conclusão"', '"mostra" "autores"')
+    consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
+                 for ano in (2025, 2026) for sinal in sinais for termo in termos]
+    if cidade and normalizar(cidade) != "nao identificado":
+        consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano} -site:linkedin.com'
+                      for ano in (2025,2026)]
+    return consultas
 
-SINAIS_FASE_FINAL = [
-    "tcc", "trabalho de conclusao", "formanda", "formando", "formandas", "formandos",
-    "concluinte", "concluintes", "colacao de grau", "formatura", "recem-formad",
-    "7º periodo", "7o periodo", "7 periodo", "8º periodo", "8o periodo", "8 periodo",
-    "7º semestre", "7o semestre", "7 semestre", "8º semestre", "8o semestre", "8 semestre",
-    "7/8", "8/8", "estagio obrigatorio", "estagio supervisionado", "estagio final",
-    "ultimo semestre", "ultimo periodo",
-]
-
-BLOQUEIOS_PESSOA = [
-    "universidade", "faculdade", "centro universitario", "instituto", "vestibular", "curso",
-    "campus", "evento", "congresso", "google docs", "pos ead", "pos-graduacao", "programa",
-    "secretaria", "reitoria", "inscricoes", "edital", "processo seletivo", "portal do aluno",
-    "noticia", "noticias", "projeto pedagogico", "matriz curricular", "grade curricular",
-    "revista", "anais", "mostra de tcc", "trabalho de conclusao",
-]
-
-
-# Uma decisão reúne motivo, ano e período da mesma evidência.
-PADRAO_FINAL = r"\b(?:[78](?:o|º)?\s+(?:periodo|semestre)|[78]/8|ultimo\s+(?:periodo|semestre)|recem[- ]formad[oa]|concluinte|formand[oa]|formatura|colacao de grau|conclusao|concluir|concluid[oa]|graduad[oa]|tcc|trabalho de conclusao|estagio final)\b"
-PADRAO_ANO = r"\b(20\d{2})(?:[./][12])?\b"
-
-
-def avaliar_lead(texto):
-    n = normalizar(re.sub(r"https?://\S+", "", str(texto or "")))
-    def decisao(status, motivo, ano=None, periodo=None, evidencia=None):
-        return dict(status=status, motivo=motivo, ano=ano,
-                    periodo=periodo, evidencia=evidencia)
-    if not re.search(r"\b(?:nutricao|nutricionista)\b", n):
-        return decisao("rejeitado", "curso_ausente")
-    # Outro curso ou papel de orientação exige confirmação humana.
-    if re.search(r"\b(?:psicologia|enfermagem|fisioterapia|medicina|direito|engenharia)\b", n):
-        return decisao("revisao", "mais_de_um_curso")
-    if re.search(r"\b(?:orientador[a]?|coorientador[a]?|professor[a]?|docente)\b", n):
-        return decisao("revisao", "papel_academico_ambiguo")
-    if re.search(r"\b(?:nao|nunca|ainda nao)\b.{0,70}" + PADRAO_FINAL, n):
-        return decisao("revisao", "negacao_da_fase_final")
-    if re.search(r"\b[1-6](?:o|º)?\s+(?:periodo|semestre)\b", n):
-        return decisao("revisao", "periodo_inicial_ou_contraditorio")
-    # Pontos nas datas semestrais não encerram a evidência.
-    blocos = re.split(r"[!;|]|(?<!\d)\.(?!\d)", n)
-    for bloco in blocos:
-        curso = re.search(r"\b(?:nutricao|nutricionista)\b", bloco)
-        intervalo = re.search(r"\b(20\d{2})(?:[./][12])?\s*-\s*(20\d{2})(?:[./][12])?\b", bloco)
-        if curso and intervalo:
-            inicio, fim = map(int, intervalo.groups())
-            if fim < inicio:
-                return decisao("rejeitado", "intervalo_invertido")
-            if fim in (2025, 2026):
-                return decisao("qualificado", "formacao_com_data", fim, "conclusão", bloco.strip())
-            return decisao("rejeitado", "formacao_fora_da_janela", fim)
-    for bloco in blocos:
-        for sinal in re.finditer(PADRAO_FINAL, bloco):
-            # O ano deve estar perto do sinal, sem atravessar outra sentença.
-            anos = [(abs(m.start()-sinal.start()), int(m.group(1)))
-                    for m in re.finditer(PADRAO_ANO, bloco)
-                    if abs(m.start()-sinal.start()) <= 100]
-            if not anos:
-                continue
-            _, ano = min(anos)
-            if ano not in (2025, 2026):
-                return decisao("rejeitado", "fase_fora_da_janela", ano)
-            # Ano de emprego/publicação não prova data acadêmica.
-            if re.search(r"\b(?:emprego|contratad[oa]|publicacao|atualizad[oa])\b", bloco):
-                continue
-            periodo = sinal.group(0)
-            return decisao("qualificado", "fase_final_com_data", ano, periodo, bloco.strip())
-    return decisao("revisao", "sem_evidencia_academica_datada")
-
-
-def identificar_ano(texto):
-    return avaliar_lead(texto)["ano"]
-
-
-def identificar_periodo(texto):
-    return avaliar_lead(texto)["periodo"]
-
-
-def lead_qualificado(texto):
-    return avaliar_lead(texto)["status"] == "qualificado"
-
-
-def nome_parece_pessoa(nome):
-    nome = limpar_espacos(nome).strip(" -–—|:,.;")
-    if len(nome) < 6 or len(nome) > 90 or re.search(r"\d", nome):
-        return False
-    n = normalizar(nome)
-    if any(b in n for b in BLOQUEIOS_PESSOA):
-        return False
-    partes = nome.split()
-    if len(partes) < 2 or len(partes) > 7:
-        return False
-    conectores = {"de", "da", "do", "das", "dos", "e"}
-    principais = [p for p in partes if normalizar(p) not in conectores]
-    if len(principais) < 2:
-        return False
-    if normalizar(partes[0]) in {"estudante", "aluno", "aluna", "nutricao", "nutricionista", "tcc", "mostra"}:
-        return False
-    return True
-
-
-def extrair_nome_resultado(resultado):
-    """Extrai nome somente de perfis sociais individualizados.
-
-    Títulos genéricos de páginas/TCC não são tratados como pessoas. Isso evita
-    repetir o problema das versões antigas, que confundiam título de documento
-    com nome de aluno. Páginas oficiais em lista usam adaptadores específicos.
-    """
-    titulo = limpar_espacos(resultado.get("title", ""))
-    url = str(resultado.get("href") or resultado.get("url") or "")
-    host = urlparse(url).netloc.lower()
-
-    if (host == "linkedin.com" or host.endswith(".linkedin.com")) and urlparse(url).path.lower().startswith("/in/"):
-        titulo = re.sub(r"(?i)\s*[|\-–—•]\s*LinkedIn.*$", "", titulo)
-        candidato = re.split(r"\s+[\-–—|•]\s+", titulo, maxsplit=1)[0]
-    elif host == "instagram.com" or host.endswith(".instagram.com"):
-        caminho = urlparse(url).path.strip("/").split("/")[0].lower()
-        if not caminho or caminho in {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}:
-            return None
-        titulo = re.sub(r"\s*\(@[A-Za-z0-9._]+\).*$", "", titulo)
-        titulo = re.sub(r"(?i)\s*[|\-–—•]\s*Instagram.*$", "", titulo)
-        candidato = re.split(r"\s+[\-–—|•]\s+", titulo, maxsplit=1)[0]
-    else:
-        return None
-
-    candidato = limpar_espacos(candidato).strip(" -–—|•:,.;")
-    return candidato if nome_parece_pessoa(candidato) else None
-
-
-def contexto_resultado_perfil(resultado, nome=None):
-    """Isola o primeiro perfil do resultado.
-
-    Alguns buscadores agregam vários perfis do LinkedIn no mesmo snippet.
-    Sem este corte, evidência de uma segunda pessoa poderia qualificar a primeira.
-    """
-    titulo = limpar_espacos(resultado.get("title", ""))
-    corpo = limpar_espacos(resultado.get("body", ""))
-    url = str(resultado.get("href") or resultado.get("url") or "")
-
-    # O primeiro "LinkedIn" normalmente encerra o título do primeiro perfil.
-    idx_t = titulo.lower().find("linkedin")
-    if idx_t > 0:
-        titulo = titulo[:idx_t]
-
-    # Um convite inicial pertence ao perfil atual; os próximos iniciam outro.
-    corpo = re.sub(r"(?i)^(?:veja o perfil de|view|mira el perfil de)\s+", "", corpo)
-
-    # O texto útil do primeiro perfil vem antes do convite "Veja/View/Mira...".
-    corpo_n = normalizar(corpo)
-    cortes = [
-        "veja o perfil de",
-        "veja ",
-        "view ",
-        "mira el perfil de",
-    ]
-    indices = []
-    for marcador in cortes:
-        i = corpo_n.find(marcador)
-        if i >= 0:
-            indices.append(i)
-    if indices:
-        corpo = corpo[:min(indices)]
-
-    return limpar_espacos(f"{titulo} {corpo} {url}")
-
-
-def extrair_instagram(resultado):
-    url = str(resultado.get("href") or resultado.get("url") or "")
-    m = re.search(r"instagram\.com/([A-Za-z0-9._]+)", url, flags=re.I)
-    if not m:
-        return None
-    usuario = m.group(1).lower()
-    if usuario in {"p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv"}:
-        return None
-    return "@" + usuario
-
-
-def relacionado_a_instituicao(texto, instituicao, cidade="", alias=None):
-    ntexto, inst = normalizar(texto), normalizar(instituicao)
-    # UFMT e UFMS não são intercambiáveis.
-    if inst == "universidade federal de mato grosso":
-        ntexto = ntexto.replace("universidade federal de mato grosso do sul", "")
-    if inst and re.search(rf"(?<!\w){re.escape(inst)}(?!\w)", ntexto):
-        return True
-    alias_n = normalizar(alias or "")
-    return bool(alias_n and re.search(rf"(?<!\w){re.escape(alias_n)}(?!\w)", ntexto))
 
 def formatar_nome_pessoa(nome):
     partes = limpar_espacos(nome).lower().split()
@@ -753,21 +529,26 @@ def formatar_nome_pessoa(nome):
 def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None):
     nome = formatar_nome_pessoa(nome)
     if repo.lead_existe(nome, instituicao):
+        if instagram and hasattr(repo,"completar_instagram"):
+            if repo.completar_instagram(nome,instituicao,instagram):
+                print(f"      Instagram completado pela fonte: {nome} | {instagram}",flush=True)
         stats["duplicados"] += 1
         print(f"      ♻️ DUPLICADO: {nome}", flush=True)
         return False
     if instagram and repo.instagram_usado(instagram):
         instagram = None
 
-    ano = ano_forcado or identificar_ano(texto)
-    periodo = periodo_forcado or identificar_periodo(texto)
+    ano = ano_forcado
+    periodo = periodo_forcado
+    if ano not in {2025,2026} or not periodo:
+        raise ValueError("Lead precisa de ano/período extraídos da fonte acadêmica")
     dados = {
         "nome": nome,
         "instagram": instagram,
         "linkedin": linkedin,
         "whatsapp": None,
         "nicho": "nutricionista",
-        "origem": "captacao_nacional_fila_v57",
+        "origem": "captacao_nacional_fila_v58",
         "status": "novo",
         "app_baixado": False,
         "nao_contatar": False,
@@ -789,76 +570,12 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
-        "fonte_validacao": "fonte_publica_validada_v57",
+        "fonte_validacao": "fonte_publica_validada_v58",
     }
     repo.inserir_lead(dados)
     stats["leads_salvos"] += 1
     print(f"      ✅ SALVO: {nome}" + (f" | {instagram}" if instagram else " | Instagram pendente"), flush=True)
     return True
-
-
-# ============================================================
-# ADAPTADOR OFICIAL MACKENZIE (FONTE ESTRUTURADA)
-# ============================================================
-
-def extrair_nomes_mackenzie_html(html):
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    linhas = [limpar_espacos(x) for x in soup.stripped_strings]
-    dentro = False
-    nomes = []
-    for linha in linhas:
-        n = normalizar(linha)
-        if "nutricao 2026.1" in n:
-            dentro = True
-            continue
-        if dentro and ("cursos de graduacao" in n or "cursos de pós-graduação" in n or "cursos de pos-graduacao" in n):
-            break
-        if not dentro:
-            continue
-        m = re.match(r"^\d{1,2}\s*-\s*(.+)$", linha)
-        if not m:
-            continue
-        bloco = m.group(1)
-        for parte in re.split(r"\s+e\s+", bloco, flags=re.I):
-            parte = limpar_espacos(parte)
-            if nome_parece_pessoa(parte):
-                nomes.append(parte)
-    # dedupe preservando ordem
-    out = []
-    vistos = set()
-    for nome in nomes:
-        k = normalizar(nome)
-        if k not in vistos:
-            vistos.add(k)
-            out.append(nome)
-    return out
-
-
-def processar_adaptadores_oficiais(repo, item):
-    inst_n = normalizar(item.get("instituicao"))
-    if not (item.get("estado") == "SP" and inst_n == "universidade presbiteriana mackenzie"):
-        return 0
-    import requests
-    try:
-        r = requests.get(MACKENZIE_TCC_URL, timeout=(20, 60), headers={"User-Agent": "Mozilla/5.0 MaquinaLeads/1.0"})
-        r.raise_for_status()
-        nomes = extrair_nomes_mackenzie_html(r.text)
-        salvos = 0
-        for nome in nomes:
-            stats["leads_encontrados"] += 1
-            if salvar_lead(
-                repo, nome, item["instituicao"], item.get("cidade") or "São Paulo", item["estado"],
-                "Mostra de TCC Nutrição 2026.1 - Universidade Presbiteriana Mackenzie",
-                MACKENZIE_TCC_URL, ano_forcado=2026, periodo_forcado="TCC"
-            ):
-                salvos += 1
-        if nomes:
-            print(f"   📄 Fonte oficial Mackenzie: {len(nomes)} nome(s) lido(s), {salvos} novo(s).", flush=True)
-        return salvos
-    except Exception as exc:
-        print(f"   ⚠️ Adaptador Mackenzie indisponível: {exc}", flush=True)
-        return 0
 
 
 # ============================================================
@@ -885,121 +602,79 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
     })
 
 
-def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar_adaptadores_oficiais):
-    iid = item["id"]
-    instituicao = item["instituicao"]
+def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
+    from fontes_academicas import carregar_fonte, url_permitida
+    source_fn = source_fn or carregar_fonte
+    iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
-    uf = item["estado"]
     alias = alias_instituicao(item)
-    consultas = consultas_leads(instituicao, alias)
+    consultas = consultas_leads(instituicao, alias, cidade, uf)
     total = len(consultas)
-
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
-    nova_varredura = bool(cp and cp.get("status") == "erro"
-                         and cp.get("ultimo_erro") == "Nenhum candidato encontrado; programada segunda varredura")
-    if not nova_varredura and cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
-        try:
-            inicio = max(0, min(int(cp.get("indice_pesquisa") or 0), total - 1))
-        except Exception:
-            inicio = 0
-
-    print("\n" + "=" * 72, flush=True)
-    print(f"🏫 {uf} | {cidade} | {instituicao}", flush=True)
-    print("=" * 72, flush=True)
-
+    if cp and cp.get("instituicao") == instituicao and cp.get("estado") == uf and cp.get("status") in {"processando", "erro"}:
+        # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
+        if cp.get("ultimo_erro") == "Busca externa indisponível":
+            inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1)
+    print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
-    checkpoint_captacao(repo, item, "processando", inicio, total, consulta=consultas[inicio])
-
     salvos_antes = stats["leads_salvos"]
     encontrados_local = 0
-
-    # Adaptadores oficiais sao idempotentes por causa da deduplicacao.
-    adapter_fn(repo, item)
-
+    fontes_vistas = set()
+    falhas_fontes = 0
     for idx in range(inicio, total):
         consulta = consultas[idx]
-        print(f"   🔎 [{idx + 1}/{total}] {consulta}", flush=True)
-        checkpoint_captacao(repo, item, "processando", idx, total, consulta=consulta, encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
+        print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
+        checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,
+                            encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
         resultados = search_fn(consulta, MAX_RESULTADOS)
         if resultados is None:
-            repo.atualizar_instituicao(iid, status="erro")
+            repo.atualizar_instituicao(iid,status="erro")
             stats["instituicoes_erro"] += 1
-            checkpoint_captacao(repo, item, "erro", idx, total, consulta=consulta, erro="Busca externa indisponível", encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
-            print("   ❌ Falha real de conexão. A próxima execução retoma exatamente desta consulta.", flush=True)
+            checkpoint_captacao(repo,item,"erro",idx,total,consulta=consulta,erro="Busca externa indisponível",
+                                encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
             return False
-
-        for resultado in resultados:
-            url = str(resultado.get("href") or resultado.get("url") or "")
-            nome = extrair_nome_resultado(resultado)
-            if not nome:
-                stats["rejeitados"] += 1
+        fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados]
+        for url, depth in fila:
+            if url in fontes_vistas or not url_permitida(url): continue
+            fontes_vistas.add(url)
+            try:
+                stats["fontes_visitadas"] += 1
+                registros, links = source_fn(url,instituicao,alias)
+                if not registros: stats["fontes_sem_nomes"] += 1
+            except Exception as exc:
+                falhas_fontes += 1
+                stats["erros"] += 1
+                print(f"      ⚠️ FONTE PENDENTE: {url} | {str(exc)[:250]}",flush=True)
                 continue
-
-            texto_real = contexto_resultado_perfil(resultado, nome)
-            avaliacao = avaliar_lead(texto_real)
-            if avaliacao["status"] != "qualificado":
-                stats["rejeitados"] += 1
-                if avaliacao["status"] == "revisao":
-                    stats["revisao_necessaria"] += 1
-                print(f"      FILTRO: {nome} | {avaliacao['status']} | {avaliacao['motivo']}", flush=True)
-                continue
-            if not relacionado_a_instituicao(texto_real, instituicao, cidade, alias):
-                continue
-
-            encontrados_local += 1
-            stats["leads_encontrados"] += 1
-            linkedin = url if "linkedin.com/in/" in url.lower() else None
-            salvar_lead(
-                repo, nome, instituicao, cidade, uf, texto_real, url,
-                extrair_instagram(resultado), linkedin=linkedin
-            )
-
-        checkpoint_captacao(repo, item, "processando", idx + 1, total, consulta=None, encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
+            print(f"      📄 FONTE: {url} | pessoas: {len(registros)}",flush=True)
+            if depth == 0:
+                fila.extend((link,1) for link in links if url_permitida(link))
+            for registro in registros:
+                encontrados_local += 1
+                stats["leads_encontrados"] += 1
+                salvar_lead(repo,registro["nome"],instituicao,cidade,uf,registro["evidencia"],url,
+                            instagram=registro.get("instagram"),
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"])
+        checkpoint_captacao(repo,item,"processando",idx+1,total,
+                            encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)
-
-    novos = stats["leads_salvos"] - salvos_antes
-
-    # Busca pública pode oscilar. Se uma instituição inteira vier zerada,
-    # damos uma segunda varredura em execução futura antes de considerá-la
-    # realmente concluída.
-    tentativas_zero = int(item.get("tentativa_descoberta") or 0)
-
-    if encontrados_local == 0 and tentativas_zero < 1:
-        tentativas_zero += 1
-        repo.atualizar_instituicao(
-            iid,
-            status="erro",
-            tentativa_descoberta=tentativas_zero,
-        )
-        stats["instituicoes_processadas"] += 1
+    novos = stats["leads_salvos"]-salvos_antes
+    tentativas = int(item.get("tentativa_descoberta") or 0)
+    repetir_zero = encontrados_local == 0 and tentativas < 1
+    if falhas_fontes or repetir_zero:
+        repo.atualizar_instituicao(iid,status="erro",tentativa_descoberta=tentativas+1)
         stats["instituicoes_erro"] += 1
-        checkpoint_captacao(
-            repo,
-            item,
-            "erro",
-            total,
-            total,
-            encontrados=0,
-            salvos=novos,
-            erro="Nenhum candidato encontrado; programada segunda varredura",
-        )
-        print(
-            "   🔁 ZERO LEADS: instituição ficará para uma segunda varredura "
-            "antes de ser concluída.",
-            flush=True,
-        )
-        return True
-
-    repo.atualizar_instituicao(
-        iid,
-        status="concluido",
-        tentativa_descoberta=tentativas_zero,
-    )
+        motivo = (f"Fontes inacessíveis: {falhas_fontes}; repetir varredura"
+                  if falhas_fontes else "Nenhum candidato encontrado; programada segunda varredura")
+        checkpoint_captacao(repo,item,"erro",0,total,erro=motivo,encontrados=encontrados_local,salvos=novos)
+        print(f"   🔁 REVISITAR: {motivo}",flush=True)
+    else:
+        repo.atualizar_instituicao(iid,status="concluido",tentativa_descoberta=tentativas)
+        stats["instituicoes_concluidas"] += 1
+        checkpoint_captacao(repo,item,"concluido",total,total,encontrados=encontrados_local,salvos=novos)
     stats["instituicoes_processadas"] += 1
-    stats["instituicoes_concluidas"] += 1
-    checkpoint_captacao(repo, item, "concluido", total, total, encontrados=encontrados_local, salvos=novos)
-    print(f"   ✅ CONCLUÍDA | candidatos web: {encontrados_local} | novos totais: {novos}", flush=True)
+    print(f"   RESUMO | pessoas: {encontrados_local} | novos: {novos} | fontes com falha: {falhas_fontes}",flush=True)
     return True
 
 
@@ -1016,7 +691,8 @@ def resumo():
         ("Novos leads salvos", "leads_salvos"),
         ("Duplicados ignorados", "duplicados"),
         ("Resultados rejeitados", "rejeitados"),
-        ("Candidatos que exigem revisão", "revisao_necessaria"),
+        ("Fontes visitadas", "fontes_visitadas"),
+        ("Fontes sem nomes extraídos", "fontes_sem_nomes"),
         ("Erros", "erros"),
     ]:
         print(f"{rotulo}: {stats[chave]}", flush=True)
@@ -1032,7 +708,7 @@ def executar():
         resumo()
         raise SystemExit(1)
 
-    if not preparar_varredura_v57(repo):
+    if not preparar_varredura_v58(repo):
         resumo()
         raise SystemExit(1)
 
@@ -1058,17 +734,33 @@ def executar():
                 print("\n⏸️ Limite seguro desta execução atingido.", flush=True)
                 print("➡️ A próxima execução retoma a fila V5.", flush=True)
                 resumo()
+                if stats["erros"]: raise SystemExit(2)
                 return
             ok = processar_instituicao(repo, item)
             processadas += 1
             if not ok:
                 print("⏸️ Busca externa instável. Encerrando este ciclo para evitar excesso de requisições.", flush=True)
                 resumo()
-                return
+                raise SystemExit(2)
 
     resumo()
+    if stats["erros"]: raise SystemExit(2)
     print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
 
 
+def preparar_lista():
+    repo = SupabaseRepo.from_env()
+    if not garantir_fila_oficial(repo): raise SystemExit(1)
+    print("LISTA CARREGADA: instituicoes_nutricao",flush=True)
+    print("Estados/DF, município da oferta, faculdade, curso, fonte e status.",flush=True)
+    for uf,nome in ESTADOS:
+        fila=repo.fila_estado(uf)
+        print(f"{uf} | {nome} | pendentes: {len(fila)}",flush=True)
+
+
 if __name__ == "__main__":
-    executar()
+    import sys
+    if "--preparar-fila" in sys.argv:
+        preparar_lista()
+    else:
+        executar()
