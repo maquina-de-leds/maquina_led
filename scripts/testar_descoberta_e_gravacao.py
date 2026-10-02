@@ -2,7 +2,7 @@
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
 Confere também parágrafos que misturam notícias de alunos com falas de docentes.
 """
-import json,signal,sys,time
+import json,re,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import scraper as s
@@ -58,6 +58,9 @@ for consulta in consultas:
             host=s.urlparse(url).hostname or ''
             if 'nutricao' not in resumo and not (host.endswith('mackenzie.br') and any(t in url for t in ['mostra-de-tcc','.pdf'])):
                 adiadas.append({'fonte':url,'motivo':'Sem evidência de Nutrição no resumo; fora do diagnóstico rápido'})
+                continue
+            if not re.search(f.FASE,resumo) and not (host.endswith('mackenzie.br') and any(t in url for t in ['mostra-de-tcc','.pdf'])):
+                adiadas.append({'fonte':url,'motivo':'Resumo sem indício acadêmico; página genérica fora do teste curto'})
                 continue
             if any(t in resumo for t in ['exemplo de curriculo','modelo de curriculo','modelos de curriculo','exemplos de curriculo']):
                 adiadas.append({'fonte':url,'motivo':'Página de modelo de currículo, não evidência de pessoa real'})
