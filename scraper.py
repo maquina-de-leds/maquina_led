@@ -932,32 +932,31 @@ def resumo():
 
 
 def executar():
-    print("🔬 TESTE DDGS AUTO", flush=True)
+    print("🔬 TESTE RECÉM-FORMADOS 2025/2026", flush=True)
     from ddgs import DDGS
     consultas = [
-        'site:linkedin.com/in CESMAC Nutrição "último período"',
-        'site:linkedin.com/in Mackenzie "estudante de Nutrição"',
-        'site:linkedin.com/in UFAC "aluno de Nutrição"',
+        'site:linkedin.com/in Mackenzie Nutrição "recém-formada" 2026',
+        'site:linkedin.com/in Mackenzie Nutrição "recém-formada" 2025',
+        '"Suélen Borguezan" Mackenzie Nutrição 2025',
+        '"Suélen Borguezan" Mackenzie Nutrição 2026',
+        'site:linkedin.com/in CESMAC Nutrição "recém-formada" 2026',
+        'site:linkedin.com/in UFF Nutrição "recém-formada" 2026',
     ]
     for consulta in consultas:
         print("\n" + "="*72, flush=True)
         print("CONSULTA:", consulta, flush=True)
         try:
-            rs = DDGS(timeout=20).text(
-                consulta,
-                region="br-pt",
-                safesearch="moderate",
-                max_results=10,
-                backend="auto",
-            )
-            rs = list(rs or [])
-            print("AUTO TOTAL:", len(rs), flush=True)
-            for r in rs[:7]:
-                print("  TITLE:", limpar_espacos(r.get("title","")), flush=True)
-                print("  URL:", r.get("href") or r.get("url") or "", flush=True)
-                print("  BODY:", limpar_espacos(r.get("body",""))[:600], flush=True)
+            rs=list(DDGS(timeout=20).text(
+                consulta, region="br-pt", safesearch="moderate",
+                max_results=10, backend="auto"
+            ) or [])
         except Exception as exc:
-            print("AUTO ERRO:", exc, flush=True)
+            print("ERRO:", exc, flush=True); continue
+        print("TOTAL:", len(rs), flush=True)
+        for r in rs[:7]:
+            print("TITLE:", limpar_espacos(r.get("title","")), flush=True)
+            print("URL:", r.get("href") or r.get("url") or "", flush=True)
+            print("BODY:", limpar_espacos(r.get("body",""))[:800], flush=True)
 
 
 if __name__ == "__main__":
