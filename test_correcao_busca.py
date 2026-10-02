@@ -61,3 +61,8 @@ class FormatosReaisTests(unittest.TestCase):
         html='<title>Mackenzie Nutrição</title><meta name="citation_publication_date" content="2025-11-27"><p>v. 9 n. 12 (2017)</p><div>Ana Silva, Universidade Presbiteriana Mackenzie</div><p>Graduanda do curso de Nutrição</p>'
         r,_=f.ler_html(html,'https://revista.example/article','Universidade Presbiteriana Mackenzie','Mackenzie')
         self.assertEqual(r,[])
+
+    def test_pagina_do_curso_nao_extrai_rotulos(self):
+        html='<title>Nutrição Mackenzie</title><p>O aluno realiza TCC e estágio em 2026.</p><ul><li>Avaliações e Premiações</li><li>Currículo Lattes</li><li>Indústria de Alimentos</li><li>Área Comercial</li></ul>'
+        r,_=f.ler_html(html,'https://mackenzie.br/nutricao','Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual(r,[])

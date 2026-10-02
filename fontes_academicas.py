@@ -104,7 +104,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:industria|alimentos|mercado|clinica|esportiva|coletiva|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -163,7 +163,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     single_course = not re.search(OUTROS_CURSOS, norm(context))
     active = single_course and 'nutricao' in norm(context)
     year, period = default_year, default_period
-    mode = 'lista' if active and re.search(r'tcc|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|ultimo (?:periodo|semestre)|estagio final|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico',norm(context)) else None
+    mode = 'lista' if active and re.search(r'tcc|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico',norm(' '.join(t for t,tag in linhas if tag in {'title','h1'}))) else None
     out = []
     role_section = False
     def add(name, evidence, y, per):
@@ -266,13 +266,13 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         if active and mode == 'autores' and tag in {'dd','p','pdf'}:
             for name in nomes_da_lista(line): add(name,line,year,period)
             continue
-        if active and re.search(FASE, n) and len(line) < 180:
+        if active and re.search(FASE, n) and len(line) < 180 and (tag.startswith('h') or (tag in {'pdf','text'} and re.search(r'\b202[56]\b',n))):
             local_y, local_p = periodo_academico(line)
             year, period = local_y or year, local_p or period
             mode = 'lista'
         if not active or not mode: continue
         # Apenas itens de lista/tabela, ou linhas de PDF em seção acadêmica.
-        if tag in {'li','tr','pdf','text'} or (tag=='p' and re.match(r'^\d+[.)\-–]?\s',line)):
+        if tag in {'li','tr','pdf'} or (tag in {'p','text'} and re.match(r'^\d+[.)\-–]?\s',line)):
             if tag == 'tr' and re.search(r'\b(?:nome|aluno|autor)\b', n):
                 mode = 'tabela'; continue
             for name in nomes_da_lista(re.sub(r'https?://\S+|@[\w.]+','',line)):
