@@ -932,7 +932,8 @@ def resumo():
 
 
 def executar():
-    print("🔬 TESTE BACKEND POR BACKEND", flush=True)
+    print("🔬 TESTE DDGS AUTO", flush=True)
+    from ddgs import DDGS
     consultas = [
         'site:linkedin.com/in CESMAC Nutrição "último período"',
         'site:linkedin.com/in Mackenzie "estudante de Nutrição"',
@@ -941,14 +942,22 @@ def executar():
     for consulta in consultas:
         print("\n" + "="*72, flush=True)
         print("CONSULTA:", consulta, flush=True)
-        for backend in ["brave", "bing", "duckduckgo"]:
-            try:
-                rs = ddgs_texto(consulta, backend, 10)
-                print(f"BACKEND={backend} TOTAL={len(rs)}", flush=True)
-                for r in rs[:3]:
-                    print("  ", limpar_espacos(r.get("title","")), "|", r.get("href") or r.get("url") or "", flush=True)
-            except Exception as exc:
-                print(f"BACKEND={backend} ERRO={exc}", flush=True)
+        try:
+            rs = DDGS(timeout=20).text(
+                consulta,
+                region="br-pt",
+                safesearch="moderate",
+                max_results=10,
+                backend="auto",
+            )
+            rs = list(rs or [])
+            print("AUTO TOTAL:", len(rs), flush=True)
+            for r in rs[:7]:
+                print("  TITLE:", limpar_espacos(r.get("title","")), flush=True)
+                print("  URL:", r.get("href") or r.get("url") or "", flush=True)
+                print("  BODY:", limpar_espacos(r.get("body",""))[:600], flush=True)
+        except Exception as exc:
+            print("AUTO ERRO:", exc, flush=True)
 
 
 if __name__ == "__main__":
