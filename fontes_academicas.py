@@ -40,11 +40,17 @@ class Pagina(HTMLParser):
         self.linhas, self.links, self.metas = [], [], {}
         self.bloco, self.partes, self.skip = None, [], 0
         self.textos = []
+        self.skip_stack = []
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
-        if tag in {'script', 'style', 'nav', 'footer'}:
-            self.skip += 1
-        if self.skip: return
+        void = {'img','br','hr','input','meta','link','source','wbr','area','base','embed','param','track','col'}
+        if self.skip_stack:
+            if tag not in void: self.skip_stack.append(tag)
+            return
+        region = ' '.join([a.get('class',''),a.get('id',''),a.get('role','')]).lower()
+        if tag in {'script','style','nav','footer'} or re.search(r'menu|navbar|sidebar|cookie|navigation|rodape',region):
+            if tag not in void: self.skip_stack.append(tag)
+            return
         if tag == 'meta':
             self.metas.setdefault(a.get('name', a.get('property', '')).lower(), []).append(a.get('content', ''))
         if tag == 'img' and a.get('alt'): self.textos.append(a['alt'])
@@ -56,16 +62,17 @@ class Pagina(HTMLParser):
             self.bloco, self.partes = tag, []
         if tag in {'br', 'td', 'th'} and self.bloco: self.partes.append(' | ')
     def handle_data(self, data):
-        if self.skip: return
+        if self.skip_stack: return
         if data.strip().lower() in {'instagram','ver instagram','perfil instagram'}: return
         self.textos.append(data)
         if self.bloco: self.partes.append(data)
         elif data.strip(): self.linhas.append((' '.join(data.split()), 'text'))
     def handle_endtag(self, tag):
-        if tag in {'script', 'style', 'nav', 'footer'} and self.skip:
-            self.skip -= 1
+        if self.skip_stack:
+            if tag in self.skip_stack:
+                while self.skip_stack:
+                    if self.skip_stack.pop() == tag: break
             return
-        if self.skip: return
         if self.bloco == tag:
             self.linhas.append((' '.join(''.join(self.partes).split()), tag))
             self.bloco, self.partes = None, []
@@ -99,6 +106,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
+    if re.search(r'\b(?:laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -151,7 +159,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     single_course = not re.search(OUTROS_CURSOS, norm(context))
     active = single_course and 'nutricao' in norm(context)
     year, period = default_year, default_period
-    mode = 'lista' if active and re.search(FASE,norm(context)) else None
+    mode = 'lista' if active and re.search(r'tcc|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|ultimo (?:periodo|semestre)|estagio final',norm(context)) else None
     out = []
     role_section = False
     def add(name, evidence, y, per):
@@ -261,7 +269,7 @@ def ler_html(html, url, instituicao, alias=None):
     records = extrair_documento(page.linhas,instituicao,alias,' '.join(page.textos),page.metas)
     links = []
     for href in page.links:
-        target=urljoin(url,href)
+        target=urljoin(url,href).split('#',1)[0]
         n=norm(target)
         if url_permitida(target) and (urlparse(target).hostname==urlparse(url).hostname) and re.search(r'\.pdf(?:\?|$)|nutri|tcc|formand|colacao|concluint', n):
             if target not in links and target != url: links.append(target)
@@ -308,3 +316,4 @@ def carregar_fonte(url, instituicao, alias=None):
         encoding=response.encoding if response.encoding and response.encoding.lower()!='iso-8859-1' else 'utf-8'
         return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
     raise ValueError('Excesso de redirecionamentos')
+

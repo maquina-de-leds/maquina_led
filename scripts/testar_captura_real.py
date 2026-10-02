@@ -5,6 +5,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import scraper as s
 
 repo = s.SupabaseRepo.from_env()
+# Correção reversível apenas dos rótulos indevidos gravados no primeiro piloto.
+nomes_indevidos = ['Laboratório de Estudos Anatômicos', 'Laboratório de Estética Corporal', 'Laboratório de Comportamento Motor', 'Laboratório de Desenho', 'Laboratório de Estudos Cardiorrespiratórios', 'Laboratório de Imaginologia', 'Laboratório de Informática', 'Laboratório de Moda', 'Estilo Ii', 'Estilo I', 'Sou Aluno', 'Uno Medical e Office', 'Trabalhe Conosco', 'Pós-graduação Lato Sensu', 'Tipo Sanguíneo', 'Ensino Médio', 'Página de Privacidade', 'Uso de Cookies', 'Processos Seletivos', 'Pesquisa e Extensão', 'Regulamentos e Normas', 'Diretório Acadêmico', 'Empresa Júnior', 'Procedimentos de Matrícula', 'Calendário de Matrícula']
+ruins=(repo.client.table('leds').select('id,nome').in_('nome',nomes_indevidos)
+       .eq('origem','captacao_nacional_fila_v58').gte('created_at','2026-10-02T15:51:00Z')
+       .in_('instituicao',['Centro Universitário Ateneu','Universidade Comunitária da Região de Chapecó',
+                          'Universidade Federal do Rio Grande do Norte']).execute()).data or []
+for registro in ruins:
+    repo.client.table('leds').update(dict(qualificado=False,nao_contatar=True,
+        proxima_acao='revisar_nome_extraido')).eq('id',registro['id']).execute()
+    confirmado=(repo.client.table('leds').select('qualificado,nao_contatar,proxima_acao')
+                .eq('id',registro['id']).execute()).data[0]
+    assert confirmado['qualificado'] is False and confirmado['nao_contatar'] is True
+print(f'REGISTROS INDEVIDOS SEPARADOS DA CAPTAÇÃO: {len(ruins)}; nenhum registro excluído.',flush=True)
+from fontes_academicas import carregar_fonte
+# Regressão nas páginas reais que produziram falsos nomes e nas listas legítimas.
+for url,inst,alias,esperado in [
+    ('https://uniateneu.edu.br/','Centro Universitário Ateneu','UniAteneu',0),
+    ('https://nutrivital.ind.br/parceria-nutrivital-unochapeco-inovacao/',
+     'Universidade Comunitária da Região de Chapecó','Unochapecó',0),
+    ('https://uno.edu.br/noticias/colacao-de-grau',
+     'Universidade Comunitária da Região de Chapecó','Unochapecó',15),
+    ('https://uno.edu.br/noticias/outorga-de-grau-1',
+     'Universidade Comunitária da Região de Chapecó','Unochapecó',13),
+]:
+    registros,_=carregar_fonte(url,inst,alias)
+    assert len(registros)==esperado,(url,len(registros),esperado)
+    print(f'REGRESSÃO REAL: {url} | candidatos: {len(registros)}',flush=True)
 # Somente carregar fila já existente, sem reinstalar ou reabrir histórico.
 dados=[]
 for offset in range(0, 20000, 1000):

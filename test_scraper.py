@@ -269,3 +269,19 @@ class AlunoIndividualTests(unittest.TestCase):
         self.assertEqual(out, [])
 
 if __name__=='__main__': unittest.main(verbosity=2)
+
+
+class MenusNaoSaoAlunosTests(unittest.TestCase):
+    def test_rotulos_reais_do_piloto_nao_sao_pessoas(self):
+        nomes=['Laboratório de Informática','Estilo II','Sou Aluno','Uno Medical e Office',
+               'Trabalhe Conosco','Pós-graduação Lato Sensu','Tipo Sanguíneo','Ensino Médio',
+               'Página de Privacidade','Uso de Cookies','Processos Seletivos',
+               'Pesquisa e Extensão','Regulamentos e Normas','Diretório Acadêmico',
+               'Empresa Júnior','Procedimentos de Matrícula','Calendário de Matrícula']
+        for nome in nomes:
+            self.assertIsNone(f.pessoa(nome),nome)
+
+    def test_menu_em_div_nao_entra_na_lista_de_formandos(self):
+        html='<title>Universidade Teste — Nutrição formandos 2026/1</title><div class="menu-principal"><ul><li><a>Ana Menu</a></li></ul></div><h2>Alunos de Nutrição 2026/1</h2><ul><li>Ana Silva</li></ul>'
+        out=f.ler_html(html,'https://universidade.edu.br/turma','Universidade Teste')[0]
+        self.assertEqual([x['nome'] for x in out],['Ana Silva'])
