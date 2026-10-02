@@ -1,4 +1,4 @@
-"""Validação curta de fontes reais, gravação e duplicação; sem varredura nacional."""
+"""Validação curta de fontes reais, gravação e duplicação; sem varredura nacional. Reteste após deduplicação sem instituição."""
 import json,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
