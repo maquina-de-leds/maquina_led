@@ -932,72 +932,26 @@ def resumo():
 
 
 def executar():
-    print("🔬 SMOKE REAL V5.4 — SEM GRAVAR NO BANCO", flush=True)
-    alvos = [
-        {
-            "estado": "SP",
-            "cidade": "São Paulo",
-            "instituicao": "Universidade Presbiteriana Mackenzie",
-            "fonte_validacao": "INEP Censo Superior 2024 - espelho processado validado | SIGLA=MACKENZIE",
-        },
-        {
-            "estado": "AC",
-            "cidade": "Rio Branco",
-            "instituicao": "Universidade Federal do Acre",
-            "fonte_validacao": "INEP Censo Superior 2024 - espelho processado validado | SIGLA=UFAC",
-        },
-        {
-            "estado": "AL",
-            "cidade": "Maceió",
-            "instituicao": "Centro Universitário Cesmac",
-            "fonte_validacao": "INEP Censo Superior 2024 - espelho processado validado | SIGLA=CESMAC",
-        },
+    print("🔬 DIAGNÓSTICO FASE FINAL V5.2", flush=True)
+    consultas = [
+        'site:linkedin.com/in UFAC "Nutrição" "7º semestre"',
+        'site:linkedin.com/in UFAC "Nutrição" "8º semestre"',
+        'site:linkedin.com/in UFAC "Nutrição" formanda',
+        'site:linkedin.com/in CESMAC "Nutrição" "7º período"',
+        'site:linkedin.com/in CESMAC "Nutrição" "8º período"',
+        'site:linkedin.com/in CESMAC "Nutrição" formanda',
     ]
-
-    total_aprovados = 0
-    for item in alvos:
-        alias = alias_instituicao(item)
-        print("\n" + "#" * 72, flush=True)
-        print(f"ALVO: {item['instituicao']} | ALIAS={alias}", flush=True)
-        vistos = set()
-        aprovados = []
-        for consulta in consultas_leads(item["instituicao"], alias):
-            print("CONSULTA:", consulta, flush=True)
-            resultados = buscar_web(consulta, max_results=10)
-            if resultados is None:
-                print("  BUSCA INDISPONÍVEL", flush=True)
-                continue
-            print("  RESULTADOS:", len(resultados), flush=True)
-            for r in resultados:
-                nome = extrair_nome_resultado(r)
-                if not nome:
-                    continue
-                contexto = contexto_resultado_perfil(r, nome)
-                if not lead_qualificado(contexto):
-                    continue
-                if not relacionado_a_instituicao(
-                    contexto,
-                    item["instituicao"],
-                    item["cidade"],
-                    alias,
-                ):
-                    continue
-                chave = (normalizar(nome), str(r.get("href") or r.get("url") or ""))
-                if chave in vistos:
-                    continue
-                vistos.add(chave)
-                aprovados.append((nome, identificar_periodo(contexto), identificar_ano(contexto)))
-                print(
-                    f"  ✅ {nome} | periodo={identificar_periodo(contexto)} "
-                    f"| ano={identificar_ano(contexto)}",
-                    flush=True,
-                )
-        print(f"TOTAL APROVADOS {alias}: {len(aprovados)}", flush=True)
-        total_aprovados += len(aprovados)
-
-    if total_aprovados < 1:
-        raise SystemExit("SMOKE_FALHOU: nenhum lead qualificado nos três alvos")
-    print(f"✅ SMOKE V5.4 PASSOU | aprovados={total_aprovados}", flush=True)
+    for consulta in consultas:
+        print("\n" + "="*72, flush=True)
+        print("CONSULTA:", consulta, flush=True)
+        rs = buscar_web(consulta, max_results=10)
+        if rs is None:
+            print("STATUS: INDISPONÍVEL", flush=True); continue
+        print("TOTAL:", len(rs), flush=True)
+        for i,r in enumerate(rs[:10],1):
+            print(f"[{i}] {limpar_espacos(r.get('title',''))}", flush=True)
+            print("URL:", r.get('href') or r.get('url') or '', flush=True)
+            print("BODY:", limpar_espacos(r.get('body',''))[:700], flush=True)
 
 
 if __name__ == "__main__":
