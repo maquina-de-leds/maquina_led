@@ -1,0 +1,29 @@
+name: Teste real de grupos de alunos
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/testar_grupos_reais.py'
+      - '.github/workflows/testar_grupos_reais.yml'
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf lxml
+      - run: python -m unittest discover -p 'test_*.py'
+      - name: Buscar grupos, comparar consultas e gravar candidatos
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u scripts/testar_grupos_reais.py
