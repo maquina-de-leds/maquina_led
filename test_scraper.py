@@ -18,6 +18,24 @@ class Repo:
     def inserir_lead(self,data): self.saved.append(data)
 
 class FontesTests(unittest.TestCase):
+    def test_noticia_multicurso_lista_por_rotulo(self):
+        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><p>Publicado em 29/04/2026</p>
+        <p>Formandos receberam a outorga de grau.</p><p>Psicologia: Ana Silva.</p>
+        <p>Nutrição: Melissa Gomes da Silva.</p>''')
+        self.assertEqual([x['nome'] for x in out],['Melissa Gomes da Silva'])
+        self.assertEqual(out[0]['ano'],2026)
+    def test_noticia_oradora_explicitamente_do_curso(self):
+        out=self.extract('''<title>Universidade Teste — Colação de grau</title><p>Turma do semestre 2026.1.</p>
+        <p>Após a cerimônia, a Giovanna Kimie, do Curso de Nutrição, fez o discurso como oradora dos formandos.
+        O formando Paulo César, do Curso de Administração, fez o juramento.</p>''')
+        self.assertEqual([x['nome'] for x in out],['Giovanna Kimie'])
+        self.assertEqual(out[0]['periodo'],'2026/1')
+    def test_semestre_explicito_em_paragrafo_longo(self):
+        self.assertEqual(f.periodo_academico('Colação de grau para 234 formandos de 23 cursos de graduação na modalidade presencial e a distância, que concluíram no semestre 2026.1.'),(2026,'2026/1'))
+    def test_rotulo_de_curso_em_secao_docente_nao_salva_professor(self):
+        out=self.extract('''<title>Universidade Teste — Colação de grau Nutrição 2026</title>
+        <h2>Professores homenageados</h2><p>Nutrição: Maria Silva.</p>''')
+        self.assertEqual(out,[])
     def extract(self,html):
         return f.ler_html(html,'https://universidade.edu.br/turmas','Universidade Teste')[0]
     def test_lista_nutricao_exclui_professores_e_outro_curso(self):

@@ -109,6 +109,7 @@ def pessoa(text):
 def nomes_da_lista(text):
     # Conjunção separa pessoas somente quando ambos os lados são nomes completos.
     out = []
+    role_section = False
     for part in re.split(r';|\s*\|\s*|,', text):
         part = re.sub(r'^\s*e\s+', '', part).strip()
         pair = re.split(r'\s+e\s+', part)
@@ -166,11 +167,16 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     for i, (line, tag) in enumerate(linhas):
         n = norm(line)
         if not line: continue
+        if tag in {'h1','h2','h3','h4','dt'}:
+            role_section = bool(re.search(PAPEL,n))
+        elif len(line)<100 and re.match(r'^(?:professores|docentes|orientadores|coordenadores|banca)\b',n):
+            role_section = True
+        elif len(line)<100 and re.match(r'^(?:formandos|concluintes|autores|alunos|discentes)\b',n):
+            role_section = False
         # Notícias multicurso também publicam linhas como 'Nutrição: Nome'.
         course_list = re.match(r'^Nutrição\s*:\s*(.+)', line, re.I)
         if course_list and not re.search(PAPEL, n):
-            previous = ' '.join(t for t, _ in linhas[max(0,i-2):i])
-            if re.search(r'professor|docente|coordenador|banca|orientador', norm(previous)) and not re.search(r'formand|concluinte|outorga|colacao', norm(previous)):
+            if role_section:
                 continue
             for name in nomes_da_lista(course_list.group(1)):
                 add(name,line,default_year,default_period)
