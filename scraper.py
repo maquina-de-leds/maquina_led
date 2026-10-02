@@ -932,37 +932,23 @@ def resumo():
 
 
 def executar():
-    print("🔬 TESTE DAS EXPRESSÕES DE BUSCA SUGERIDAS", flush=True)
+    print("🔬 TESTE BACKEND POR BACKEND", flush=True)
     consultas = [
-        'site:linkedin.com/in Mackenzie "aluno de Nutrição"',
-        'site:linkedin.com/in Mackenzie "estudante de Nutrição"',
-        'site:linkedin.com/in Mackenzie Nutrição "último período"',
-        'site:linkedin.com/in Mackenzie Nutrição "recém-formada"',
-        'site:linkedin.com/in UFAC "aluno de Nutrição"',
-        'site:linkedin.com/in UFAC "estudante de Nutrição"',
-        'site:linkedin.com/in UFAC Nutrição "último período"',
-        'site:linkedin.com/in UFAC Nutrição "recém-formada"',
-        'site:linkedin.com/in CESMAC "aluno de Nutrição"',
-        'site:linkedin.com/in CESMAC "estudante de Nutrição"',
         'site:linkedin.com/in CESMAC Nutrição "último período"',
-        'site:linkedin.com/in CESMAC Nutrição "recém-formada"',
+        'site:linkedin.com/in Mackenzie "estudante de Nutrição"',
+        'site:linkedin.com/in UFAC "aluno de Nutrição"',
     ]
     for consulta in consultas:
         print("\n" + "="*72, flush=True)
         print("CONSULTA:", consulta, flush=True)
-        rs = buscar_web(consulta, max_results=10)
-        if rs is None:
-            print("STATUS: INDISPONÍVEL", flush=True)
-            continue
-        print("TOTAL:", len(rs), flush=True)
-        for i, r in enumerate(rs[:10], 1):
-            titulo = limpar_espacos(r.get("title",""))
-            url = r.get("href") or r.get("url") or ""
-            corpo = limpar_espacos(r.get("body",""))
-            print(f"[{i}] TITLE: {titulo}", flush=True)
-            print(f"    URL: {url}", flush=True)
-            print(f"    BODY: {corpo[:700]}", flush=True)
-            print(f"    NOME: {extrair_nome_resultado(r)}", flush=True)
+        for backend in ["brave", "bing", "duckduckgo"]:
+            try:
+                rs = ddgs_texto(consulta, backend, 10)
+                print(f"BACKEND={backend} TOTAL={len(rs)}", flush=True)
+                for r in rs[:3]:
+                    print("  ", limpar_espacos(r.get("title","")), "|", r.get("href") or r.get("url") or "", flush=True)
+            except Exception as exc:
+                print(f"BACKEND={backend} ERRO={exc}", flush=True)
 
 
 if __name__ == "__main__":
