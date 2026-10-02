@@ -32,6 +32,14 @@ for url,inst,alias,esperado in [
      'Universidade Comunitária da Região de Chapecó','Unochapecó',13),
 ]:
     registros,_=carregar_fonte(url,inst,alias)
+    if len(registros)!=esperado:
+        import requests
+        from fontes_academicas import Pagina
+        pagina=Pagina(); pagina.feed(requests.get(url,timeout=25).text)
+        for texto,tag in pagina.linhas:
+            if any(palavra in s.normalizar(texto) for palavra in ['giovanna','2026','nutricao','ateneu']):
+                print('DIAGNOSTICO HTML:',tag,texto[:1600],flush=True)
+        print('DIAGNOSTICO META:',pagina.metas,flush=True)
     assert len(registros)==esperado,(url,len(registros),esperado)
     print(f'REGRESSÃO REAL: {url} | candidatos: {len(registros)}',flush=True)
 # Somente carregar fila já existente, sem reinstalar ou reabrir histórico.
