@@ -2,13 +2,14 @@ import requests, os, tempfile, json
 from scraper import ler_fila_inep_zip, ESTADOS
 from fontes_academicas import ler_html
 url="https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"
-import subprocess
-try:
-    d=subprocess.run(["openssl","s_client","-connect","download.inep.gov.br:443","-servername","download.inep.gov.br","-showcerts"],input="",capture_output=True,text=True,timeout=12)
-    print("TLS",d.stdout,d.stderr,flush=True)
-except subprocess.TimeoutExpired as e: print("TLS TIMEOUT",e.stdout,e.stderr,flush=True)
+import certifi
+pem=requests.get("https://www.detic.unicamp.br/wp-content/uploads/sites/38/2026/05/intermediate_2025.pem",timeout=25)
+pem.raise_for_status()
+bundle="inep-ca.pem"
+with open(bundle,"w") as dest:
+    dest.write(open(certifi.where()).read()+"\n"+pem.text)
 ok=False
-for ca in [True, "/etc/ssl/certs/ca-certificates.crt"]:
+for ca in [bundle]:
     try:
         print("DOWNLOAD CA:",ca,flush=True)
         with requests.get(url,verify=ca,stream=True,timeout=(20,90)) as r:
