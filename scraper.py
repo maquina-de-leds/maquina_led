@@ -14,13 +14,14 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.4"
+VERSAO = "v5.6"
 ETAPA_CARGA_IES = "carga_inep_nutricao_v54"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v54"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v56"
+ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v56"
 ORIGEM_IES = "inep_censo_superior_v54"
 MAX_RESULTADOS = 12
-MAX_INSTITUICOES_POR_EXECUCAO = 8
-PAUSA_ENTRE_BUSCAS = 2.0
+MAX_INSTITUICOES_POR_EXECUCAO = 4
+PAUSA_ENTRE_BUSCAS = 3.0
 
 INEP_FONTES = [
     (2024, "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"),
@@ -413,13 +414,69 @@ def garantir_fila_oficial(repo):
         return False
 
 
+def preparar_varredura_v56(repo):
+    """Reabre uma única vez a fila V5.4 para usar o motor V5.6.
+
+    As primeiras instituições processadas pela V5.4 foram concluídas com o
+    buscador antigo e precisam ser varridas novamente. Também removemos apenas
+    as linhas de fila criadas pela branch de smoke V5.5; os leads válidos
+    encontrados nos testes permanecem na tabela leds.
+    """
+    cp = repo.controle_get(ETAPA_MIGRACAO_BUSCA)
+    if cp and cp.get("status") == "concluido":
+        return True
+
+    try:
+        (
+            repo.client.table("instituicoes_nutricao")
+            .delete()
+            .eq("origem", "inep_censo_superior_v55")
+            .execute()
+        )
+
+        (
+            repo.client.table("instituicoes_nutricao")
+            .update({
+                "status": "pendente",
+                "tentativa_descoberta": 0,
+                "ultima_verificacao": agora(),
+            })
+            .eq("origem", ORIGEM_IES)
+            .execute()
+        )
+
+        repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
+            "estado": "BR",
+            "cidade": "Nacional",
+            "instituicao": "Reabertura da fila V5.4 para V5.6",
+            "status": "concluido",
+            "ultimo_erro": None,
+            "finalizado_em": agora(),
+        })
+
+        print("🔄 Fila oficial reaberta uma vez para a varredura V5.6.", flush=True)
+        return True
+
+    except Exception as exc:
+        stats["erros"] += 1
+        repo.controle_salvar(ETAPA_MIGRACAO_BUSCA, {
+            "estado": "BR",
+            "cidade": "Nacional",
+            "instituicao": "Reabertura da fila V5.4 para V5.6",
+            "status": "erro",
+            "ultimo_erro": str(exc)[:1000],
+        })
+        print(f"❌ Falha preparando a fila V5.6: {exc}", flush=True)
+        return False
+
+
 # ============================================================
 # BUSCA WEB CONTROLADA
 # ============================================================
 
-def ddgs_texto(consulta, backend, max_results):
+def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
     from ddgs import DDGS
-    with DDGS(timeout=15) as ddgs:
+    with DDGS(timeout=20) as ddgs:
         return list(ddgs.text(
             consulta,
             region="br-pt",
@@ -430,45 +487,44 @@ def ddgs_texto(consulta, backend, max_results):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca com diagnóstico de 'sem resultado' versus indisponibilidade do motor.
+    """Busca robusta para o runner do GitHub.
 
-    DDGS pode lançar 'No results found' tanto para uma consulta realmente vazia
-    quanto quando um backend deixa de responder. Se todos os backends disserem
-    isso, fazemos uma única consulta de saúde antes de concluir que o resultado é vazio.
+    Testes reais mostraram que forçar Brave/Bing podia retornar zero para a
+    mesma consulta que o metabusca backend='auto' encontrava corretamente.
+    Também repetimos uma vez quando a resposta vem vazia, porque o índice pode
+    oscilar entre chamadas consecutivas no mesmo runner.
     """
-    backends = ["brave", "bing"]
-    sem_resultado = 0
-    erros_reais = []
+    ultimo_erro = None
 
-    for backend in backends:
+    for tentativa in range(1, 3):
         try:
-            resultados = fetch_fn(consulta, backend, max_results)
+            try:
+                resultados = fetch_fn(consulta, "auto", max_results)
+            except TypeError:
+                resultados = fetch_fn(consulta, max_results)
+
+            resultados = list(resultados or [])
             if resultados:
                 return resultados
-            # Retorno normal vazio do backend: resultado vazio confiável.
+
+            if tentativa < 2:
+                time.sleep(4.0)
+                continue
+
             return []
+
         except Exception as exc:
+            ultimo_erro = exc
             msg = str(exc)
+
+            if tentativa < 2:
+                time.sleep(4.0)
+                continue
+
             if "No results found" in msg:
-                sem_resultado += 1
-            else:
-                erros_reais.append(f"{backend}: {msg}")
-            time.sleep(0.5)
+                return []
 
-    if sem_resultado:
-        # Diagnóstico barato: se uma busca extremamente ampla funciona, tratamos
-        # 'No results found' da consulta específica como vazio real. Se nem a
-        # busca de saúde funciona, não concluímos a instituição por engano.
-        for backend in backends:
-            try:
-                saude = fetch_fn("Brasil", backend, 1)
-                if saude:
-                    return []
-            except Exception as exc:
-                erros_reais.append(f"health/{backend}: {exc}")
-
-    detalhe = " | ".join(erros_reais[-4:]) or "backends sem resposta verificável"
-    print(f"      ⚠️ Busca externa indisponível: {detalhe}", flush=True)
+    print(f"      ⚠️ Busca externa indisponível: {ultimo_erro}", flush=True)
     return None
 
 
@@ -482,19 +538,23 @@ def alias_instituicao(item):
 
 
 def consultas_leads(instituicao, alias=None):
-    # A sigla/alias serve para DESCOBERTA porque o buscador encontra muito mais
-    # perfis por UFAC/CESMAC/etc. A validação posterior continua exigindo prova
-    # de vínculo com a instituição correta.
+    """Consultas que refletem diretamente o público desejado.
+
+    A Máquina 1 procura nomes de estudantes/concluintes. Instagram continua
+    sendo enriquecimento da Máquina 2.
+    """
     termo = limpar_espacos(alias or instituicao)
     return [
-        f'site:linkedin.com/in {termo} "graduanda em Nutrição"',
-        f'site:linkedin.com/in {termo} "graduanda de Nutrição"',
-        f'site:linkedin.com/in {termo} "Nutrição" "7º semestre"',
-        f'site:linkedin.com/in {termo} "Nutrição" "8º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "último período"',
+        f'site:linkedin.com/in {termo} Nutrição "último semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "8º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "7º semestre"',
         f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
-        f'site:linkedin.com/in {termo} Nutrição "2021 - 2025"',
-        f'site:linkedin.com/in {termo} Nutrição "2022 - 2026"',
         f'site:linkedin.com/in {termo} Nutrição TCC 2026',
+        f'site:linkedin.com/in {termo} Nutrição "recém-formada"',
+        f'site:linkedin.com/in {termo} Nutrição "recém-formado"',
+        f'site:linkedin.com/in {termo} "aluno de Nutrição"',
+        f'site:linkedin.com/in {termo} "estudante de Nutrição"',
     ]
 
 
@@ -530,6 +590,7 @@ def identificar_periodo(texto):
     grupos = [
         ("8º período/semestre", ["8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8"]),
         ("7º período/semestre", ["7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8"]),
+        ("último período/semestre", ["ultimo periodo", "ultimo semestre"]),
         ("TCC", ["tcc", "trabalho de conclusao"]),
         ("estágio final/obrigatório", ["estagio obrigatorio", "estagio supervisionado", "estagio final"]),
         ("formando", ["formanda", "formando", "concluinte", "colacao de grau", "formatura"]),
@@ -546,20 +607,28 @@ def lead_qualificado(texto):
     if "nutricao" not in n and "nutricionista" not in n:
         return False
 
-    # 7º/8º semestre ou período já prova a fase acadêmica desejada.
-    if any(s in n for s in [
+    # Sinais diretos de fase final ou recém-formado.
+    # Nesses casos o próprio texto do perfil já prova o estágio desejado,
+    # mesmo quando o snippet não mostra o ano explicitamente.
+    sinais_diretos = [
         "7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8",
         "8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8",
-    ]):
+        "ultimo periodo", "ultimo semestre",
+        "recem formada", "recem-formada", "recem formado", "recem-formado",
+        "concluinte",
+    ]
+    if any(s in n for s in sinais_diretos):
         return True
 
-    # Nos demais casos, o ano precisa estar ligado ao curso/conclusão da pessoa,
-    # não apenas aparecer solto em uma data da página.
+    # Para TCC, estágio ou formatura genéricos exigimos 2025/2026 no contexto,
+    # evitando que uma página acadêmica antiga seja aceita como lead atual.
     padroes = [
-        r"(?:formatura|conclusao|concluir|formando|formanda|concluinte)[^.!;]{0,100}202[56]",
-        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda|concluinte)",
+        r"(?:formatura|conclusao|concluir|formando|formanda)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda)",
         r"(?:tcc|trabalho de conclusao)[^.!;]{0,100}202[56]",
         r"202[56][^.!;]{0,100}(?:tcc|trabalho de conclusao)",
+        r"(?:estagio obrigatorio|estagio supervisionado|estagio final)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:estagio obrigatorio|estagio supervisionado|estagio final)",
         r"(?:nutricao)[^.!;]{0,120}20\d{2}\s*[-–—]\s*202[56]",
         r"20\d{2}\s*[-–—]\s*202[56][^.!;]{0,120}(?:nutricao)",
     ]
@@ -719,7 +788,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "linkedin": linkedin,
         "whatsapp": None,
         "nicho": "nutricionista",
-        "origem": "captacao_nacional_fila_v5",
+        "origem": "captacao_nacional_fila_v56",
         "status": "novo",
         "app_baixado": False,
         "nao_contatar": False,
@@ -741,7 +810,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
-        "fonte_validacao": "fonte_publica_validada_v5",
+        "fonte_validacao": "fonte_publica_validada_v56",
     }
     repo.inserir_lead(dados)
     stats["leads_salvos"] += 1
@@ -903,10 +972,46 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
         checkpoint_captacao(repo, item, "processando", idx + 1, total, consulta=None, encontrados=encontrados_local, salvos=stats["leads_salvos"] - salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)
 
-    repo.atualizar_instituicao(iid, status="concluido")
+    novos = stats["leads_salvos"] - salvos_antes
+
+    # Busca pública pode oscilar. Se uma instituição inteira vier zerada,
+    # damos uma segunda varredura em execução futura antes de considerá-la
+    # realmente concluída.
+    tentativas_zero = int(item.get("tentativa_descoberta") or 0)
+
+    if encontrados_local == 0 and tentativas_zero < 1:
+        tentativas_zero += 1
+        repo.atualizar_instituicao(
+            iid,
+            status="erro",
+            tentativa_descoberta=tentativas_zero,
+        )
+        stats["instituicoes_processadas"] += 1
+        stats["instituicoes_erro"] += 1
+        checkpoint_captacao(
+            repo,
+            item,
+            "erro",
+            total,
+            total,
+            encontrados=0,
+            salvos=novos,
+            erro="Nenhum candidato encontrado; programada segunda varredura",
+        )
+        print(
+            "   🔁 ZERO LEADS: instituição ficará para uma segunda varredura "
+            "antes de ser concluída.",
+            flush=True,
+        )
+        return True
+
+    repo.atualizar_instituicao(
+        iid,
+        status="concluido",
+        tentativa_descoberta=tentativas_zero,
+    )
     stats["instituicoes_processadas"] += 1
     stats["instituicoes_concluidas"] += 1
-    novos = stats["leads_salvos"] - salvos_antes
     checkpoint_captacao(repo, item, "concluido", total, total, encontrados=encontrados_local, salvos=novos)
     print(f"   ✅ CONCLUÍDA | candidatos web: {encontrados_local} | novos totais: {novos}", flush=True)
     return True
@@ -914,7 +1019,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, adapter_fn=processar
 
 def resumo():
     print("\n" + "=" * 72, flush=True)
-    print("RESUMO MÁQUINA 1 V5.4", flush=True)
+    print(f"RESUMO MÁQUINA 1 {VERSAO.upper()}", flush=True)
     print("=" * 72, flush=True)
     for rotulo, chave in [
         ("IES oficiais carregadas", "ies_carregadas"),
@@ -932,11 +1037,15 @@ def resumo():
 
 
 def executar():
-    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5.4", flush=True)
+    print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
     repo = SupabaseRepo.from_env()
 
     if not garantir_fila_oficial(repo):
+        resumo()
+        raise SystemExit(1)
+
+    if not preparar_varredura_v56(repo):
         resumo()
         raise SystemExit(1)
 
@@ -971,7 +1080,7 @@ def executar():
                 return
 
     resumo()
-    print("✅ CICLO V5.4 FINALIZADO", flush=True)
+    print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
 
 
 if __name__ == "__main__":
