@@ -19,7 +19,7 @@ class Repo:
 
 class FontesTests(unittest.TestCase):
     def test_noticia_multicurso_lista_por_rotulo(self):
-        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><p>Publicado em 29/04/2026</p>
+        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><meta property="article:published_time" content="2026-04-29"><p>Publicado em 29/04/2026</p>
         <p>Formandos receberam a outorga de grau em abril de 2026.</p><p>Psicologia: Ana Silva.</p>
         <p>Nutrição: Melissa Gomes da Silva.</p>''')
         self.assertEqual([x['nome'] for x in out],['Melissa Gomes da Silva'])

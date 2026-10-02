@@ -247,7 +247,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
 def ler_html(html, url, instituicao, alias=None):
     page = Pagina(); page.feed(html)
     # Metadados podem completar uma data; não inferir ano a partir do URL.
-    for key in ('article:published_time', 'citation_title', 'dc.title', 'dc.description'):
+    for key in ('citation_title', 'dc.title', 'dc.description'):
         for value in page.metas.get(key,[]): page.linhas.append((value, 'meta'))
     records = extrair_documento(page.linhas,instituicao,alias,' '.join(page.textos),page.metas)
     links = []
