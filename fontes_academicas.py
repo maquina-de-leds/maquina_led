@@ -144,7 +144,8 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     related = bool(inst and re.search(r'(?<!\w)'+re.escape(inst)+r'(?!\w)', branded))
     if alias:
         related = related or bool(re.search(r'(?<!\w)'+re.escape(norm(alias))+r'(?!\w)', branded))
-    if not related: return []
+    if not related and inst: return []
+    instituicao = instituicao or 'Faculdade não informada'
     # Sem Nutrição + fase acadêmica não há extração de pessoas.
     if 'nutricao' not in norm(full) or not re.search(FASE, norm(full)): return []
     # Apenas texto editorial (sem rodapé) contribui para contexto acadêmico.
@@ -290,8 +291,9 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     trecho=str(resultado.get('body') or resultado.get('snippet') or '')
     texto=titulo+' | '+trecho
     n=norm(texto)
-    if 'nutricao' not in n or not any(t and norm(t) in n for t in (instituicao,alias)):
+    if 'nutricao' not in n:
         return []
+    vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
     if re.search(PAPEL,n) or re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
         return []
     ano,periodo=periodo_academico(texto)
@@ -303,8 +305,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
         nome=pessoa(m.group(1)) if m else None
     if not nome or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
-    return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
-                 evidencia=instituicao+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
+    return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
+                 evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
                  contexto_academico=texto)]
 
 
@@ -340,6 +342,9 @@ def ler_html(html, url, instituicao, alias=None):
     for key in ('citation_title', 'dc.title', 'dc.description'):
         for value in page.metas.get(key,[]): page.linhas.append((value, 'meta'))
     records = extrair_documento(page.linhas,instituicao,alias,' '.join(page.textos),page.metas)
+    if not records:
+        records=extrair_documento(page.linhas,None,None,' '.join(page.textos),page.metas)
+        for registro in records: registro['instituicao']=None
     links = []
     for href in page.links:
         target=urljoin(url,href).split('#',1)[0]
@@ -366,10 +371,10 @@ def extrair_autores_alunos_pdf(linhas, instituicao, alias=None):
         if not re.match(r'(?:academic[oa]|alun[oa]|estudante|discente)\b',n): continue
         if 'nutricao' not in n: continue
         termos=[norm(instituicao),norm(alias)]
-        if not any(t and re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',n) for t in termos): continue
+        if instituicao and not any(t and re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',n) for t in termos): continue
         periodo=f'{ano} (semestre não informado)'
         out.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
-            evidencia=f'{instituicao} | Nutrição | vínculo acadêmico em {ano} | {nome} | {vinculo} | Fase do curso pendente de confirmação',
+            evidencia=f'{instituicao or "Faculdade não informada"} | Nutrição | vínculo acadêmico em {ano} | {nome} | {vinculo} | Fase do curso pendente de confirmação',
             contexto_academico=vinculo))
     return out
 
@@ -383,6 +388,10 @@ def ler_pdf(data, instituicao, alias=None):
     # Primeiro cabeçalho em PDF fornece contexto e data da seção.
     records=extrair_documento(lines,instituicao,alias,' '.join(x[0] for x in lines))
     records += extrair_autores_alunos_pdf(lines,instituicao,alias)
+    if not records:
+        records=extrair_documento(lines,None,None,' '.join(x[0] for x in lines))
+        records+=extrair_autores_alunos_pdf(lines,None,None)
+        for registro in records: registro['instituicao']=None
     records = list({(norm(r["nome"]),r["ano"]):r for r in records}.values())
     return records, []
 

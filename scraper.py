@@ -246,11 +246,10 @@ class SupabaseRepo:
         self.client.table("instituicoes_nutricao").update(dados).eq("id", iid).execute()
 
     def lead_existe(self, nome, instituicao):
+        consulta=self.client.table("leds").select("id")
+        consulta=consulta.eq("instituicao",instituicao) if instituicao else consulta.is_("instituicao","null")
         r = (
-            self.client.table("leds")
-            .select("id")
-            .eq("instituicao", instituicao)
-            .ilike("nome", nome)
+            consulta.ilike("nome", nome)
             .limit(1)
             .execute()
         )
@@ -762,8 +761,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 stats["leads_encontrados"] += 1
                 registro["evidencia"] += " | Consultado em "+agora()
                 print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
-                salvar_lead(repo,registro["nome"],instituicao,None,None,registro["evidencia"],url_resultado,
-                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias)
+                salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),None,None,registro["evidencia"],url_resultado,
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
         termos=[normalizar(t) for t in (instituicao,alias) if t]
         resultados_relacionados=[]
         for resultado in resultados:
@@ -772,7 +771,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             host=(urlparse(str(resultado.get("href") or resultado.get("url") or "")).hostname or "").lower()
             hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
             host_institucional=host in hosts_conhecidos or any(t and t.replace(' ','') in host.split('.') for t in termos)
-            if host_institucional or not texto.strip() or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos):
+            if 'nutricao' in texto or host_institucional or not texto.strip() or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos):
                 resultados_relacionados.append(resultado)
             else:
                 print("      RESULTADO SEM VÍNCULO INSTITUCIONAL:",resultado.get("href") or resultado.get("url"),flush=True)
@@ -797,10 +796,10 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 stats["leads_encontrados"] += 1
                 contexto = normalizar(registro.get("contexto_academico", ""))
                 cidade_confirmada = bool(cidade and re.search(r'(?<!\w)'+re.escape(normalizar(cidade))+r'(?!\w)',contexto))
-                salvar_lead(repo,registro["nome"],instituicao,cidade if cidade_confirmada else None,
+                salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),cidade if cidade_confirmada else None,
                             uf if cidade_confirmada else None,registro["evidencia"],url,
                             instagram=registro.get("instagram"),
-                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias)
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
         checkpoint_captacao(repo,item,"processando",idx+1,total,
                             encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)

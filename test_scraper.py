@@ -83,7 +83,9 @@ class FontesTests(unittest.TestCase):
         <meta name="dc.date.issued" content="2025-09-10">'''
         self.assertEqual([x['nome'] for x in self.extract(html)],['Ana Silva'])
     def test_vinculo_ou_data_ausentes_nao_inventam_lead(self):
-        self.assertEqual(self.extract('<h1>Formandos Nutrição 2025</h1><li>Ana Silva</li>'),[])
+        sem_faculdade=self.extract('<h1>Formandos Nutrição 2025</h1><li>Ana Silva</li>')
+        self.assertEqual([r['nome'] for r in sem_faculdade],['Ana Silva'])
+        self.assertIsNone(sem_faculdade[0]['instituicao'])
         self.assertEqual(self.extract('<title>Universidade Teste</title><h1>Formandos Nutrição</h1><li>Ana Silva</li>'),[])
     def test_titulo_documento_nao_e_pessoa(self):
         for title in ['Trabalho de Conclusão','Alimentação Saudável','Mostra De TCC','Consumo nutricional']:

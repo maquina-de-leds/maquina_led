@@ -8,7 +8,9 @@ import fontes_academicas as f
 inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0
 ies='Universidade Presbiteriana Mackenzie'
 sinais=['"TCC"','"formandos"','"grupo de alunos"','"iniciação científica"','"projetos aprovados"','"e-book" "alunas"']
-consultas=[f'"Mackenzie" Nutrição {sinal} {ano}' for sinal in sinais for ano in (2025,2026)]
+consultas=[f'"Mackenzie" Nutrição {sinal} {ano}' for sinal in sinais[:4] for ano in (2025,2026)]
+consultas += ['"Nutrição" "recém-formada" "2025"','"Nutrição" "formanda" "2026"',
+              '"Nutrição" "7º semestre"','"Nutrição" "8º semestre"']
 def esgotado(*args): raise TimeoutError('Limite de tempo desta operação')
 signal.signal(signal.SIGALRM,esgotado)
 def executar(fn,limite):
@@ -28,8 +30,11 @@ for consulta in consultas:
             url=resultado.get('href') or resultado.get('url') or ''
             registros=f.extrair_resultado_busca(resultado,ies,'Mackenzie')
             for r in registros: nomes[f.norm(r['nome'])]=r
+            if url in fontes or not f.url_permitida(url): continue
+            resumo=f.norm(str(resultado.get('title') or '')+' '+str(resultado.get('body') or ''))
             host=s.urlparse(url).hostname or ''
-            if url in fontes or not (host=='mackenzie.br' or host.endswith('.mackenzie.br')): continue
+            if 'nutricao' not in resumo and not (host=='mackenzie.br' or host.endswith('.mackenzie.br')):
+                continue
             if s.urlparse(url).path.rstrip('/').endswith('/pg'):
                 print('PAGINA DE NAVEGACAO, FORA DO DIAGNOSTICO RAPIDO',url,flush=True)
                 continue

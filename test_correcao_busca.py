@@ -20,7 +20,19 @@ class CorrecaoBuscaTests(unittest.TestCase):
                     {'href':'https://outra.edu.br/alunos.pdf','title':'Nutrição Universidade Outra 2025'}]
         with patch.object(s,'consultas_leads',return_value=['teste']):
             s.processar_instituicao(repo,{**repo.item,'instituicao':'Universidade Presbiteriana Mackenzie','fonte_validacao':'SIGLA=Mackenzie'},search_fn=lambda *a:resultados,source_fn=fonte)
-        self.assertEqual(lidas,['https://www.mackenzie.br/alunos.pdf'])
+        self.assertEqual(lidas,['https://www.mackenzie.br/alunos.pdf','https://outra.edu.br/alunos.pdf'])
+
+    def test_busca_sem_faculdade_salva_sem_atribuir_mackenzie(self):
+        registros=f.extrair_resultado_busca({'title':'Ana Silva','body':'Graduanda de Nutrição, formando em 2026.'},'Mackenzie')
+        self.assertEqual(registros[0]['nome'],'Ana Silva')
+        self.assertIsNone(registros[0]['instituicao'])
+        repo=Repo()
+        self.assertTrue(s.salvar_lead(repo,'Ana Silva',None,None,None,registros[0]['evidencia'],'https://example.org',ano_forcado=2026,periodo_forcado=registros[0]['periodo']))
+        self.assertIsNone(repo.saved[0]['instituicao'])
+
+    def test_nome_sem_nutricao_ou_periodo_nao_basta(self):
+        for texto in ['Graduanda de Direito em 2026','Graduanda de Nutrição']:
+            self.assertEqual(f.extrair_resultado_busca({'title':'Ana Silva','body':texto},'Mackenzie'),[])
 
     def test_noticia_oficial_tenta_copia_publica_apos_falha(self):
         url='https://www.mackenzie.br/noticias/artigo/n/a/i/projeto'
