@@ -436,6 +436,7 @@ def carregar_fonte(url, instituicao, alias=None):
         slug=p.path.split('/n/a/i/',1)[1]
         alternativas += ['https://portal.mackenzie.br/noticias/artigo/n/a/i/'+slug,
                          'https://www.mackenzie.br/noticias/artigo/n/a/i/'+slug,
+                         'https://www.mackenzie.br/memorias/150-anos/acontece/arquivo/n/a/i/'+slug,
                          'https://www.mackenzie.br/colegios/agnes-recife/noticias/arquivo/n/a/i/'+slug]
     ultimo=None
     resposta=None
