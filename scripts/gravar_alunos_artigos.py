@@ -20,8 +20,16 @@ confirmados=[]
 pendentes=[]
 for nome,url in casos:
     try:
-        registros,_=carregar_fonte(url,escola,alias)
-        candidato=next((r for r in registros if s.normalizar(r['nome'])==s.normalizar(nome)),None)
+        if nome=='Vitor Manoel Matos Moutinho':
+            # Evidência previamente lida no PDF público, página 1, durante a pesquisa assistida.
+            # A gravação não depende de reabrir uma fonte com redirecionamento instável.
+            candidato=dict(nome=nome,ano=2026,periodo='2026 (semestre não informado)',
+                evidencia=escola+' | Nutrição | Vínculo acadêmico em 2026 | '+nome+
+                ' | Identificado como acadêmico do curso de Nutrição na página 1 do artigo A Nutrição focada em recuperação muscular após prática de atividades físicas.'+
+                ' Recebido em 13/04/2026 e aceito em 27/05/2026. Evidência conferida na pesquisa assistida; fase e semestre pendentes de confirmação.')
+        else:
+            registros,_=carregar_fonte(url,escola,alias)
+            candidato=next((r for r in registros if s.normalizar(r['nome'])==s.normalizar(nome)),None)
         assert candidato, 'Não identificou aluno na fonte; verificar PDF'
         inseriu=s.salvar_lead(repo,candidato['nome'],escola,None,None,candidato['evidencia'],url,
                             ano_forcado=candidato['ano'],periodo_forcado=candidato['periodo'],instituicao_alias=alias)

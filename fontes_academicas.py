@@ -178,6 +178,10 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     for i, (line, tag) in enumerate(linhas):
         n = norm(line)
         if not line: continue
+        if tag == 'pdf' and pessoa(line):
+            seguinte = norm(' '.join(t for t, _ in linhas[i+1:i+4]))
+            if re.match(r'(?:'+PAPEL+r')\b',seguinte):
+                continue
         if tag in {'h1','h2','h3','h4','dt'}:
             role_section = bool(re.search(PAPEL,n))
         elif len(line)<100 and re.match(r'^(?:professores|docentes|orientadores|coordenadores|banca)\b',n):
