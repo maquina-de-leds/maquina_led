@@ -577,7 +577,11 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
               '"grupo de estudantes"', '"grupo de estudos"', '"turma de nutrição"',
               '"liga acadêmica" "integrantes"', '"centro acadêmico" "membros"',
               '"alunos de nutrição"', '"estudantes de nutrição"',
-              '"grupo" "alunos"')
+              '"grupo" "alunos"', '"projeto integrador"', '"iniciação científica"',
+              '"iniciação tecnológica"', '"projetos aprovados"', '"resultado" "monitoria"',
+              '"extensão" "alunos"', '"workshop" "alunos"', '"caderno de resumos"',
+              '"anais" "autores"', '"ebook" "alunos"', '"e-book" "alunas"',
+              '"semana acadêmica"', '"jornada" "graduanda"')
     consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
