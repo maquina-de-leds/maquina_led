@@ -5,6 +5,31 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_interrupcao_runner_retoma_consulta_sem_repetir_inicio(self,sleep):
+        repo=Repo(); repo.cp={**repo.item,'status':'processando','indice_pesquisa':2,'total_pesquisas':3,'ultimo_erro':None,'leads_encontrados':4,'leads_salvos':2}
+        chamadas=[]
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [])
+        self.assertEqual(chamadas,['c'])
+        self.assertEqual(repo.cp['status'],'concluido')
+        self.assertEqual(repo.cp['leads_encontrados'],4)
+        self.assertEqual(repo.cp['leads_salvos'],2)
+
+    @patch.object(s.time,'sleep')
+    def test_fonte_pendente_nao_se_perde_na_interrupcao(self,sleep):
+        repo=Repo()
+        def fonte(*a): raise RuntimeError('503')
+        def busca(q,*a):
+            if q=='b': raise KeyboardInterrupt()
+            return [{'href':'https://example.org/nutricao','title':'Nutrição formandos 2026'}]
+        with patch.object(s,'consultas_leads',return_value=['a','b']):
+            with self.assertRaises(KeyboardInterrupt): s.processar_instituicao(repo,repo.item,search_fn=busca,source_fn=fonte)
+            self.assertIsNotNone(repo.cp['ultimo_erro'])
+            chamadas=[]
+            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [])
+            self.assertEqual(chamadas,['a','b'])
+
     def test_noticia_falecimento_nao_captura_pessoa(self):
         linhas=[('Recém-formada em Nutrição morre em acidente','h1'),('08 Ago 2026','text'),('Recém-formada em Nutrição, Ana Diankelley Oliveira, foi identificada como a vítima.','p')]
         self.assertEqual(f.extrair_documento(linhas,None),[])

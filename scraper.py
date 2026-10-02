@@ -729,18 +729,22 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
         if cp.get("ultimo_erro") == "Busca externa indisponível":
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1)
+        elif cp.get("status") == "processando" and not cp.get("ultimo_erro") and cp.get("total_pesquisas") == total:
+            # Interrupção do runner: continuar da próxima consulta ainda não concluída.
+            inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total)
     print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
     salvos_antes = stats["leads_salvos"]
-    encontrados_local = 0
+    encontrados_local = int(cp.get("leads_encontrados") or 0) if inicio else 0
+    salvos_checkpoint = int(cp.get("leads_salvos") or 0) if inicio else 0
     fontes_vistas = set()
     falhas_fontes = 0
     falhas_busca_seguidas = 0
     for idx in range(inicio, total):
         consulta = consultas[idx]
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
-        checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,
-                            encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
+        checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
+                            encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
         resultados = ([{"href":url} for url in fontes_conhecidas] if consulta=="FONTES PÚBLICAS JÁ DESCOBERTAS"
                       else search_fn(consulta, MAX_RESULTADOS))
         if resultados is None:
@@ -754,14 +758,14 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                     repo.atualizar_instituicao(iid,status="erro")
                     stats["instituicoes_erro"] += 1
                     checkpoint_captacao(repo,item,"erro",retomar,total,consulta=consultas[retomar],erro="Busca externa indisponível",
-                                        encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
+                                        encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
                     print("      BUSCADOR INDISPONÍVEL: três falhas seguidas; retomar da primeira consulta pendente.",flush=True)
                     return False
                 continue
             repo.atualizar_instituicao(iid,status="erro")
             stats["instituicoes_erro"] += 1
             checkpoint_captacao(repo,item,"erro",idx,total,consulta=consulta,erro="Busca externa indisponível",
-                                encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
+                                encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
             return False
         falhas_busca_seguidas = 0
         for resultado in resultados:
@@ -811,8 +815,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                             uf if cidade_confirmada else None,registro["evidencia"],url,
                             instagram=registro.get("instagram"),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
-        checkpoint_captacao(repo,item,"processando",idx+1,total,
-                            encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
+        checkpoint_captacao(repo,item,"processando",idx+1,total,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
+                            encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)
     novos = stats["leads_salvos"]-salvos_antes
     tentativas = int(item.get("tentativa_descoberta") or 0)
@@ -823,12 +827,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         stats["instituicoes_erro"] += 1
         motivo = (f"Fontes inacessíveis: {falhas_fontes}; repetir varredura"
                   if falhas_fontes else "Nenhum candidato encontrado; programada segunda varredura")
-        checkpoint_captacao(repo,item,"erro",0,total,erro=motivo,encontrados=encontrados_local,salvos=novos)
+        checkpoint_captacao(repo,item,"erro",0,total,erro=motivo,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
         print(f"   🔁 REVISITAR: {motivo}",flush=True)
     else:
         repo.atualizar_instituicao(iid,status="concluido",tentativa_descoberta=tentativas)
         stats["instituicoes_concluidas"] += 1
-        checkpoint_captacao(repo,item,"concluido",total,total,encontrados=encontrados_local,salvos=novos)
+        checkpoint_captacao(repo,item,"concluido",total,total,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
     stats["instituicoes_processadas"] += 1
     print(f"   RESUMO | pessoas: {encontrados_local} | novos: {novos} | fontes com falha: {falhas_fontes}",flush=True)
     return True
