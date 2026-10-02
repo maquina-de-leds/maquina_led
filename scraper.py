@@ -845,14 +845,17 @@ def resumo():
 
 
 def executar():
-    print("🔬 DIAGNÓSTICO DE BUSCA V5", flush=True)
+    print("🔬 DIAGNÓSTICO DE BUSCA V5.1", flush=True)
     consultas = [
-        '"Universidade Presbiteriana Mackenzie" "Nutrição" "TCC" "2026"',
-        'site:linkedin.com/in "Universidade Presbiteriana Mackenzie" "Nutrição"',
-        'site:linkedin.com/in "Universidade Federal do Acre" "Nutrição"',
-        '"Universidade Federal do Acre" "Nutrição" "TCC"',
-        '"CESMAC" "Nutrição" "TCC"',
-        'site:linkedin.com/in "CESMAC" "Nutrição"',
+        'site:linkedin.com/in "Universidade Presbiteriana Mackenzie" "Nutrição" "2026"',
+        'site:linkedin.com/in Mackenzie "graduanda de Nutrição" 2026',
+        'site:linkedin.com/in UFAC Nutrição',
+        'site:linkedin.com/in UFAC "graduanda em Nutrição"',
+        'site:instagram.com UFAC Nutrição',
+        'site:linkedin.com/in CESMAC Nutrição',
+        'site:instagram.com CESMAC Nutrição',
+        '"UFAC" "Nutrição" "TCC" 2026',
+        '"CESMAC" "Nutrição" "TCC" 2026',
     ]
     for consulta in consultas:
         print("\n" + "=" * 72, flush=True)
@@ -863,13 +866,15 @@ def executar():
             continue
         print("TOTAL:", len(resultados), flush=True)
         for i, r in enumerate(resultados[:10], 1):
-            print(f"[{i}] TITLE: {limpar_espacos(r.get('title',''))}", flush=True)
-            print(f"    URL: {r.get('href') or r.get('url') or ''}", flush=True)
-            print(f"    BODY: {limpar_espacos(r.get('body',''))[:500]}", flush=True)
-            nome = extrair_nome_resultado(r)
-            print(f"    NOME_EXTRAIDO: {nome}", flush=True)
-            texto = limpar_espacos(f"{r.get('title','')} {r.get('body','')} {r.get('href') or r.get('url') or ''}")
-            print(f"    QUALIFICADO: {lead_qualificado(texto)}", flush=True)
+            titulo = limpar_espacos(r.get('title',''))
+            url = r.get('href') or r.get('url') or ''
+            corpo = limpar_espacos(r.get('body',''))
+            texto = limpar_espacos(f"{titulo} {corpo} {url}")
+            print(f"[{i}] TITLE: {titulo}", flush=True)
+            print(f"    URL: {url}", flush=True)
+            print(f"    BODY: {corpo[:800]}", flush=True)
+            print(f"    NOME_EXTRAIDO: {extrair_nome_resultado(r)}", flush=True)
+            print(f"    ANO: {identificar_ano(texto)} | PERIODO: {identificar_periodo(texto)} | QUALIFICADO: {lead_qualificado(texto)}", flush=True)
 
 
 if __name__ == "__main__":
