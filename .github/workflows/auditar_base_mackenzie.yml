@@ -1,0 +1,23 @@
+name: Auditar base Mackenzie
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/auditar_base_mackenzie.py', '.github/workflows/auditar_base_mackenzie.yml']
+permissions:
+  contents: read
+jobs:
+  auditar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install supabase
+      - name: Ler registros sem alteracoes
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u scripts/auditar_base_mackenzie.py
