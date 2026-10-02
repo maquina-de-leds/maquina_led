@@ -2,6 +2,7 @@ name: Validacao real de fontes
 on:
   push:
     branches: [validacao-fontes-v58]
+    paths: ['validar_fontes_reais.py', 'fontes_academicas.py', 'test_scraper.py', '.github/workflows/validar_fontes.yml']
 permissions:
   contents: read
 jobs:
@@ -13,6 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pypdf
-      - name: Validar download e paginas reais sem banco
+      - run: pip install requests pypdf remotezip
+      - uses: actions/cache@v4
+        with:
+          path: cache_inep
+          key: cadastros-inep-2024-v1
+      - name: Conferir cadastros oficiais por Range sem banco
         run: python -u validar_fontes_reais.py
