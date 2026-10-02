@@ -5,6 +5,10 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_noticia_falecimento_nao_captura_pessoa(self):
+        linhas=[('Recém-formada em Nutrição morre em acidente','h1'),('08 Ago 2026','text'),('Recém-formada em Nutrição, Ana Diankelley Oliveira, foi identificada como a vítima.','p')]
+        self.assertEqual(f.extrair_documento(linhas,None),[])
+
     def test_noticia_aluno_e_docentes_no_mesmo_paragrafo(self):
         linhas=[('28 Jan 2025','text'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação. Os professores apoiaram a aluna. O reitor Osvaldo Gastaldon comemorou.','p')]
         r=f.extrair_documento(linhas,None,None)

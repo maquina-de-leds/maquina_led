@@ -137,6 +137,8 @@ def instagram_associado(text, nome):
 def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=None):
     metas = metas or {}
     full = '\n'.join(x[0] for x in linhas)
+    titulo = norm(' '.join(t for t,tag in linhas if tag in {'title','h1'}))
+    if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',titulo): return []
     branded = norm(texto_vinculo + ' ' + full)
     inst = norm(instituicao)
     if inst == 'universidade federal de mato grosso':
