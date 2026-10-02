@@ -313,3 +313,27 @@ class ArtigoAlunoRecenteTests(unittest.TestCase):
         self.assertEqual(f.extrair_autores_alunos_pdf(self.linhas('2024'),'Universidade Teste'),[])
     def test_vinculo_de_outra_faculdade_nao_e_reaproveitado(self):
         self.assertEqual(f.extrair_autores_alunos_pdf(self.linhas(escola='Outra Faculdade'),'Universidade Teste'),[])
+
+
+class GruposAcademicosTests(unittest.TestCase):
+    def extrair(self,conteudo):
+        return f.ler_html('<title>Universidade Teste</title>'+conteudo,
+                          'https://universidade.edu.br/grupo','Universidade Teste')[0]
+    def test_grupo_estudos_com_lista_membros(self):
+        out=self.extrair('<h1>Grupo de estudos de Nutrição 2026/2</h1><p>Membros: Ana Silva; Bruno Santos</p>')
+        self.assertEqual([x['nome'] for x in out],['Ana Silva','Bruno Santos'])
+        self.assertTrue(all(x['periodo']=='2026/2' for x in out))
+    def test_liga_aluno_unico_sem_instagram(self):
+        out=self.extrair('<h1>Liga acadêmica de Nutrição 2025</h1><p>Integrantes: Carla Souza</p>')
+        self.assertEqual([x['nome'] for x in out],['Carla Souza'])
+        self.assertIsNone(out[0]['instagram'])
+    def test_grupo_so_primeiro_nome_nao_salva(self):
+        self.assertEqual(self.extrair('<h1>Grupo de alunos de Nutrição 2026/1</h1><p>Membros: Ana</p>'),[])
+    def test_docente_do_grupo_nao_e_aluno(self):
+        out=self.extrair('<h1>Grupo de estudos de Nutrição 2026/1</h1><p>Professora: Ana Silva</p><p>Membros: Carla Souza</p>')
+        self.assertEqual([x['nome'] for x in out],['Carla Souza'])
+    def test_consultas_grupos_tem_ano_curso_e_faculdade(self):
+        qs=s.consultas_leads('Universidade Teste','UT')
+        for criterio in ['grupo de alunos','grupo de estudantes','grupo de estudos','liga acadêmica','centro acadêmico']:
+            for ano in ['2025','2026']:
+                self.assertTrue(any(criterio in q and ano in q and 'Nutrição' in q and 'Universidade Teste' in q for q in qs))

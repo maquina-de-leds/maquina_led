@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 ANOS = {2025, 2026}
 OUTROS_CURSOS = r'educacao fisica|enfermagem|fisioterapia|psicologia|medicina|direito|engenharia|farmacia|pedagogia|letras|biomedicina'
-FASE = r'tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica'
+FASE = r'tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
 PAPEL = r'orientador|coorientador|professor|docente|coordenador|paraninf|patron|reitor|banca'
 
 
@@ -106,7 +106,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -159,7 +159,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     single_course = not re.search(OUTROS_CURSOS, norm(context))
     active = single_course and 'nutricao' in norm(context)
     year, period = default_year, default_period
-    mode = 'lista' if active and re.search(r'tcc|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|ultimo (?:periodo|semestre)|estagio final',norm(context)) else None
+    mode = 'lista' if active and re.search(r'tcc|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|ultimo (?:periodo|semestre)|estagio final|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico',norm(context)) else None
     out = []
     role_section = False
     def add(name, evidence, y, per):
@@ -226,7 +226,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
                     year, period = default_year, default_period
                 mode = 'lista' if re.search(FASE, n+' '+norm(context)) else None
         # Listas em notícia: o rótulo pode explicitar o curso mesmo numa página multicurso.
-        label = re.search(r'(?:formand[oa]s?|concluintes?|alun[oa]s?|discentes?|autores?)[^:]{0,130}:\s*(.+)', line, re.I)
+        label = re.search(r'(?:formand[oa]s?|concluintes?|alun[oa]s?|discentes?|autores?|integrantes?|membros?|participantes?)[^:]{0,130}:\s*(.+)', line, re.I)
         if label:
             leadin = norm(line[:label.start(1)])
             is_nutrition = 'nutricao' in leadin or (active and not re.search(OUTROS_CURSOS, leadin))
@@ -242,7 +242,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
                 mode = None
             if n.rstrip(' :') in {'orientador','orientadora','coorientador','coorientadora','banca'}: mode = None
             continue
-        if active and re.fullmatch(r'(?:autores?|alun[oa]s?|discentes?|formand[oa]s?)\s*:', n):
+        if active and re.fullmatch(r'(?:autores?|alun[oa]s?|discentes?|formand[oa]s?|integrantes?|membros?|participantes?)\s*:', n):
             mode = 'autores'; continue
         if active and mode == 'autores' and tag in {'dd','p','pdf'}:
             for name in nomes_da_lista(line): add(name,line,year,period)
@@ -370,5 +370,6 @@ def carregar_fonte(url, instituicao, alias=None):
         encoding=response.encoding if response.encoding and response.encoding.lower()!='iso-8859-1' else 'utf-8'
         return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
     raise ValueError('Excesso de redirecionamentos')
+
 
 

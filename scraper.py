@@ -573,7 +573,11 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
               '"cerimônia de formatura"', '"concluíram"',
               '"jornada acadêmica" "trabalhos"', '"entrega" "TCC"', '"aluno"', '"aluna"',
               '"grupo de alunos"', '"estudante" "apresentação"', '"acadêmico do curso"',
-              '"acadêmica do curso"', '"discente" "artigo"')
+              '"acadêmica do curso"', '"discente" "artigo"',
+              '"grupo de estudantes"', '"grupo de estudos"', '"turma de nutrição"',
+              '"liga acadêmica" "integrantes"', '"centro acadêmico" "membros"',
+              '"alunos de nutrição"', '"estudantes de nutrição"',
+              '"grupo" "alunos"')
     consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
@@ -827,4 +831,5 @@ if __name__ == "__main__":
         preparar_lista()
     else:
         executar()
+
 
