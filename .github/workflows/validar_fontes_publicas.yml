@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'scripts/validar_fontes_publicas.py'
+      - 'fontes_academicas.py'
       - '.github/workflows/validar_fontes_publicas.yml'
   workflow_dispatch:
 permissions:
