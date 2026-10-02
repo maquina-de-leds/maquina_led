@@ -5,6 +5,16 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_duplicado_sem_instituicao_nao_e_inserido(self):
+        repo=Repo(); repo.lead_existe=lambda *a:True
+        self.assertFalse(s.salvar_lead(repo,'Ana Silva',None,None,None,'Nutrição 2026','https://example.org',ano_forcado=2026,periodo_forcado='2026'))
+        self.assertEqual(repo.saved,[])
+
+    def test_mesmo_nome_e_fonte_com_faculdade_diferente_nao_duplica(self):
+        repo=Repo(); repo.lead_da_fonte=lambda *a:{'id':1,'instituicao':None}
+        self.assertFalse(s.salvar_lead(repo,'Ana Silva','Faculdade Teste',None,None,'Nutrição 2026','https://example.org',ano_forcado=2026,periodo_forcado='2026'))
+        self.assertEqual(repo.saved,[])
+
     @patch.object(s.time,'sleep')
     def test_captacao_salva_indice_apos_503_e_preserva_pendencia(self,sleep):
         repo=Repo(); u='https://example.org/noticias/alunos-de-nutricao-criam-livro'

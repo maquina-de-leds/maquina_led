@@ -267,6 +267,12 @@ class SupabaseRepo:
         )
         return bool(r.data)
 
+    def lead_da_fonte(self, nome, url):
+        if not url: return None
+        rows=(self.client.table("leds").select("id,instituicao").eq("fonte_url",url)
+              .ilike("nome",nome).limit(1).execute()).data or []
+        return rows[0] if rows else None
+
     def instituicao_de_lead_por_alias(self, nome, alias):
         if not re.fullmatch(r"[A-Za-zÀ-ÿ0-9 .-]{2,30}",alias or ""): return None
         rows=(self.client.table("leds").select("instituicao").ilike("instituicao",alias)
@@ -275,8 +281,9 @@ class SupabaseRepo:
 
     def completar_instagram(self, nome, instituicao, instagram):
         if self.instagram_usado(instagram): return False
-        rows = (self.client.table("leds").select("id,instagram")
-                .eq("instituicao",instituicao).ilike("nome",nome).limit(1).execute()).data
+        consulta=self.client.table("leds").select("id,instagram")
+        consulta=consulta.eq("instituicao",instituicao) if instituicao else consulta.is_("instituicao","null")
+        rows=consulta.ilike("nome",nome).limit(1).execute().data
         if rows and not rows[0].get("instagram"):
             (self.client.table("leds").update({"instagram":instagram,"proxima_acao":"primeiro_contato_instagram"})
              .eq("id",rows[0]["id"]).is_("instagram","null").execute())
@@ -622,10 +629,13 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         stats["rejeitados"] += 1
         return False
     nome = formatar_nome_pessoa(nome)
-    instituicao_existente = instituicao if repo.lead_existe(nome,instituicao) else None
-    if not instituicao_existente and instituicao_alias and hasattr(repo,"instituicao_de_lead_por_alias"):
+    existente_fonte=repo.lead_da_fonte(nome,url) if hasattr(repo,"lead_da_fonte") else None
+    existe=existente_fonte is not None or repo.lead_existe(nome,instituicao)
+    instituicao_existente=existente_fonte.get("instituicao") if existente_fonte is not None else instituicao
+    if not existe and instituicao_alias and hasattr(repo,"instituicao_de_lead_por_alias"):
         instituicao_existente = repo.instituicao_de_lead_por_alias(nome,instituicao_alias)
-    if instituicao_existente:
+        existe=instituicao_existente is not None
+    if existe:
         if instagram and hasattr(repo,"completar_instagram"):
             if repo.completar_instagram(nome,instituicao_existente,instagram):
                 print(f"      Instagram completado pela fonte: {nome} | {instagram}",flush=True)
