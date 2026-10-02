@@ -471,13 +471,13 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
 def consultas_leads(instituicao, alias=None):
     termo = limpar_espacos(alias or instituicao)
     return [
-        f'site:linkedin.com/in "{termo}" "Nutrição" "7º semestre"',
-        f'site:linkedin.com/in "{termo}" "Nutrição" "8º semestre"',
-        f'site:linkedin.com/in "{termo}" "graduanda de Nutrição"',
-        f'site:linkedin.com/in "{termo}" "graduanda em Nutrição"',
-        f'site:linkedin.com/in "{termo}" "Nutrição" "formatura prevista" 2026',
-        f'site:linkedin.com/in "{termo}" "Nutrição" "2021 - 2025"',
-        f'site:linkedin.com/in "{termo}" "Nutrição" "2022 - 2026"',
+        f'site:linkedin.com/in {termo} "graduanda de Nutrição" 2026',
+        f'site:linkedin.com/in {termo} "graduanda em Nutrição" 2026',
+        f'site:linkedin.com/in {termo} "Nutrição" "7º semestre"',
+        f'site:linkedin.com/in {termo} "Nutrição" "8º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
+        f'site:linkedin.com/in {termo} Nutrição "2021 - 2025"',
+        f'site:linkedin.com/in {termo} Nutrição "2022 - 2026"',
     ]
 
 
