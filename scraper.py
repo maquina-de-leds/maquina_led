@@ -735,6 +735,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     encontrados_local = 0
     fontes_vistas = set()
     falhas_fontes = 0
+    falhas_busca_seguidas = 0
     for idx in range(inicio, total):
         consulta = consultas[idx]
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
@@ -746,13 +747,23 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             if continuar_falhas:
                 falhas_fontes += 1
                 stats["erros"] += 1
+                falhas_busca_seguidas += 1
                 print(f"      CONSULTA PENDENTE: {consulta}",flush=True)
+                if falhas_busca_seguidas >= 3:
+                    retomar=idx-falhas_busca_seguidas+1
+                    repo.atualizar_instituicao(iid,status="erro")
+                    stats["instituicoes_erro"] += 1
+                    checkpoint_captacao(repo,item,"erro",retomar,total,consulta=consultas[retomar],erro="Busca externa indisponível",
+                                        encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
+                    print("      BUSCADOR INDISPONÍVEL: três falhas seguidas; retomar da primeira consulta pendente.",flush=True)
+                    return False
                 continue
             repo.atualizar_instituicao(iid,status="erro")
             stats["instituicoes_erro"] += 1
             checkpoint_captacao(repo,item,"erro",idx,total,consulta=consulta,erro="Busca externa indisponível",
                                 encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
             return False
+        falhas_busca_seguidas = 0
         for resultado in resultados:
             url_resultado=str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url_resultado): continue

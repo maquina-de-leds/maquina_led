@@ -5,6 +5,19 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_tres_falhas_pausam_e_retomam_primeira_pendente(self,sleep):
+        repo=Repo(); chamadas=[]
+        def falha(q,*a): chamadas.append(q); return None
+        with patch.object(s,'consultas_leads',return_value=['a','b','c','d']):
+            self.assertFalse(s.processar_instituicao(repo,repo.item,search_fn=falha,continuar_falhas=True))
+            self.assertEqual(chamadas,['a','b','c'])
+            self.assertEqual(repo.cp['indice_pesquisa'],0)
+            chamadas.clear()
+            def recuperado(q,*a): chamadas.append(q); return []
+            self.assertTrue(s.processar_instituicao(repo,repo.item,search_fn=recuperado,continuar_falhas=True))
+            self.assertEqual(chamadas,['a','b','c','d'])
+
     def test_artigo_em_ingles_tenta_endereco_portugues(self):
         with patch.object(f,'_carregar_url',return_value=([{'nome':'Ana Silva'}],[])) as leitura:
             f.carregar_fonte('https://eventoscopq.mackenzie.br/jornada/en/article/view/2554','Mackenzie')
