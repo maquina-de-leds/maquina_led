@@ -417,9 +417,9 @@ def garantir_fila_oficial(repo):
 # BUSCA WEB CONTROLADA
 # ============================================================
 
-def ddgs_texto(consulta, backend, max_results):
+def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
     from ddgs import DDGS
-    with DDGS(timeout=15) as ddgs:
+    with DDGS(timeout=20) as ddgs:
         return list(ddgs.text(
             consulta,
             region="br-pt",
@@ -430,45 +430,37 @@ def ddgs_texto(consulta, backend, max_results):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca com diagnóstico de 'sem resultado' versus indisponibilidade do motor.
+    """Busca usando o metabusca automático do DDGS.
 
-    DDGS pode lançar 'No results found' tanto para uma consulta realmente vazia
-    quanto quando um backend deixa de responder. Se todos os backends disserem
-    isso, fazemos uma única consulta de saúde antes de concluir que o resultado é vazio.
+    O teste no próprio GitHub Actions mostrou que forçar Brave/Bing podia
+    retornar zero enquanto backend='auto' encontrava o lead correto.
     """
-    backends = ["brave", "bing"]
-    sem_resultado = 0
-    erros_reais = []
-
-    for backend in backends:
+    ultimo_erro = None
+    for tentativa in range(1, 3):
         try:
-            resultados = fetch_fn(consulta, backend, max_results)
-            if resultados:
-                return resultados
-            # Retorno normal vazio do backend: resultado vazio confiável.
-            return []
-        except Exception as exc:
-            msg = str(exc)
-            if "No results found" in msg:
-                sem_resultado += 1
-            else:
-                erros_reais.append(f"{backend}: {msg}")
-            time.sleep(0.5)
-
-    if sem_resultado:
-        # Diagnóstico barato: se uma busca extremamente ampla funciona, tratamos
-        # 'No results found' da consulta específica como vazio real. Se nem a
-        # busca de saúde funciona, não concluímos a instituição por engano.
-        for backend in backends:
+            resultados = fetch_fn(consulta, "auto", max_results)
+            return list(resultados or [])
+        except TypeError:
+            # Compatibilidade com funções de teste que aceitam só consulta/max_results.
             try:
-                saude = fetch_fn("Brasil", backend, 1)
-                if saude:
-                    return []
+                resultados = fetch_fn(consulta, max_results)
+                return list(resultados or [])
             except Exception as exc:
-                erros_reais.append(f"health/{backend}: {exc}")
+                ultimo_erro = exc
+        except Exception as exc:
+            ultimo_erro = exc
 
-    detalhe = " | ".join(erros_reais[-4:]) or "backends sem resposta verificável"
-    print(f"      ⚠️ Busca externa indisponível: {detalhe}", flush=True)
+        msg = str(ultimo_erro or "")
+        if "No results found" in msg:
+            if tentativa < 2:
+                time.sleep(2.0)
+                continue
+            return []
+
+        if tentativa < 2:
+            time.sleep(3.0)
+
+    print(f"      ⚠️ Busca externa indisponível: {ultimo_erro}", flush=True)
     return None
 
 
