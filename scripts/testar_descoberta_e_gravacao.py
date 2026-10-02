@@ -1,6 +1,6 @@
 """Teste curto de descoberta e gravação real, sem alterar a fila nacional.
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
-Confere também a data editorial quando ela aparece depois do menu.
+Confere também parágrafos que misturam notícias de alunos com falas de docentes.
 """
 import json,signal,sys,time
 from pathlib import Path

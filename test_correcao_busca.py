@@ -5,6 +5,12 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_noticia_aluno_e_docentes_no_mesmo_paragrafo(self):
+        linhas=[('28 Jan 2025','text'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação. Os professores apoiaram a aluna. O reitor Osvaldo Gastaldon comemorou.','p')]
+        r=f.extrair_documento(linhas,None,None)
+        self.assertEqual([x['nome'] for x in r],['Júlia Parpineli Bernini Silva'])
+        self.assertEqual(r[0]['ano'],2025)
+
     def test_data_editorial_apos_menu_permite_noticia_recente(self):
         linhas=[('Navegação '+str(i),'p') for i in range(35)]
         linhas += [('28 Jan 2025','div'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação.','p')]

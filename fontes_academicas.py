@@ -230,13 +230,16 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
             match = re.search(r'\b(?:a|o|aluna|aluno|formanda|formando|estudante|discente|acadêmica|acadêmico)\s+([A-ZÀ-Ý][^,.;:]{2,100}),?\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição\b',sentence)
             if match:
                 add(pessoa(match.group(1).strip()),sentence,default_year,default_period)
-        if not role_section and not re.search(PAPEL, n):
-            recente=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,100})[,.;]',line)
+        # Um parágrafo pode misturar a notícia do aluno com falas de docentes.
+        for frase in re.split(r'(?<=[.!?])\s+', line):
+            if role_section or re.search(PAPEL,norm(frase)): continue
+            recente=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,100})[,.;]',frase)
             if recente:
-                y,per=periodo_academico(line)
+                y,per=periodo_academico(frase)
                 y=y or publication_year
                 per=per or (f'{y} (notícia de recém-formado; semestre da conclusão não informado)' if y else None)
-                add(pessoa(recente.group(1)),line,y,per)
+                add(pessoa(recente.group(1)),frase,y,per)
+        if not role_section and not re.search(PAPEL, n):
             # Evidência direta individual; não depende de uma lista de turma.
             for sentence in re.split(r'(?<=[.!?])\s+', line):
                 match = re.search(r'\b(?:alun[oa]|estudante|discente|acadêmic[oa])\s+([A-ZÀ-Ý][^,.;:]{2,100}?),?\s+(?:d[eoa]\s+(?:curso\s+de\s+)?Nutrição)\b', sentence)
