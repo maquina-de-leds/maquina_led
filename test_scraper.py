@@ -104,6 +104,12 @@ class FontesTests(unittest.TestCase):
             self.assertFalse(f.url_permitida(url))
 
 class FluxoTests(unittest.TestCase):
+    def test_nome_existente_com_sigla_da_faculdade_nao_duplica(self):
+        repo=Repo()
+        repo.instituicao_de_lead_por_alias=lambda nome,alias:'UniAteneu' if alias=='UNIATENEU' else None
+        self.assertFalse(s.salvar_lead(repo,'Giovanna Kimie','Centro Universitário Ateneu','Fortaleza','CE','Nutrição 2026/1','https://uniateneu.edu.br/fonte',ano_forcado=2026,periodo_forcado='2026/1',instituicao_alias='UNIATENEU'))
+        self.assertEqual(repo.saved,[])
+        self.assertEqual(s.stats['duplicados'],1)
     def setUp(self):
         for key in s.stats: s.stats[key]=0
     def test_consultas_institucionais(self):
@@ -146,12 +152,34 @@ class FluxoTests(unittest.TestCase):
     def test_busca_indisponivel(self,sleep):
         def fail(*args): raise RuntimeError('No results found')
         self.assertIsNone(s.buscar_web('test',fetch_fn=fail))
+    @patch.object(s.time,'sleep')
+    def test_cidade_da_fila_nao_e_atribuida_sem_evidencia(self,sleep):
+        for contexto,expected in [('Colação em Sorocaba 2026/1',('Não identificado',None)),('Colação em Itu 2026/1',('Itu','SP'))]:
+            repo=Repo();item=dict(repo.item,cidade='Itu')
+            record=dict(nome='Ana Silva',ano=2026,periodo='2026/1',evidencia='Formanda de Nutrição 2026/1',contexto_academico=contexto)
+            with patch.object(s,'consultas_leads',return_value=['test']):
+                s.processar_instituicao(repo,item,lambda *a:[dict(href='https://universidade.edu.br/turma')],lambda *a:([record],[]))
+            self.assertEqual((repo.saved[0]['cidade'],repo.saved[0]['estado']),expected)
     def test_maquina2_nao_chama_busca_linkedin(self):
         tree=ast.parse(Path(__file__).with_name('enriquecimento.py').read_text())
         self.assertFalse(any(isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='buscar_linkedin' for x in ast.walk(tree)))
 
 
 class MunicipiosTests(unittest.TestCase):
+    def arquivo_ead(self, linhas):
+        import tempfile,zipfile
+        tmp=tempfile.NamedTemporaryFile(suffix='.zip')
+        with zipfile.ZipFile(tmp.name,'w') as z:
+            z.writestr('MICRODADOS_ED_SUP_IES_2024.CSV','CO_IES;NO_IES;SG_IES\n1;Universidade Teste;UT\n2;Faculdade Outra;FO\n')
+            z.writestr('MICRODADOS_CADASTRO_CURSOS_2024.CSV','CO_IES;SG_UF;NO_MUNICIPIO;NO_CINE_ROTULO;NU_ANO_CENSO;TP_MODALIDADE_ENSINO\n'+linhas)
+        return tmp
+    def test_sede_ead_nao_inventa_municipio_quando_polo_existe(self):
+        with self.arquivo_ead('1;;;Nutrição;2024;2\n1;SP;Itu;Nutrição;2024;2\n') as tmp:
+            rows=s.ler_fila_inep_zip(tmp.name)
+        self.assertEqual([(r['estado'],r['cidade']) for r in rows],[('SP','Itu')])
+    def test_sede_ead_sem_oferta_municipal_exige_conferencia(self):
+        with self.arquivo_ead('1;;;Nutrição;2024;2\n2;SP;Itu;Nutrição;2024;1\n') as tmp:
+            with self.assertRaises(RuntimeError):s.ler_fila_inep_zip(tmp.name)
     def test_fila_usa_municipio_do_curso_e_nao_sede(self):
         import tempfile,zipfile
         ies='CO_IES;NO_IES;SG_IES;NO_MUNICIPIO_IES\n1;Universidade Teste;UT;Capital\n'

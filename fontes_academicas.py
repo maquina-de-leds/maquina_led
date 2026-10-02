@@ -157,7 +157,8 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         if name and y in ANOS:
             phase = 'TCC' if re.search(r'tcc|trabalho de conclusao', norm(evidence+' '+context)) else 'turma/conclusão'
             out.append(dict(nome=name, ano=y, periodo=per, instagram=instagram_associado(evidence,name),
-                            evidencia=f'{instituicao} | Nutrição | {per} | {phase} | {evidence}'))
+                            evidencia=f'{instituicao} | Nutrição | {per} | {phase} | {evidence}',
+                            contexto_academico=context))
     # Repositórios institucionais com metadados de autor/data acadêmica.
     meta_text = ' '.join(metas.get('citation_title', []) + metas.get('dc.title', []) + metas.get('dc.description', []))
     dates = metas.get('dc.date.issued', []) + metas.get('citation_date', []) + metas.get('citation_publication_date', [])
