@@ -582,11 +582,12 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
               '"extensão" "alunos"', '"workshop" "alunos"', '"caderno de resumos"',
               '"anais" "autores"', '"ebook" "alunos"', '"e-book" "alunas"',
               '"semana acadêmica"', '"jornada" "graduanda"')
-    consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
+    consultas = [f'"{termo}" Nutrição {sinal} {ano}'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
-        consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano} -site:linkedin.com'
+        consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano}'
                       for ano in (2025,2026)]
+    consultas += [f'site:linkedin.com/in "{instituicao}" Nutrição {ano}' for ano in (2025,2026)]
     return consultas
 
 
@@ -603,6 +604,10 @@ def formatar_nome_pessoa(nome):
 
 
 def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None):
+    from fontes_academicas import pessoa
+    if not pessoa(nome):
+        stats["rejeitados"] += 1
+        return False
     nome = formatar_nome_pessoa(nome)
     instituicao_existente = instituicao if repo.lead_existe(nome,instituicao) else None
     if not instituicao_existente and instituicao_alias and hasattr(repo,"instituicao_de_lead_por_alias"):
@@ -619,7 +624,8 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
 
     ano = ano_forcado
     periodo = periodo_forcado
-    if ano not in {2025,2026} or not periodo:
+    periodo_sem_ano = ano is None and periodo and re.search(r'[78]º período/semestre',periodo) and "nutricao" in normalizar(texto)
+    if (ano not in {2025,2026} and not periodo_sem_ano) or not periodo:
         raise ValueError("Lead precisa de ano/período extraídos da fonte acadêmica")
     dados = {
         "nome": nome,
@@ -694,8 +700,8 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
     })
 
 
-def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
-    from fontes_academicas import carregar_fonte, url_permitida
+def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False):
+    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
@@ -721,11 +727,26 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
                             encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
         resultados = search_fn(consulta, MAX_RESULTADOS)
         if resultados is None:
+            if continuar_falhas:
+                falhas_fontes += 1
+                stats["erros"] += 1
+                print(f"      CONSULTA PENDENTE: {consulta}",flush=True)
+                continue
             repo.atualizar_instituicao(iid,status="erro")
             stats["instituicoes_erro"] += 1
             checkpoint_captacao(repo,item,"erro",idx,total,consulta=consulta,erro="Busca externa indisponível",
                                 encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
             return False
+        for resultado in resultados:
+            url_resultado=str(resultado.get("href") or resultado.get("url") or "")
+            if not url_permitida(url_resultado): continue
+            for registro in extrair_resultado_busca(resultado,instituicao,alias):
+                encontrados_local += 1
+                stats["leads_encontrados"] += 1
+                registro["evidencia"] += " | Consultado em "+agora()
+                print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
+                salvar_lead(repo,registro["nome"],instituicao,None,None,registro["evidencia"],url_resultado,
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias)
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados]
         for url, depth in fila:
             if url in fontes_vistas or not url_permitida(url): continue
@@ -811,7 +832,7 @@ def executar():
     fila = repo.fila_nacional()
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
     for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
-        if not processar_instituicao(repo, item):
+        if not processar_instituicao(repo, item, continuar_falhas=True):
             resumo()
             raise SystemExit(2)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
@@ -835,5 +856,3 @@ if __name__ == "__main__":
         preparar_lista()
     else:
         executar()
-
-

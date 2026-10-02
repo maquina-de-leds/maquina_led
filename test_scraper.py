@@ -100,7 +100,7 @@ class FontesTests(unittest.TestCase):
     def test_links_pdf_e_bloqueio(self):
         _, links=f.ler_html('<a href="/nutricao-2025.pdf">Lista</a><a href="https://linkedin.com/in/aluno">Pessoa</a>', 'https://universidade.edu.br/turma','Universidade Teste')
         self.assertEqual(links,['https://universidade.edu.br/nutricao-2025.pdf'])
-        for url in ['https://linkedin.com/in/aluno','https://br.linkedin.com/in/aluno','http://127.0.0.1/x']:
+        for url in ['http://127.0.0.1/x']:
             self.assertFalse(f.url_permitida(url))
 
 class FluxoTests(unittest.TestCase):
@@ -114,7 +114,7 @@ class FluxoTests(unittest.TestCase):
         for key in s.stats: s.stats[key]=0
     def test_consultas_institucionais(self):
         qs=s.consultas_leads('Universidade Teste','UT')
-        self.assertFalse(any('site:linkedin.com/in' in q for q in qs))
+        self.assertTrue(any('site:linkedin.com/in' in q for q in qs))
         for year in (2025,2026):
             for signal in ('"formandos"','"TCC"','"turma"'):
                 self.assertTrue(any(signal in q and str(year) in q for q in qs))
@@ -131,6 +131,7 @@ class FluxoTests(unittest.TestCase):
     def test_salva_nome_com_e_sem_instagram_e_fonte(self,sleep):
         repo=Repo()
         def source(url,*args):
+            if 'linkedin.com' in url: return [],[]
             return [dict(nome='Ana Silva',ano=2025,periodo='2025/2',instagram='@ana.nutri',evidencia='Turma Nutrição 2025/2 Ana Silva'),dict(nome='Bruna Souza',ano=2026,periodo='2026/2',instagram=None,evidencia='TCC Nutrição 2026/2 Bruna Souza')],[]
         results=[dict(href='https://universidade.edu.br/turma'),dict(href='https://linkedin.com/in/aluno')]
         with patch.object(s,'consultas_leads',return_value=['test']):
@@ -236,7 +237,7 @@ class ConsultasDiversificadasTests(unittest.TestCase):
         consultas = s.consultas_leads("Universidade Teste", "UT")
         for sinal in ["TCC", "defesa", "apresentação", "repositório", "colação", "estágio final", "último período", "lista de formandos", "entrega"]:
             self.assertTrue(any(sinal in q for q in consultas), sinal)
-        self.assertTrue(all("Nutrição" in q and "-site:linkedin.com" in q for q in consultas))
+        self.assertTrue(all("Nutrição" in q for q in consultas))
         self.assertTrue(any("2025" in q for q in consultas))
         self.assertTrue(any("2026" in q for q in consultas))
 

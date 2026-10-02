@@ -23,8 +23,6 @@ def url_permitida(url):
     host = (p.hostname or '').lower()
     if p.scheme not in {'http', 'https'} or not host or p.username or p.password:
         return False
-    if host == 'linkedin.com' or host.endswith('.linkedin.com'):
-        return False
     if host in {'localhost', 'metadata.google.internal'} or host.endswith('.local'):
         return False
     try:
@@ -106,7 +104,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:industria|alimentos|mercado|clinica|esportiva|coletiva|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -156,6 +154,9 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         context_lines = [t for t,tag in linhas[:20] if tag == 'pdf']
     context = ' '.join(context_lines)
     default_year, default_period = periodo_academico(context)
+    publication_year, publication_period = periodo_academico(' '.join(metas.get('article:published_time', []) + metas.get('date', [])))
+    if not publication_year:
+        publication_year, publication_period = periodo_academico(' '.join(t for t,tag in linhas[:30]))
     single_course = not re.search(OUTROS_CURSOS, norm(context))
     active = single_course and 'nutricao' in norm(context)
     year, period = default_year, default_period
@@ -178,6 +179,15 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     for i, (line, tag) in enumerate(linhas):
         n = norm(line)
         if not line: continue
+        # Notícias com alunos e orientadores na mesma frase: delimitar os alunos.
+        inline = re.search(r'\bas alunas\s+(.+?)\s+e as professoras',line,re.I)
+        if inline and 'nutricao' in n:
+            for name in nomes_da_lista(inline.group(1)):
+                add(name,line,default_year or publication_year,default_period or publication_period)
+        # Biografia de autor explicitamente aluno, sem incluir coautores docentes.
+        if re.match(r'^(?:graduand[oa]s?|estudante|alun[oa]|academic[oa]|discente)\b',n) and 'nutricao' in n and i:
+            previous = linhas[i-1][0].split(instituicao)[0].strip(' ,|-')
+            add(pessoa(previous),previous+' | '+line,default_year,default_period)
         if tag == 'pdf' and pessoa(line):
             seguinte = norm(' '.join(t for t, _ in linhas[i+1:i+4]))
             if re.match(r'(?:'+PAPEL+r')\b',seguinte):
@@ -265,6 +275,30 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     return list(unique.values())
 
 
+def extrair_resultado_busca(resultado, instituicao, alias=None):
+    """Trecho público deve conter vínculo; nunca usa o ano digitado na consulta."""
+    titulo=str(resultado.get('title') or '')
+    trecho=str(resultado.get('body') or resultado.get('snippet') or '')
+    texto=titulo+' | '+trecho
+    n=norm(texto)
+    if 'nutricao' not in n or not any(t and norm(t) in n for t in (instituicao,alias)):
+        return []
+    if re.search(PAPEL,n) or re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
+        return []
+    ano,periodo=periodo_academico(texto)
+    fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
+    if ano not in ANOS and not fase: return []
+    nome=pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0])
+    if not nome:
+        m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
+        nome=pessoa(m.group(1)) if m else None
+    if not nome or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
+    if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
+    return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
+                 evidencia=instituicao+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
+                 contexto_academico=texto)]
+
+
 def ler_html(html, url, instituicao, alias=None):
     from lxml import html as html_dom
     raiz = html_dom.fromstring(html)
@@ -289,6 +323,9 @@ def ler_html(html, url, instituicao, alias=None):
             handles=[a.get('href') for a in node.xpath('.//a[@href]') if 'instagram.com/' in a.get('href')]
             if handles: text += ' '+' '.join(handles)
             if text: page.linhas.append((text,node.tag))
+        elif node.tag in {'div','span','strong','b'} and not node.xpath('.//p|.//li|.//tr|.//h1|.//h2|.//h3|.//h4|.//div|.//span'):
+            text=' '.join(' '.join(node.itertext()).split())
+            if text: page.linhas.append((text,'text'))
     page.textos.extend(t for t,tag in page.linhas)
     # Metadados podem completar uma data; não inferir ano a partir do URL.
     for key in ('citation_title', 'dc.title', 'dc.description'):
@@ -347,12 +384,17 @@ def carregar_fonte(url, instituicao, alias=None):
     # Redirecionamentos são verificados antes de cada acesso.
     for _ in range(5):
         response=requests.get(url, timeout=(10,25), allow_redirects=False, stream=True,
-                              headers={'User-Agent':'Mozilla/5.0 MaquinaLeads/5.8'})
+                              headers={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/pdf;q=0.9,*/*;q=0.8'})
         if response.status_code in {301,302,303,307,308}:
             target=urljoin(url,response.headers.get('Location',''))
             response.close()
             if not url_permitida(target): return [], []
             url=target; continue
+        if response.status_code in {429,500,502,503,504} and _ < 2:
+            response.close()
+            import time
+            time.sleep(2 * (_ + 1))
+            continue
         response.raise_for_status()
         chunks=[]; size=0
         for chunk in response.iter_content(65536):
@@ -370,6 +412,4 @@ def carregar_fonte(url, instituicao, alias=None):
         encoding=response.encoding if response.encoding and response.encoding.lower()!='iso-8859-1' else 'utf-8'
         return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
     raise ValueError('Excesso de redirecionamentos')
-
-
 

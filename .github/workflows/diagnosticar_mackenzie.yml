@@ -1,0 +1,27 @@
+name: Diagnostico de leitura da Mackenzie
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/diagnosticar_mackenzie.py', '.github/workflows/diagnosticar_mackenzie.yml']
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  diagnosticar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf lxml
+      - run: python -m unittest discover -p 'test_*.py'
+      - name: Ler fontes reais e bloquear falso positivo
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u scripts/diagnosticar_mackenzie.py
