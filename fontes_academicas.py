@@ -299,6 +299,31 @@ def ler_html(html, url, instituicao, alias=None):
     return records, links[:6]
 
 
+def extrair_autores_alunos_pdf(linhas, instituicao, alias=None):
+    """Identificação explícita de aluno no cabeçalho de artigo recente."""
+    textos=[t.strip() for t,tag in linhas if t.strip()][:45]
+    cabecalho=norm(' '.join(textos[:10]))
+    datas=re.findall(r'(?:received|accepted|recebido|aceito|publicado)\s*:\s*\d{1,2}[/.-]\d{1,2}[/.-](20\d{2})',cabecalho)
+    anos=[int(a) for a in datas]
+    if not anos or max(anos) not in ANOS: return []
+    ano=max(anos)
+    out=[]
+    for i,line in enumerate(textos[:-1]):
+        nome=pessoa(line)
+        if not nome: continue
+        vinculo=' '.join(textos[i+1:i+4])
+        n=norm(vinculo)
+        if not re.match(r'(?:academic[oa]|alun[oa]|estudante|discente)\b',n): continue
+        if 'nutricao' not in n: continue
+        termos=[norm(instituicao),norm(alias)]
+        if not any(t and re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',n) for t in termos): continue
+        periodo=f'{ano} (semestre não informado)'
+        out.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
+            evidencia=f'{instituicao} | Nutrição | vínculo acadêmico em {ano} | {nome} | {vinculo} | Fase do curso pendente de confirmação',
+            contexto_academico=vinculo))
+    return out
+
+
 def ler_pdf(data, instituicao, alias=None):
     from pypdf import PdfReader
     reader=PdfReader(io.BytesIO(data))
@@ -307,6 +332,8 @@ def ler_pdf(data, instituicao, alias=None):
         lines.extend((line.strip(),'pdf') for line in (page.extract_text() or '').splitlines())
     # Primeiro cabeçalho em PDF fornece contexto e data da seção.
     records=extrair_documento(lines,instituicao,alias,' '.join(x[0] for x in lines))
+    records += extrair_autores_alunos_pdf(lines,instituicao,alias)
+    records = list({(norm(r["nome"]),r["ano"]):r for r in records}.values())
     return records, []
 
 
@@ -339,4 +366,5 @@ def carregar_fonte(url, instituicao, alias=None):
         encoding=response.encoding if response.encoding and response.encoding.lower()!='iso-8859-1' else 'utf-8'
         return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
     raise ValueError('Excesso de redirecionamentos')
+
 

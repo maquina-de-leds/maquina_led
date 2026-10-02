@@ -294,3 +294,22 @@ class AtributosHtmlTests(unittest.TestCase):
     def test_centro_e_relacionados_nao_sao_pessoas(self):
         for nome in ['Centro Universitário Uniateneu','Assuntos Relacionados']:
             self.assertIsNone(f.pessoa(nome))
+
+
+class ArtigoAlunoRecenteTests(unittest.TestCase):
+    def linhas(self, data='2026', escola='Universidade Teste'):
+        return [(x,'pdf') for x in [f'Received: 13/04/{data} - Accepted: 27/05/{data}',
+            'Nutrição e recuperação muscular', 'Vitor Manoel Matos Moutinho',
+            'Acadêmico do curso de Nutrição da', escola+'. Brasil.',
+            'E-mail: teste@example.org', 'Karine Rodrigues da Silva Neumann',
+            'Docente do curso de Nutrição da', escola+'. Brasil.',
+            'Revisão de artigos de 2015 a 2025']]
+    def test_artigo_recente_aluno_sem_semestre_ignora_docente(self):
+        out=f.extrair_autores_alunos_pdf(self.linhas(),'Universidade Teste')
+        self.assertEqual([r['nome'] for r in out],['Vitor Manoel Matos Moutinho'])
+        self.assertEqual(out[0]['ano'],2026)
+        self.assertIsNone(out[0]['instagram'])
+    def test_artigo_antigo_nao_usa_ano_das_referencias(self):
+        self.assertEqual(f.extrair_autores_alunos_pdf(self.linhas('2024'),'Universidade Teste'),[])
+    def test_vinculo_de_outra_faculdade_nao_e_reaproveitado(self):
+        self.assertEqual(f.extrair_autores_alunos_pdf(self.linhas(escola='Outra Faculdade'),'Universidade Teste'),[])
