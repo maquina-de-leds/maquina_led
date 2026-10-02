@@ -1,0 +1,27 @@
+name: Salvar duas recém-formadas autorizadas
+on:
+  push:
+    paths:
+      - 'scripts/salvar_recem_formadas_noticias.py'
+      - '.github/workflows/salvar_recem_formadas_noticias.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: salvar-duas-recem-formadas-noticias
+  cancel-in-progress: false
+jobs:
+  salvar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install supabase
+      - name: Salvar e confirmar somente os dois nomes autorizados
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u scripts/salvar_recem_formadas_noticias.py
