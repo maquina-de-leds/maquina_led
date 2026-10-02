@@ -22,7 +22,7 @@ Quando um Instagram pessoal estiver claramente associado a um único nome da fon
 
 ### Validação real em 02/10/2026
 
-O ajuste dos extratores passou em 26 testes e em três páginas institucionais reais. A leitura extraiu 13 nomes da Unochapecó (2025/2), um nome da mesma instituição sem semestre explícito e um nome da UniAteneu (2026/1). A ampliação incluiu listas por rótulo de curso e pessoa explicitamente identificada como oradora/formanda de Nutrição, mantendo exclusão de seções docentes.
+O ajuste dos extratores passou em 27 testes e em três páginas institucionais reais. A leitura identifica 13 nomes da Unochapecó (2025/2) e um nome da UniAteneu (2026/1). Uma terceira notícia apresenta um nome de Nutrição, mas só fornece ano de publicação: ela não comprova o período acadêmico e não foi usada na gravação. Isso não significa que a pessoa seja inválida; exige confirmação da turma. A ampliação incluiu listas por rótulo de curso e pessoa explicitamente identificada como oradora/formanda de Nutrição, mantendo exclusão de seções docentes e impedindo usar exclusivamente o ano editorial como ano da turma.
 
 Foi feita uma gravação controlada somente dos 14 nomes com semestre explícito. Resultado: 14 candidatos, 14 novos registros, zero duplicados na primeira passagem. Todos ficaram com Instagram pendente. Uma segunda passagem confirmou os 14 no banco e ignorou os 14 como duplicados, sem novas inserções. A validação usou o schema existente do Supabase e não enviou mensagens.
 

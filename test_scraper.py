@@ -19,8 +19,8 @@ class Repo:
 
 class FontesTests(unittest.TestCase):
     def test_noticia_multicurso_lista_por_rotulo(self):
-        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><p>Publicado em 29/04/2026</p>
-        <p>Formandos receberam a outorga de grau.</p><p>Psicologia: Ana Silva.</p>
+        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><meta property="article:published_time" content="2026-04-29"><p>Publicado em 29/04/2026</p>
+        <p>Formandos receberam a outorga de grau em abril de 2026.</p><p>Psicologia: Ana Silva.</p>
         <p>Nutrição: Melissa Gomes da Silva.</p>''')
         self.assertEqual([x['nome'] for x in out],['Melissa Gomes da Silva'])
         self.assertEqual(out[0]['ano'],2026)
@@ -35,6 +35,10 @@ class FontesTests(unittest.TestCase):
     def test_rotulo_de_curso_em_secao_docente_nao_salva_professor(self):
         out=self.extract('''<title>Universidade Teste — Colação de grau Nutrição 2026</title>
         <h2>Professores homenageados</h2><p>Nutrição: Maria Silva.</p>''')
+        self.assertEqual(out,[])
+    def test_ano_de_publicacao_sozinho_nao_comprova_turma(self):
+        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><meta property="article:published_time" content="2026-04-29"><p>Publicado em 29/04/2026</p>
+        <p>Formandos receberam a outorga de grau.</p><p>Nutrição: Ana Silva.</p>''')
         self.assertEqual(out,[])
     def extract(self,html):
         return f.ler_html(html,'https://universidade.edu.br/turmas','Universidade Teste')[0]
