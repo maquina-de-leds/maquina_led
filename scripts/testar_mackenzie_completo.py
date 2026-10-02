@@ -1,54 +1,42 @@
-"""Busca completa independente na Mackenzie e compara nomes únicos com a base."""
-import json,sys,os
+"""Validação curta de fontes reais, gravação e duplicação; sem varredura nacional."""
+import json,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import scraper as s
 from fontes_academicas import carregar_fonte
-repo=s.SupabaseRepo.from_env()
-rows=repo.client.table("instituicoes_nutricao").select("*").eq("origem",s.ORIGEM_IES).ilike("instituicao","%Mackenzie%").execute().data or []
-base=next(x for x in s.agrupar_faculdades(rows) if s.normalizar(x["instituicao"])==s.normalizar("Universidade Presbiteriana Mackenzie"))
-alias=s.alias_instituicao(base)
-if s.normalizar(alias) not in {"mackenzie","upm"}:
-    base["fonte_validacao"]=(base.get("fonte_validacao") or "")+" | SIGLA=Mackenzie"
-def nomes_banco():
-    nomes={}
-    for offset in range(0,100000,1000):
-        lote=repo.client.table("leds").select("nome,instituicao,nao_contatar").ilike("instituicao","%Mackenzie%").order("id").range(offset,offset+999).execute().data or []
-        for r in lote:
-            if not r.get("nao_contatar"): nomes[s.normalizar(r["nome"])]=r["nome"]
-        if len(lote)<1000: return nomes
-    raise RuntimeError("Paginação incompleta")
-antes=nomes_banco()
-print("BASE ANTES:",json.dumps(list(antes.values()),ensure_ascii=False),flush=True)
-vistos={}
-original_salvar=s.salvar_lead
-def salvar_observado(repo,nome,*args,**kw):
-    vistos[s.normalizar(s.formatar_nome_pessoa(nome))]=s.formatar_nome_pessoa(nome)
-    return original_salvar(repo,nome,*args,**kw)
-s.salvar_lead=salvar_observado
-class Piloto:
-    def __getattr__(self,n): return getattr(repo,n)
-    def atualizar_instituicao(self,*a,**kw): pass
-    def inserir_lead(self,d):
-        repo.inserir_lead(d)
-        assert repo.lead_existe(d["nome"],d["instituicao"])
-        print("GRAVACAO CONFIRMADA:",d["nome"],flush=True)
-def fonte(url,ies,alias):
-    registros,links=carregar_fonte(url,ies,alias)
-    for r in registros: vistos[s.normalizar(r["nome"])]=r["nome"]
-    return registros,links
-def busca(q,max_results):
-    resultados=s.buscar_web(q,max_results)
-    print("RESULTADOS BUSCA:",json.dumps({"consulta":q,"indisponivel":resultados is None,"urls":[r.get("href") or r.get("url") for r in resultados or []]},ensure_ascii=False),flush=True)
-    return resultados
-item=dict(base,id="mackenzie_completo_"+os.environ.get("GITHUB_RUN_ID","local"))
-consultas=s.consultas_leads(item["instituicao"],s.alias_instituicao(item))
-print("CONSULTAS PLANEJADAS:",len(consultas),flush=True)
-ok=s.processar_instituicao(Piloto(),item,search_fn=busca,source_fn=fonte,continuar_falhas=True)
-depois=nomes_banco()
-resultado={"busca_terminou":ok,"consultas_planejadas":len(consultas),"base_antes":len(antes),"nomes_unicos_encontrados":len(vistos),"nomes_anteriores_reencontrados":[antes[k] for k in antes.keys() & vistos.keys()],"nomes_anteriores_nao_reencontrados":[antes[k] for k in antes.keys()-vistos.keys()],"novos_confirmados":[depois[k] for k in depois.keys()-antes.keys()],"base_depois":len(depois),"stats":s.stats}
-print("COMPARACAO FINAL:",json.dumps(resultado,ensure_ascii=False),flush=True)
-print("Teste isolado: não conclui nem avança outras faculdades.",flush=True)
-if not ok or s.stats["erros"]: raise SystemExit(2)
-
-# Revalidar descoberta e gravação com cópias oficiais e filtro institucional corrigidos.
+repo=s.SupabaseRepo.from_env(); inicio=time.monotonic(); vistos={}; novos=[]; pendentes=[]; duplicados=0
+ies='Universidade Presbiteriana Mackenzie'
+fontes=[
+('https://www.mackenzie.br/universidade/unidades-academicas/ccbs/tcc-e-pesquisa/mostra-de-tcc',22),
+('https://www.mackenzie.br/memorias/150-anos/acontece/arquivo/n/a/i/alunos-de-nutricao-criam-e-book-de-receitas-saudaveis-e-praticas',8),
+('https://eventoscopq.mackenzie.br/jornada/pt_BR/article/view/317',1),
+('https://www.mackenzie.br/fileadmin/ARQUIVOS/Public/pesquisa-inovacao/incubadora/Vitrine_2024/Lista_unificada_projetos_aprovador.23.06.25.pdf',4)
+]
+def limite(*args): raise TimeoutError('Limite de leitura da fonte atingido')
+signal.signal(signal.SIGALRM,limite)
+for url,minimo in fontes:
+    restante=360-(time.monotonic()-inicio)
+    if restante<=0:
+        pendentes.append({'fonte':url,'erro':'Orçamento total de leitura esgotado'}); continue
+    try:
+        signal.setitimer(signal.ITIMER_REAL,min(45,restante))
+        try: registros,_=carregar_fonte(url,ies,'Mackenzie')
+        finally: signal.setitimer(signal.ITIMER_REAL,0)
+        print('FONTE REAL:',json.dumps({'url':url,'pessoas':len(registros),'nomes':[r['nome'] for r in registros]},ensure_ascii=False),flush=True)
+        if len(registros)<minimo: pendentes.append({'fonte':url,'erro':'Leitura menor que a última quantidade validada','lidos':len(registros),'referencia':minimo})
+        for r in registros:
+            instituicao=r.get('instituicao',ies)
+            chave=(s.normalizar(r['nome']),instituicao)
+            if chave in vistos: continue
+            vistos[chave]=r['nome']
+            inseriu=s.salvar_lead(repo,r['nome'],instituicao,None,None,r['evidencia'],url,instagram=r.get('instagram'),ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if instituicao==ies else None)
+            assert repo.lead_existe(s.formatar_nome_pessoa(r['nome']),instituicao), 'Registro não confirmado após salvar/verificar duplicado'
+            if inseriu: novos.append(r['nome'])
+            else: duplicados+=1
+            print('CONFIRMADO NO BANCO:',r['nome'],'| novo:',inseriu,flush=True)
+    except Exception as exc:
+        signal.setitimer(signal.ITIMER_REAL,0)
+        pendentes.append({'fonte':url,'erro':str(exc)[:250]})
+        print('PENDENTE:',url,str(exc)[:250],flush=True)
+print('RESULTADO REAL:',json.dumps({'segundos':round(time.monotonic()-inicio,1),'fontes_planejadas':len(fontes),'nomes_unicos':len(vistos),'nomes':list(vistos.values()),'novos_confirmados':novos,'duplicados_confirmados':duplicados,'pendencias':pendentes,'pesquisas_extensas':0,'fila_nacional_alterada':False},ensure_ascii=False),flush=True)
+if pendentes: raise SystemExit(2)

@@ -1,4 +1,4 @@
-name: Busca completa da Mackenzie
+name: Validar lote Mackenzie e banco
 on:
   workflow_dispatch:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 concurrency:
   group: maquina-1-fila
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   salvar:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +22,7 @@ jobs:
           python-version: '3.11'
       - run: pip install requests supabase ddgs pypdf lxml
       - run: python -m unittest discover -p 'test_*.py'
-      - name: Pesquisar todos os critérios e comparar com a base
+      - name: Ler quatro fontes, salvar e confirmar duplicação
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
