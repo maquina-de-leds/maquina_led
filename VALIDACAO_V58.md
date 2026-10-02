@@ -20,6 +20,16 @@ Quando um Instagram pessoal estiver claramente associado a um único nome da fon
 
 ## Verificação e operação
 
+### Validação real em 02/10/2026
+
+O ajuste dos extratores passou em 26 testes e em três páginas institucionais reais. A leitura extraiu 13 nomes da Unochapecó (2025/2), um nome da mesma instituição sem semestre explícito e um nome da UniAteneu (2026/1). A ampliação incluiu listas por rótulo de curso e pessoa explicitamente identificada como oradora/formanda de Nutrição, mantendo exclusão de seções docentes.
+
+Foi feita uma gravação controlada somente dos 14 nomes com semestre explícito. Resultado: 14 candidatos, 14 novos registros, zero duplicados na primeira passagem. Todos ficaram com Instagram pendente. Uma segunda passagem confirmou os 14 no banco e ignorou os 14 como duplicados, sem novas inserções. A validação usou o schema existente do Supabase e não enviou mensagens.
+
+Execução da gravação: https://github.com/maquina-de-leds/maquina_led/actions/runs/37010461518 . Fontes: https://uno.edu.br/noticias/outorga-de-grau-1 e https://uniateneu.edu.br/uniateneu-realizou-colacao-de-grau-para-celebrar-a-formatura-de-alunos-de-diferentes-cursos-de-graduacao/ .
+
+A carga nacional não foi validada: a preparação inicial falhou por conexão/certificado no download do INEP. O CSV alternativo de cursos do portal de dados abertos do MEC retornou HTTP 403. As tentativas de completar a cadeia TLS ficaram isoladas no branch `validacao-fontes-v58`; não são uma correção comprovada. O sucesso do lote de 14 pessoas não comprova funcionamento da descoberta automática nem cobertura nacional.
+
 `python -m unittest discover -p 'test_*.py'` valida fontes HTML/PDF, cursos e anos distintos, professores, autoria, Instagram associado, filas municipais, repetição de buscas e gravação simulada. Os testes não comprovam desempenho nacional nem substituem validação de uma execução real. O download oficial, schema do Supabase e volume final só são confirmados pelos logs da preparação/captura.
 
 A captura continua em `Automacao Maquina de Leads`, acionada manualmente. Preparação e captura compartilham bloqueio de concorrência. O limite permanece quatro instituições por execução, com checkpoints. Falhas de busca, download ou banco são sinalizadas; uma instituição com fontes inacessíveis fica pendente de revisita. Falha real encerra o job com código diferente de zero.

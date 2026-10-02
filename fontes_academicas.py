@@ -77,6 +77,7 @@ def periodo_academico(text):
     patterns = [
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?([12])o?\s*semestre(?:\s+letivo)?\s*(?:de|/)?\s*(202[56])',
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?(202[56])[./-]([12])\b',
+        r'\bsemestre\s+(202[56])[./-]([12])\b',
     ]
     for i, pattern in enumerate(patterns):
         m = re.search(pattern, n)
@@ -108,6 +109,7 @@ def pessoa(text):
 def nomes_da_lista(text):
     # Conjunção separa pessoas somente quando ambos os lados são nomes completos.
     out = []
+    role_section = False
     for part in re.split(r';|\s*\|\s*|,', text):
         part = re.sub(r'^\s*e\s+', '', part).strip()
         pair = re.split(r'\s+e\s+', part)
@@ -165,6 +167,27 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     for i, (line, tag) in enumerate(linhas):
         n = norm(line)
         if not line: continue
+        if tag in {'h1','h2','h3','h4','dt'}:
+            role_section = bool(re.search(PAPEL,n))
+        elif len(line)<100 and re.match(r'^(?:professores|docentes|orientadores|coordenadores|banca)\b',n):
+            role_section = True
+        elif len(line)<100 and re.match(r'^(?:formandos|concluintes|autores|alunos|discentes)\b',n):
+            role_section = False
+        # Notícias multicurso também publicam linhas como 'Nutrição: Nome'.
+        course_list = re.match(r'^Nutrição\s*:\s*(.+)', line, re.I)
+        if course_list and not re.search(PAPEL, n):
+            if role_section:
+                continue
+            for name in nomes_da_lista(course_list.group(1)):
+                add(name,line,default_year,default_period)
+            continue
+        # Pessoa explicitamente vinculada ao curso, na própria frase da notícia.
+        for sentence in re.split(r'(?<=[.!?])\s+', line):
+            if re.search(PAPEL,norm(sentence)) or not re.search(r'formand|concluinte|orador',norm(sentence)):
+                continue
+            match = re.search(r'\b(?:a|o|aluna|aluno|formanda|formando)\s+([A-ZÀ-Ý][^,.;:]{2,100}),?\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição\b',sentence)
+            if match:
+                add(pessoa(match.group(1).strip()),sentence,default_year,default_period)
         if re.match(r'^(?:referencias|bibliografia|leia tambem|siga-nos|compartilhe)\b',n):
             active, mode = False, None
             continue

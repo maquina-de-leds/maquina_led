@@ -347,7 +347,6 @@ def garantir_fila_oficial(repo):
         ano, registros = carregar_instituicoes_municipais_inep()
         if not registros:
             raise RuntimeError("o filtro oficial nao encontrou nenhum curso de Nutricao")
-        repo.limpar_residuos_v4()
         repo.upsert_ies(registros)
         total = repo.contar_ies_v5()
         if total < len(registros):
