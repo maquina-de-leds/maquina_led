@@ -468,14 +468,16 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
     return None
 
 
-def consultas_leads(instituicao):
+def consultas_leads(instituicao, alias=None):
+    termo = limpar_espacos(alias or instituicao)
     return [
-        f'"{instituicao}" "Nutrição" "TCC" "2026"',
-        f'"{instituicao}" "Nutrição" "TCC" "2025"',
-        f'"{instituicao}" "Nutrição" "formanda" "2026"',
-        f'"{instituicao}" "Nutrição" "formatura" "2025"',
-        f'site:linkedin.com/in "{instituicao}" "Nutrição" "2026"',
-        f'site:instagram.com "{instituicao}" "Nutrição" "2026"',
+        f'site:linkedin.com/in "{termo}" "Nutrição" "7º semestre"',
+        f'site:linkedin.com/in "{termo}" "Nutrição" "8º semestre"',
+        f'site:linkedin.com/in "{termo}" "graduanda de Nutrição"',
+        f'site:linkedin.com/in "{termo}" "graduanda em Nutrição"',
+        f'site:linkedin.com/in "{termo}" "Nutrição" "formatura prevista" 2026',
+        f'site:linkedin.com/in "{termo}" "Nutrição" "2021 - 2025"',
+        f'site:linkedin.com/in "{termo}" "Nutrição" "2022 - 2026"',
     ]
 
 
@@ -526,10 +528,24 @@ def lead_qualificado(texto):
     n = normalizar(texto)
     if "nutricao" not in n and "nutricionista" not in n:
         return False
-    ano = identificar_ano(texto)
-    if ano not in (2025, 2026):
-        return False
-    return any(s in n for s in SINAIS_FASE_FINAL)
+
+    # 7º/8º semestre/período é evidência direta de fase final ou próxima do final.
+    if any(s in n for s in [
+        "7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8",
+        "8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8",
+    ]):
+        return True
+
+    # Previsão explícita de conclusão/formatura em 2025/2026.
+    padroes = [
+        r"(?:formatura|conclusao|concluir|formando|formanda|concluinte)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda|concluinte)",
+        r"(?:tcc|trabalho de conclusao)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:tcc|trabalho de conclusao)",
+        r"(?:nutricao)[^.!;]{0,120}20\d{2}\s*[-–—]\s*202[56]",
+        r"20\d{2}\s*[-–—]\s*202[56][^.!;]{0,120}(?:nutricao)",
+    ]
+    return any(re.search(p, n, flags=re.I) for p in padroes)
 
 
 def nome_parece_pessoa(nome):
@@ -845,36 +861,39 @@ def resumo():
 
 
 def executar():
-    print("🔬 DIAGNÓSTICO DE BUSCA V5.1", flush=True)
-    consultas = [
-        'site:linkedin.com/in "Universidade Presbiteriana Mackenzie" "Nutrição" "2026"',
-        'site:linkedin.com/in Mackenzie "graduanda de Nutrição" 2026',
-        'site:linkedin.com/in UFAC Nutrição',
-        'site:linkedin.com/in UFAC "graduanda em Nutrição"',
-        'site:instagram.com UFAC Nutrição',
-        'site:linkedin.com/in CESMAC Nutrição',
-        'site:instagram.com CESMAC Nutrição',
-        '"UFAC" "Nutrição" "TCC" 2026',
-        '"CESMAC" "Nutrição" "TCC" 2026',
+    print("🔬 DIAGNÓSTICO DE QUALIFICAÇÃO V5.2", flush=True)
+    alvos = [
+        ("Universidade Presbiteriana Mackenzie", "Mackenzie", "São Paulo"),
+        ("Universidade Federal do Acre", "UFAC", "Rio Branco"),
+        ("Centro Universitário Cesmac", "CESMAC", "Maceió"),
     ]
-    for consulta in consultas:
-        print("\n" + "=" * 72, flush=True)
-        print("CONSULTA:", consulta, flush=True)
-        resultados = buscar_web(consulta, max_results=10)
-        if resultados is None:
-            print("STATUS: INDISPONÍVEL", flush=True)
-            continue
-        print("TOTAL:", len(resultados), flush=True)
-        for i, r in enumerate(resultados[:10], 1):
-            titulo = limpar_espacos(r.get('title',''))
-            url = r.get('href') or r.get('url') or ''
-            corpo = limpar_espacos(r.get('body',''))
-            texto = limpar_espacos(f"{titulo} {corpo} {url}")
-            print(f"[{i}] TITLE: {titulo}", flush=True)
-            print(f"    URL: {url}", flush=True)
-            print(f"    BODY: {corpo[:800]}", flush=True)
-            print(f"    NOME_EXTRAIDO: {extrair_nome_resultado(r)}", flush=True)
-            print(f"    ANO: {identificar_ano(texto)} | PERIODO: {identificar_periodo(texto)} | QUALIFICADO: {lead_qualificado(texto)}", flush=True)
+    for instituicao, alias, cidade in alvos:
+        print("\n" + "#" * 72, flush=True)
+        print(f"ALVO: {instituicao} | ALIAS: {alias}", flush=True)
+        vistos = set()
+        aprovados = []
+        for consulta in consultas_leads(instituicao, alias):
+            print("CONSULTA:", consulta, flush=True)
+            resultados = buscar_web(consulta, max_results=10)
+            if resultados is None:
+                print("  INDISPONÍVEL", flush=True)
+                continue
+            print("  RESULTADOS:", len(resultados), flush=True)
+            for r in resultados:
+                titulo = limpar_espacos(r.get("title", ""))
+                corpo = limpar_espacos(r.get("body", ""))
+                url = str(r.get("href") or r.get("url") or "")
+                texto = limpar_espacos(f"{titulo} {corpo} {url}")
+                nome = extrair_nome_resultado(r)
+                if not nome or not lead_qualificado(texto) or not relacionado_a_instituicao(texto, instituicao, cidade):
+                    continue
+                chave = normalizar(nome)
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                aprovados.append((nome, identificar_periodo(texto), identificar_ano(texto), url))
+                print(f"  ✅ {nome} | {identificar_periodo(texto)} | {identificar_ano(texto)} | {url}", flush=True)
+        print(f"TOTAL_APROVADOS_{alias}: {len(aprovados)}", flush=True)
 
 
 if __name__ == "__main__":
