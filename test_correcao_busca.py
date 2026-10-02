@@ -5,6 +5,10 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_post_de_terceiro_extrai_aluna_e_nao_autora_do_post(self):
+        r=f.extrair_resultado_busca({'title':'Beatriz Moreti - LinkedIn','body':'A aluna do Curso de Nutrição da Universidade Presbiteriana Mackenzie, Un Hwa Moreira, foi premiada no Ganepão 2026.'},'Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual([x['nome'] for x in r],['Un Hwa Moreira'])
+
     def test_noticia_recem_formada_sem_faculdade_pesquisada(self):
         html='<meta property="article:published_time" content="2025-02-20"><h1>Trajetória profissional</h1><p>Recém-formada em Nutrição pela Unifacisa, Carolina Nóbrega Dantas, compartilha sua trajetória.</p>'
         registros,_=f.ler_html(html,'https://example.org/noticia','Mackenzie')

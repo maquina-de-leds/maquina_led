@@ -299,6 +299,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     n=norm(texto)
     if 'nutricao' not in n:
         return []
+    if re.search(r'exemplos? de curriculo|modelos? de curriculo|personagem fictici|caso hipotetic',n):
+        return []
     vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
     if re.search(PAPEL,n) or re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
         return []
@@ -306,6 +308,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
     if ano not in ANOS and not fase: return []
     nome=pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0])
+    aluno_citado=re.search(r'\b(?:alun[oa]|estudante)\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição[^.!?]{0,160}?,\s*([A-ZÀ-Ý][^,.;]{2,80}),',trecho)
+    if aluno_citado: nome=pessoa(aluno_citado.group(1))
     if not nome:
         m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
         nome=pessoa(m.group(1)) if m else None
