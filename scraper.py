@@ -845,53 +845,31 @@ def resumo():
 
 
 def executar():
-    print("🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS V5", flush=True)
-    print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
-    repo = SupabaseRepo.from_env()
-
-    if not garantir_fila_oficial(repo):
-        resumo()
-        raise SystemExit(1)
-
-    processadas = 0
-    for uf, estado_nome in ESTADOS:
-        # Smoke de integração: validar fonte oficial com Mackenzie/SP.
-        if uf != "SP":
+    print("🔬 DIAGNÓSTICO DE BUSCA V5", flush=True)
+    consultas = [
+        '"Universidade Presbiteriana Mackenzie" "Nutrição" "TCC" "2026"',
+        'site:linkedin.com/in "Universidade Presbiteriana Mackenzie" "Nutrição"',
+        'site:linkedin.com/in "Universidade Federal do Acre" "Nutrição"',
+        '"Universidade Federal do Acre" "Nutrição" "TCC"',
+        '"CESMAC" "Nutrição" "TCC"',
+        'site:linkedin.com/in "CESMAC" "Nutrição"',
+    ]
+    for consulta in consultas:
+        print("\n" + "=" * 72, flush=True)
+        print("CONSULTA:", consulta, flush=True)
+        resultados = buscar_web(consulta, max_results=10)
+        if resultados is None:
+            print("STATUS: INDISPONÍVEL", flush=True)
             continue
-        print("\n" + "#" * 72, flush=True)
-        print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
-        print("#" * 72, flush=True)
-        try:
-            fila = repo.fila_estado(uf)
-            fila = [
-                x for x in fila
-                if normalizar(x.get("instituicao")) == "universidade presbiteriana mackenzie"
-            ]
-        except Exception as exc:
-            stats["erros"] += 1
-            print(f"❌ Erro lendo fila de {uf}: {exc}", flush=True)
-            continue
-
-        if not fila:
-            print(f"🏁 {uf}: nenhuma instituição V5 pendente.", flush=True)
-            continue
-
-        print(f"📚 {uf}: {len(fila)} instituição(ões) pendente(s).", flush=True)
-        for item in fila:
-            if processadas >= MAX_INSTITUICOES_POR_EXECUCAO:
-                print("\n⏸️ Limite seguro desta execução atingido.", flush=True)
-                print("➡️ A próxima execução retoma a fila V5.", flush=True)
-                resumo()
-                return
-            ok = processar_instituicao(repo, item)
-            processadas += 1
-            if not ok:
-                print("⏸️ Busca externa instável. Encerrando este ciclo para evitar excesso de requisições.", flush=True)
-                resumo()
-                return
-
-    resumo()
-    print("✅ CICLO V5 FINALIZADO", flush=True)
+        print("TOTAL:", len(resultados), flush=True)
+        for i, r in enumerate(resultados[:10], 1):
+            print(f"[{i}] TITLE: {limpar_espacos(r.get('title',''))}", flush=True)
+            print(f"    URL: {r.get('href') or r.get('url') or ''}", flush=True)
+            print(f"    BODY: {limpar_espacos(r.get('body',''))[:500]}", flush=True)
+            nome = extrair_nome_resultado(r)
+            print(f"    NOME_EXTRAIDO: {nome}", flush=True)
+            texto = limpar_espacos(f"{r.get('title','')} {r.get('body','')} {r.get('href') or r.get('url') or ''}")
+            print(f"    QUALIFICADO: {lead_qualificado(texto)}", flush=True)
 
 
 if __name__ == "__main__":
