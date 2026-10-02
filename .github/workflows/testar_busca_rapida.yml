@@ -1,0 +1,20 @@
+name: Diagnóstico rápido da busca Mackenzie
+on:
+  push:
+    paths:
+      - 'scripts/testar_busca_rapida.py'
+      - '.github/workflows/testar_busca_rapida.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests ddgs pypdf lxml
+      - run: python -u scripts/testar_busca_rapida.py
