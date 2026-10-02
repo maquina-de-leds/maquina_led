@@ -165,6 +165,22 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     for i, (line, tag) in enumerate(linhas):
         n = norm(line)
         if not line: continue
+        # Notícias multicurso também publicam linhas como 'Nutrição: Nome'.
+        course_list = re.match(r'^Nutrição\s*:\s*(.+)', line, re.I)
+        if course_list and not re.search(PAPEL, n):
+            previous = ' '.join(t for t, _ in linhas[max(0,i-2):i])
+            if re.search(r'professor|docente|coordenador|banca|orientador', norm(previous)) and not re.search(r'formand|concluinte|outorga|colacao', norm(previous)):
+                continue
+            for name in nomes_da_lista(course_list.group(1)):
+                add(name,line,default_year,default_period)
+            continue
+        # Pessoa explicitamente vinculada ao curso, na própria frase da notícia.
+        for sentence in re.split(r'(?<=[.!?])\s+', line):
+            if re.search(PAPEL,norm(sentence)) or not re.search(r'formand|concluinte|orador',norm(sentence)):
+                continue
+            match = re.search(r'\b(?:a|o|aluna|aluno|formanda|formando)\s+([A-ZÀ-Ý][^,.;:]{2,100}),?\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição\b',sentence)
+            if match:
+                add(pessoa(match.group(1).strip()),sentence,default_year,default_period)
         if re.match(r'^(?:referencias|bibliografia|leia tambem|siga-nos|compartilhe)\b',n):
             active, mode = False, None
             continue

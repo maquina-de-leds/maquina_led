@@ -9,7 +9,7 @@ bundle="inep-ca.pem"
 with open(bundle,"w") as dest:
     dest.write(open(certifi.where()).read()+"\n"+pem.text)
 ok=False
-for ca in [bundle]:
+for ca in [bundle,bundle,bundle]:
     try:
         print("DOWNLOAD CA:",ca,flush=True)
         with requests.get(url,verify=ca,stream=True,timeout=(20,90)) as r:
@@ -36,9 +36,9 @@ for url,inst in [
         from fontes_academicas import Pagina
         page=Pagina(); page.feed(r.text)
         for text,tag in page.linhas:
-            if any(w in text.lower() for w in ["nutri","melissa","giovanna","semestre"]):
+            if any(w in text.lower() for w in ["nutri","melissa","giovanna","semestre","2026","2025"]):
                 print("CONTEXTO",tag,text,flush=True)
         result=ler_html(r.text,url,inst)
-        print("PAGINA REAL:",url,json.dumps(result,ensure_ascii=False),flush=True)
+        print("PAGINA REAL:",url,"CONTAGEM:",len(result[0]),"NOMES:",[(x["nome"],x["periodo"]) for x in result[0]],flush=True)
     except Exception as e: print("FALHA PAGINA:",url,str(e),flush=True)
 if not ok: raise SystemExit(1)
