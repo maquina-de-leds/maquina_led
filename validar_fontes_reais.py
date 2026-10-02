@@ -10,7 +10,7 @@ try:
 except Exception as e: print("MEC FALHA:",type(e).__name__,str(e),flush=True)
 for url,inst,expected in [
 ("https://uno.edu.br/noticias/outorga-de-grau-1","Unochapecó",13),
-("https://site.uno.edu.br/noticias/ciclo-concluido","Unochapecó",1),
+("https://site.uno.edu.br/noticias/ciclo-concluido","Unochapecó",0),
 ("https://uniateneu.edu.br/uniateneu-realizou-colacao-de-grau-para-celebrar-a-formatura-de-alunos-de-diferentes-cursos-de-graduacao/","UniAteneu",1)]:
     r=requests.get(url,timeout=30);r.raise_for_status()
     result=ler_html(r.text,url,inst)[0]

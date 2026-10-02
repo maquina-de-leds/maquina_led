@@ -142,7 +142,8 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     # Sem Nutrição + fase acadêmica não há extração de pessoas.
     if 'nutricao' not in norm(full) or not re.search(FASE, norm(full)): return []
     # Apenas texto editorial (sem rodapé) contribui para contexto acadêmico.
-    context_lines = [t for t,tag in linhas if tag in {'title','h1','h2','h3','h4','p','meta'}]
+    context_lines = [t for t,tag in linhas if tag in {'title','h1','h2','h3','h4','p','meta'}
+                     and not re.match(r'^(?:publicado|atualizado|postado)\b',norm(t))]
     if not context_lines:
         context_lines = [t for t,tag in linhas[:20] if tag == 'pdf']
     context = ' '.join(context_lines)
