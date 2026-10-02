@@ -157,6 +157,9 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     publication_year, publication_period = periodo_academico(' '.join(metas.get('article:published_time', []) + metas.get('date', []) + metas.get('citation_publication_date', []) + metas.get('citation_date', [])))
     if not publication_year:
         publication_year, publication_period = periodo_academico(' '.join(t for t,tag in linhas[:30]))
+    edition=re.search(r'\bv\.?\s*\d+\s*n\.?\s*\d+\s*\((20\d{2})\)',norm(full))
+    if edition and int(edition.group(1)) not in ANOS:
+        publication_year, publication_period = None, None
     single_course = not re.search(OUTROS_CURSOS, norm(context))
     active = single_course and 'nutricao' in norm(context)
     year, period = default_year, default_period

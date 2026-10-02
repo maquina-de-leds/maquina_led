@@ -56,3 +56,8 @@ class FormatosReaisTests(unittest.TestCase):
         html='<title>Mackenzie Nutrição</title><meta property="article:published_time" content="2025-05-19"><p>As alunas Ana Raquel Alves de Pontes, Sara Silva Santos e as professoras Ana Cristina Cabral e Rosana Farah, do curso de Nutrição da Universidade Presbiteriana Mackenzie, desenvolveram um projeto.</p>'
         r,_=f.ler_html(html,'https://mackenzie.br/noticia','Universidade Presbiteriana Mackenzie','Mackenzie')
         self.assertEqual({x['nome'] for x in r},{'Ana Raquel Alves de Pontes','Sara Silva Santos'})
+
+    def test_biografia_em_edicao_antiga_nao_usa_republicacao(self):
+        html='<title>Mackenzie Nutrição</title><meta name="citation_publication_date" content="2025-11-27"><p>v. 9 n. 12 (2017)</p><div>Ana Silva, Universidade Presbiteriana Mackenzie</div><p>Graduanda do curso de Nutrição</p>'
+        r,_=f.ler_html(html,'https://revista.example/article','Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual(r,[])
