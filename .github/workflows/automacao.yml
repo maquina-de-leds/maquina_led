@@ -2,6 +2,9 @@ name: Automacao Maquina de Leads
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - v5-1-candidate
 
 jobs:
   executar:
