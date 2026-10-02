@@ -1,0 +1,36 @@
+name: Lote nacional de uma faculdade
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lote_nacional.yml'
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  capturar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Instalar dependencias
+        run: pip install requests supabase ddgs pypdf lxml
+      - name: Validar antes de capturar
+        run: python -m unittest discover -p 'test_*.py'
+      - name: Capturar proxima faculdade da fila com todos os criterios
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python -u - <<'PY'
+          import scraper
+          scraper.MAX_INSTITUICOES_POR_EXECUCAO = 1
+          print("LOTE NACIONAL: próxima faculdade pendente; todos os critérios; gravação real; checkpoint nacional.", flush=True)
+          scraper.executar()
+          PY
