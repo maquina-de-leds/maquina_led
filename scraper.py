@@ -229,8 +229,11 @@ class SupabaseRepo:
             if cp and cp.get("status") == "concluido":
                 continue
             item["tentativa_descoberta"] = int(item.get("tentativa_descoberta") or 0) if cp else 0
+            item["_ultimo_checkpoint"] = cp.get("atualizado_em") or "" if cp else ""
+            item["_status_checkpoint"] = cp.get("status") if cp else "pendente"
             fila.append(item)
-        return fila
+        ordem={"pendente":0,"processando":1,"erro":2}
+        return sorted(fila,key=lambda x:(ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
 
     def contar_pendentes_uf(self, uf):
         r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
@@ -761,7 +764,19 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
                 salvar_lead(repo,registro["nome"],instituicao,None,None,registro["evidencia"],url_resultado,
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias)
-        fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados]
+        termos=[normalizar(t) for t in (instituicao,alias) if t]
+        resultados_relacionados=[]
+        for resultado in resultados:
+            texto=normalizar(str(resultado.get("title") or "")+" "+str(resultado.get("body") or resultado.get("snippet") or ""))
+            # Fontes conhecidas e resultados sem resumo continuam sendo lidos.
+            host=(urlparse(str(resultado.get("href") or resultado.get("url") or "")).hostname or "").lower()
+            hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
+            host_institucional=host in hosts_conhecidos or any(t and t.replace(' ','') in host.split('.') for t in termos)
+            if host_institucional or not texto.strip() or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos):
+                resultados_relacionados.append(resultado)
+            else:
+                print("      RESULTADO SEM VÍNCULO INSTITUCIONAL:",resultado.get("href") or resultado.get("url"),flush=True)
+        fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
         for url, depth in fila:
             if url in fontes_vistas or not url_permitida(url): continue
             fontes_vistas.add(url)

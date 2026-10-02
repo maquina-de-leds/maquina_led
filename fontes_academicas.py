@@ -387,7 +387,7 @@ def ler_pdf(data, instituicao, alias=None):
     return records, []
 
 
-def carregar_fonte(url, instituicao, alias=None):
+def _carregar_url(url, instituicao, alias=None):
     import requests
     if not url_permitida(url): return [], []
     # Redirecionamentos são verificados antes de cada acesso.
@@ -422,3 +422,24 @@ def carregar_fonte(url, instituicao, alias=None):
         return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
     raise ValueError('Excesso de redirecionamentos')
 
+
+
+def carregar_fonte(url, instituicao, alias=None):
+    """Reabre cópias públicas oficiais; nunca contorna login ou paywall."""
+    alternativas=[url]
+    p=urlparse(url)
+    if (p.hostname or '') in {'www.mackenzie.br','portal.mackenzie.br'} and '/n/a/i/' in p.path:
+        slug=p.path.split('/n/a/i/',1)[1]
+        alternativas += ['https://portal.mackenzie.br/noticias/artigo/n/a/i/'+slug,
+                         'https://www.mackenzie.br/noticias/artigo/n/a/i/'+slug,
+                         'https://www.mackenzie.br/colegios/agnes-recife/noticias/arquivo/n/a/i/'+slug]
+    ultimo=None
+    resposta=None
+    for alternativa in dict.fromkeys(alternativas):
+        try:
+            resposta=_carregar_url(alternativa,instituicao,alias)
+            if resposta[0]: return resposta
+        except Exception as exc: ultimo=exc
+    if resposta is not None: return resposta
+    if ultimo: raise ultimo
+    return [],[]

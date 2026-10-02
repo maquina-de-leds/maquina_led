@@ -5,6 +5,25 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_pdf_oficial_sem_instituicao_no_resumo_continua_lido(self,sleep):
+        repo=Repo(); lidas=[]
+        def fonte(url,*args):
+            lidas.append(url)
+            return [],[]
+        resultados=[{'href':'https://www.mackenzie.br/alunos.pdf','title':'Projetos aprovados 2025'},
+                    {'href':'https://outra.edu.br/alunos.pdf','title':'Nutrição Universidade Outra 2025'}]
+        with patch.object(s,'consultas_leads',return_value=['teste']):
+            s.processar_instituicao(repo,{**repo.item,'instituicao':'Universidade Presbiteriana Mackenzie','fonte_validacao':'SIGLA=Mackenzie'},search_fn=lambda *a:resultados,source_fn=fonte)
+        self.assertEqual(lidas,['https://www.mackenzie.br/alunos.pdf'])
+
+    def test_noticia_oficial_tenta_copia_publica_apos_falha(self):
+        url='https://www.mackenzie.br/noticias/artigo/n/a/i/projeto'
+        registro={'nome':'Ana Silva'}
+        with patch.object(f,'_carregar_url',side_effect=[RuntimeError('503'),([registro],[])]) as leitura:
+            self.assertEqual(f.carregar_fonte(url,'Mackenzie'),([registro],[]))
+        self.assertEqual(leitura.call_args_list[1].args[0],'https://portal.mackenzie.br/noticias/artigo/n/a/i/projeto')
+
     def test_area_profissional_nao_e_pessoa(self):
         self.assertIsNone(f.pessoa('Indústria de Alimentos'))
         repo=Repo()
