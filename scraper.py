@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.5"  # smoke dedupe CESMAC
+VERSAO = "v5.6-smoke"
 ETAPA_CARGA_IES = "carga_inep_nutricao_v55"
 ETAPA_CAPTACAO = "captacao_nacional_nutricao_v55"
 ORIGEM_IES = "inep_censo_superior_v55"
@@ -430,35 +430,41 @@ def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca usando o metabusca automático do DDGS.
+    """Busca pelo metabusca automático do DDGS, com segunda tentativa em vazio.
 
-    O teste no próprio GitHub Actions mostrou que forçar Brave/Bing podia
-    retornar zero enquanto backend='auto' encontrava o lead correto.
+    No runner real, a mesma consulta pode vir vazia numa chamada e retornar
+    resultados poucos segundos depois. Por isso vazio também recebe uma
+    segunda tentativa antes de ser aceito como ausência de resultados.
     """
     ultimo_erro = None
+
     for tentativa in range(1, 3):
         try:
-            resultados = fetch_fn(consulta, "auto", max_results)
-            return list(resultados or [])
-        except TypeError:
-            # Compatibilidade com funções de teste que aceitam só consulta/max_results.
             try:
+                resultados = fetch_fn(consulta, "auto", max_results)
+            except TypeError:
                 resultados = fetch_fn(consulta, max_results)
-                return list(resultados or [])
-            except Exception as exc:
-                ultimo_erro = exc
-        except Exception as exc:
-            ultimo_erro = exc
 
-        msg = str(ultimo_erro or "")
-        if "No results found" in msg:
+            resultados = list(resultados or [])
+            if resultados:
+                return resultados
+
             if tentativa < 2:
-                time.sleep(2.0)
+                time.sleep(4.0)
                 continue
+
             return []
 
-        if tentativa < 2:
-            time.sleep(3.0)
+        except Exception as exc:
+            ultimo_erro = exc
+            msg = str(exc)
+
+            if tentativa < 2:
+                time.sleep(4.0)
+                continue
+
+            if "No results found" in msg:
+                return []
 
     print(f"      ⚠️ Busca externa indisponível: {ultimo_erro}", flush=True)
     return None
@@ -474,21 +480,18 @@ def alias_instituicao(item):
 
 
 def consultas_leads(instituicao, alias=None):
-    # Primeiro buscamos sinais fortes de fase final; depois usamos aluno/estudante
-    # como descoberta ampla. A qualificação continua usando somente a evidência
-    # real do perfil retornado.
     termo = limpar_espacos(alias or instituicao)
     return [
         f'site:linkedin.com/in {termo} Nutrição "último período"',
         f'site:linkedin.com/in {termo} Nutrição "último semestre"',
         f'site:linkedin.com/in {termo} Nutrição "8º semestre"',
         f'site:linkedin.com/in {termo} Nutrição "7º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "formatura prevista" 2026',
+        f'site:linkedin.com/in {termo} Nutrição TCC 2026',
         f'site:linkedin.com/in {termo} Nutrição "recém-formada"',
         f'site:linkedin.com/in {termo} Nutrição "recém-formado"',
         f'site:linkedin.com/in {termo} "aluno de Nutrição"',
         f'site:linkedin.com/in {termo} "estudante de Nutrição"',
-        f'site:linkedin.com/in {termo} "graduanda em Nutrição"',
-        f'site:linkedin.com/in {termo} "graduando em Nutrição"',
     ]
 
 
@@ -936,26 +939,14 @@ def executar():
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
     repo = SupabaseRepo.from_env()
 
-    # TESTE ISOLADO: reabre CESMAC para validar a nova captura sem afetar outras IES.
-    try:
-        (
-            repo.client.table("instituicoes_nutricao")
-            .update({"status": "pendente", "ultima_verificacao": agora()})
-            .eq("origem", ORIGEM_IES)
-            .ilike("instituicao", "%Cesmac%")
-            .execute()
-        )
-    except Exception as exc:
-        print(f"⚠️ Não foi possível reabrir CESMAC no smoke: {exc}", flush=True)
-
     if not garantir_fila_oficial(repo):
         resumo()
         raise SystemExit(1)
 
     processadas = 0
     for uf, estado_nome in ESTADOS:
-        # TESTE ISOLADO: valida CESMAC/AL antes de promover à main.
-        if uf != "AL":
+        # TESTE ISOLADO: valida UFF/RJ antes de promover à main.
+        if uf != "RJ":
             continue
         print("\n" + "#" * 72, flush=True)
         print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
@@ -964,7 +955,7 @@ def executar():
             fila = repo.fila_estado(uf)
             fila = [
                 x for x in fila
-                if "cesmac" in normalizar(x.get("instituicao"))
+                if normalizar(x.get("instituicao")) == "universidade federal fluminense"
             ]
         except Exception as exc:
             stats["erros"] += 1
