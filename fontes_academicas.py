@@ -47,8 +47,8 @@ class Pagina(HTMLParser):
         if self.skip_stack:
             if tag not in void: self.skip_stack.append(tag)
             return
-        region = ' '.join([a.get('class',''),a.get('id',''),a.get('role','')]).lower()
-        if tag in {'script','style','nav','footer'} or re.search(r'menu|navbar|sidebar|cookie|navigation|rodape',region):
+        region = ' '.join([a.get('class') or '',a.get('id') or '',a.get('role') or '']).lower()
+        if tag in {'script','style','nav','footer'} or re.search(r'(?:^|[\s_-])(?:menu|navbar|sidebar|cookie|navigation|rodape)(?:$|[\s_-])',region):
             if tag not in void: self.skip_stack.append(tag)
             return
         if tag == 'meta':
@@ -106,7 +106,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None

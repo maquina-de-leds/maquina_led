@@ -6,7 +6,7 @@ import scraper as s
 
 repo = s.SupabaseRepo.from_env()
 # Correção reversível apenas dos rótulos indevidos gravados no primeiro piloto.
-nomes_indevidos = ['Laboratório de Estudos Anatômicos', 'Laboratório de Estética Corporal', 'Laboratório de Comportamento Motor', 'Laboratório de Desenho', 'Laboratório de Estudos Cardiorrespiratórios', 'Laboratório de Imaginologia', 'Laboratório de Informática', 'Laboratório de Moda', 'Estilo Ii', 'Estilo I', 'Sou Aluno', 'Uno Medical e Office', 'Trabalhe Conosco', 'Pós-graduação Lato Sensu', 'Tipo Sanguíneo', 'Ensino Médio', 'Página de Privacidade', 'Uso de Cookies', 'Processos Seletivos', 'Pesquisa e Extensão', 'Regulamentos e Normas', 'Diretório Acadêmico', 'Empresa Júnior', 'Procedimentos de Matrícula', 'Calendário de Matrícula']
+nomes_indevidos = ['Laboratório de Estudos Anatômicos', 'Laboratório de Estética Corporal', 'Laboratório de Comportamento Motor', 'Laboratório de Desenho', 'Laboratório de Estudos Cardiorrespiratórios', 'Laboratório de Imaginologia', 'Laboratório de Informática', 'Laboratório de Moda', 'Estilo Ii', 'Estilo I', 'Sou Aluno', 'Uno Medical e Office', 'Trabalhe Conosco', 'Pós-graduação Lato Sensu', 'Tipo Sanguíneo', 'Ensino Médio', 'Página de Privacidade', 'Uso de Cookies', 'Processos Seletivos', 'Pesquisa e Extensão', 'Regulamentos e Normas', 'Diretório Acadêmico', 'Empresa Júnior', 'Procedimentos de Matrícula', 'Calendário de Matrícula', 'Centro Universitário Uniateneu', 'Assuntos Relacionados']
 ruins=(repo.client.table('leds').select('id,nome').in_('nome',nomes_indevidos)
        .eq('origem','captacao_nacional_fila_v58').gte('created_at','2026-10-02T15:51:00Z')
        .in_('instituicao',['Centro Universitário Ateneu','Universidade Comunitária da Região de Chapecó',
@@ -22,6 +22,8 @@ from fontes_academicas import carregar_fonte
 # Regressão nas páginas reais que produziram falsos nomes e nas listas legítimas.
 for url,inst,alias,esperado in [
     ('https://uniateneu.edu.br/','Centro Universitário Ateneu','UniAteneu',0),
+    ('https://uniateneu.edu.br/uniateneu-realizou-colacao-de-grau-para-celebrar-a-formatura-de-alunos-de-diferentes-cursos-de-graduacao/', 'Centro Universitário Ateneu','UniAteneu',1),
+    ('https://diariodonordeste.verdesmares.com.br/ceara/curso-de-nutricao-da-uniateneu-garante-formacao-pratica-em-diferentes-campos-de-atuacao-1.3302265','Centro Universitário Ateneu','UniAteneu',0),
     ('https://nutrivital.ind.br/parceria-nutrivital-unochapeco-inovacao/',
      'Universidade Comunitária da Região de Chapecó','Unochapecó',0),
     ('https://uno.edu.br/noticias/colacao-de-grau',
@@ -67,11 +69,16 @@ for base in alvos:
     item=dict(base)
     item['id']='piloto_real_20261002_'+str(base['id'])
     termo=s.alias_instituicao(base) or base['instituicao']
-    consultas=[f'"{termo}" Nutrição {criterio} {ano} -site:linkedin.com'
-               for criterio,ano in [('"colação de grau"',2026),('"formandos"',2025),('"TCC"',2026),('"alunos"',2026)]]
+    consultas=['fontes descobertas no piloto real']
+    fontes_por_alias={
+        'uniateneu':['https://uniateneu.edu.br/uniateneu-realizou-colacao-de-grau-para-celebrar-a-formatura-de-alunos-de-diferentes-cursos-de-graduacao/'],
+        'unochapeco':['https://uno.edu.br/noticias/colacao-de-grau','https://uno.edu.br/noticias/outorga-de-grau-1'],
+        'ufrn':[],
+    }
     s.consultas_leads=lambda *args, consultas=consultas: consultas
     try:
-        if not s.processar_instituicao(piloto,item):
+        if not s.processar_instituicao(piloto,item, search_fn=lambda *args: [{"href":u} for u in fontes_por_alias[s.normalizar(termo)]],
+            source_fn=lambda url,inst,alias: (carregar_fonte(url,inst,alias)[0],[])):
             falha_busca=True
             break
     finally: s.consultas_leads=original
@@ -85,5 +92,5 @@ assert s.stats['leads_salvos']==antes
 print(f'NOVOS CONFIRMADOS NO BANCO: {len(piloto.salvos)}',flush=True)
 print('REPETIÇÃO DOS NOVOS: nenhuma inserção duplicada.',flush=True)
 s.resumo()
-print('PILOTO: 4 consultas por faculdade; fila nacional não foi marcada como concluída.',flush=True)
+print('CONFERÊNCIA FINAL: fontes descobertas pela busca real anterior; sem nova metabusca e sem concluir fila nacional.',flush=True)
 if falha_busca or s.stats['erros']: raise SystemExit(2)

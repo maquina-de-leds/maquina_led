@@ -285,3 +285,12 @@ class MenusNaoSaoAlunosTests(unittest.TestCase):
         html='<title>Universidade Teste — Nutrição formandos 2026/1</title><div class="menu-principal"><ul><li><a>Ana Menu</a></li></ul></div><h2>Alunos de Nutrição 2026/1</h2><ul><li>Ana Silva</li></ul>'
         out=f.ler_html(html,'https://universidade.edu.br/turma','Universidade Teste')[0]
         self.assertEqual([x['nome'] for x in out],['Ana Silva'])
+
+class AtributosHtmlTests(unittest.TestCase):
+    def test_atributos_sem_valor_nao_quebram_leitura(self):
+        html='<title>Universidade Teste Nutrição 2026/1</title><p class role>A aluna Ana Silva do curso de Nutrição apresentou seu trabalho.</p>'
+        out=f.ler_html(html,'https://universidade.edu.br/noticia','Universidade Teste')[0]
+        self.assertEqual([x['nome'] for x in out],['Ana Silva'])
+    def test_centro_e_relacionados_nao_sao_pessoas(self):
+        for nome in ['Centro Universitário Uniateneu','Assuntos Relacionados']:
+            self.assertIsNone(f.pessoa(nome))
