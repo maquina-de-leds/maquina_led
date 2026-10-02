@@ -210,6 +210,12 @@ class SupabaseRepo:
         ordem = {"pendente": 0, "processando": 1, "erro": 2}
         return sorted(dados, key=lambda x: (ordem.get(x.get("status"), 9), normalizar(x.get("instituicao"))))
 
+    def contar_pendentes_uf(self, uf):
+        r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
+           .eq("origem",ORIGEM_IES).eq("estado",uf)
+           .in_("status",["pendente","processando","erro"]).execute())
+        return r.count or 0
+
     def atualizar_instituicao(self, iid, **dados):
         dados["ultima_verificacao"] = agora()
         self.client.table("instituicoes_nutricao").update(dados).eq("id", iid).execute()
@@ -236,6 +242,12 @@ class SupabaseRepo:
             .execute()
         )
         return bool(r.data)
+
+    def instituicao_de_lead_por_alias(self, nome, alias):
+        if not re.fullmatch(r"[A-Za-zÀ-ÿ0-9 .-]{2,30}",alias or ""): return None
+        rows=(self.client.table("leds").select("instituicao").ilike("instituicao",alias)
+              .ilike("nome",nome).limit(1).execute()).data
+        return rows[0]["instituicao"] if rows else None
 
     def completar_instagram(self, nome, instituicao, instagram):
         if self.instagram_usado(instagram): return False
@@ -310,12 +322,32 @@ def ler_fila_inep_zip(caminho, ano=2024):
 def carregar_instituicoes_municipais_inep():
     import requests
     ano, url = INEP_FONTES[0]
+    arquivo_local = os.environ.get("INEP_CADASTROS_PATH")
+    if arquivo_local:
+        registros = ler_fila_inep_zip(arquivo_local,ano)
+        if {r["estado"] for r in registros} != {e[0] for e in ESTADOS} or len(registros)<500:
+            raise RuntimeError("Arquivo local INEP sem cobertura nacional validada")
+        print(f"✅ INEP em cache validado: {len(registros)} combinações faculdade/município",flush=True)
+        return ano,registros
     for tentativa in range(1,4):
         try:
             print(f"📥 INEP {ano}: preparando fila faculdade/município, tentativa {tentativa}/3",flush=True)
             with tempfile.TemporaryDirectory() as tmp:
                 path = os.path.join(tmp,"inep.zip")
-                with requests.get(url,stream=True,timeout=(20,90)) as response:
+                # O servidor envia só a folha. Completar a intermediária mantém
+                # a verificação de hostname e a cadeia até as raízes habituais.
+                import certifi, ssl, hashlib
+                cert_url = "https://www.detic.unicamp.br/wp-content/uploads/sites/38/2026/05/intermediate_2025.pem"
+                cert_response = requests.get(cert_url,timeout=(10,30))
+                cert_response.raise_for_status()
+                pem = cert_response.text
+                fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+                if fingerprint != "e10747d4da7bab09cba9952f019d3534cb9fba070bf13d8791b1699cd2ff59dd":
+                    raise RuntimeError("Certificado intermediário diferente do validado; revisar fonte")
+                ca_path = os.path.join(tmp,"inep-ca.pem")
+                with open(ca_path,"w") as bundle:
+                    with open(certifi.where()) as roots: bundle.write(roots.read()+"\n"+pem)
+                with requests.get(url,stream=True,timeout=(20,90),verify=ca_path) as response:
                     response.raise_for_status()
                     size = 0
                     with open(path,"wb") as dest:
@@ -534,11 +566,14 @@ def formatar_nome_pessoa(nome):
     return " ".join(saida)
 
 
-def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None):
+def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None):
     nome = formatar_nome_pessoa(nome)
-    if repo.lead_existe(nome, instituicao):
+    instituicao_existente = instituicao if repo.lead_existe(nome,instituicao) else None
+    if not instituicao_existente and instituicao_alias and hasattr(repo,"instituicao_de_lead_por_alias"):
+        instituicao_existente = repo.instituicao_de_lead_por_alias(nome,instituicao_alias)
+    if instituicao_existente:
         if instagram and hasattr(repo,"completar_instagram"):
-            if repo.completar_instagram(nome,instituicao,instagram):
+            if repo.completar_instagram(nome,instituicao_existente,instagram):
                 print(f"      Instagram completado pela fonte: {nome} | {instagram}",flush=True)
         stats["duplicados"] += 1
         print(f"      ♻️ DUPLICADO: {nome}", flush=True)
@@ -661,9 +696,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None):
             for registro in registros:
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
-                salvar_lead(repo,registro["nome"],instituicao,cidade,uf,registro["evidencia"],url,
+                contexto = normalizar(registro.get("contexto_academico", ""))
+                cidade_confirmada = bool(cidade and re.search(r'(?<!\w)'+re.escape(normalizar(cidade))+r'(?!\w)',contexto))
+                salvar_lead(repo,registro["nome"],instituicao,cidade if cidade_confirmada else None,
+                            uf if cidade_confirmada else None,registro["evidencia"],url,
                             instagram=registro.get("instagram"),
-                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"])
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias)
         checkpoint_captacao(repo,item,"processando",idx+1,total,
                             encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)
@@ -762,8 +800,7 @@ def preparar_lista():
     print("LISTA CARREGADA: instituicoes_nutricao",flush=True)
     print("Estados/DF, município da oferta, faculdade, curso, fonte e status.",flush=True)
     for uf,nome in ESTADOS:
-        fila=repo.fila_estado(uf)
-        print(f"{uf} | {nome} | pendentes: {len(fila)}",flush=True)
+        print(f"{uf} | {nome} | pendentes: {repo.contar_pendentes_uf(uf)}",flush=True)
 
 
 if __name__ == "__main__":
