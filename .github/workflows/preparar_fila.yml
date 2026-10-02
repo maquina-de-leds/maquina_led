@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Instalar dependencias
-        run: pip install requests supabase pypdf
+        run: pip install requests supabase pypdf lxml
       - name: Testar montagem da lista e extracao
         run: python -m unittest discover -p 'test_*.py'
       - name: Carregar lista por municipio no Supabase

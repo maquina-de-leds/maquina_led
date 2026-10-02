@@ -23,6 +23,6 @@ jobs:
         with:
           python-version: '3.11'
       - name: Instalar leitor PDF
-        run: pip install pypdf
+        run: pip install pypdf lxml
       - name: Validar qualificacao e retomada sem acesso ao Supabase
         run: python -m unittest discover -p 'test_*.py' -v

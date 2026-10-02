@@ -262,6 +262,10 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
 
 
 def ler_html(html, url, instituicao, alias=None):
+    # Repara o HTML antes da leitura: menus mal fechados não podem esconder o artigo.
+    from lxml import html as html_dom
+    raiz = html_dom.fromstring(html)
+    html = html_dom.tostring(raiz, encoding='unicode', method='html')
     page = Pagina(); page.feed(html)
     # Metadados podem completar uma data; não inferir ano a partir do URL.
     for key in ('citation_title', 'dc.title', 'dc.description'):

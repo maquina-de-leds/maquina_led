@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests supabase ddgs pypdf
+      - run: pip install requests supabase ddgs pypdf lxml
       - name: Testes de qualificação
         run: python -m unittest discover -p 'test_*.py' -v
       - name: Conferir fila e fontes reais sem escrever dados
