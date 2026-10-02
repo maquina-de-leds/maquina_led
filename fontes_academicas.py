@@ -262,11 +262,30 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
 
 
 def ler_html(html, url, instituicao, alias=None):
-    # Repara o HTML antes da leitura: menus mal fechados não podem esconder o artigo.
     from lxml import html as html_dom
     raiz = html_dom.fromstring(html)
-    html = html_dom.tostring(raiz, encoding='unicode', method='html')
-    page = Pagina(); page.feed(html)
+    page = Pagina()
+    # DOM tolerante a HTML mal formado; não propaga estado de um menu ao artigo.
+    for node in list(raiz.iter()):
+        if not isinstance(node.tag,str): continue
+        region = ' '.join(node.get(k) or '' for k in ('class','id','role')).lower()
+        navigation = re.search(r'(?:^|[\s_-])(?:menu|navbar|sidebar|cookie|navigation|rodape)(?:$|[\s_-])',region)
+        if node.tag in {'script','style','nav','footer'} or (navigation and not node.xpath('.//article|.//main')):
+            if node.getparent() is not None: node.drop_tree()
+    blocos={'p','li','tr','h1','h2','h3','h4','title','dt','dd'}
+    for node in raiz.iter():
+        if not isinstance(node.tag,str): continue
+        if node.tag=='meta':
+            key=(node.get('name') or node.get('property') or '').lower()
+            page.metas.setdefault(key,[]).append(node.get('content') or '')
+        if node.tag=='a' and node.get('href'): page.links.append(node.get('href'))
+        if node.tag=='img' and node.get('alt'): page.textos.append(node.get('alt'))
+        if node.tag in blocos:
+            text=' '.join(' '.join(node.itertext()).split())
+            handles=[a.get('href') for a in node.xpath('.//a[@href]') if 'instagram.com/' in a.get('href')]
+            if handles: text += ' '+' '.join(handles)
+            if text: page.linhas.append((text,node.tag))
+    page.textos.extend(t for t,tag in page.linhas)
     # Metadados podem completar uma data; não inferir ano a partir do URL.
     for key in ('citation_title', 'dc.title', 'dc.description'):
         for value in page.metas.get(key,[]): page.linhas.append((value, 'meta'))

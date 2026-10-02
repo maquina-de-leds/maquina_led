@@ -40,6 +40,11 @@ for url,inst,alias,esperado in [
             if any(palavra in s.normalizar(texto) for palavra in ['giovanna','2026','nutricao','ateneu']):
                 print('DIAGNOSTICO HTML:',tag,texto[:1600],flush=True)
         print('DIAGNOSTICO META:',pagina.metas,flush=True)
+        from lxml import html as html_dom
+        doc=html_dom.fromstring(requests.get(url,timeout=25).text)
+        for node in doc.xpath('//*[contains(text(),"Giovanna")]'):
+            print('DIAGNOSTICO DOM:',node.tag,' '.join(node.itertext())[:1600],flush=True)
+            print('DIAGNOSTICO ANCESTRAIS:',[(p.tag,dict(p.attrib)) for p in node.iterancestors()],flush=True)
     assert len(registros)==esperado,(url,len(registros),esperado)
     print(f'REGRESSÃO REAL: {url} | candidatos: {len(registros)}',flush=True)
 # Somente carregar fila já existente, sem reinstalar ou reabrir histórico.
