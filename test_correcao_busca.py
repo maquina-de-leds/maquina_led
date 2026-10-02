@@ -5,6 +5,13 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_noticia_recem_formada_sem_faculdade_pesquisada(self):
+        html='<meta property="article:published_time" content="2025-02-20"><h1>Trajetória profissional</h1><p>Recém-formada em Nutrição pela Unifacisa, Carolina Nóbrega Dantas, compartilha sua trajetória.</p>'
+        registros,_=f.ler_html(html,'https://example.org/noticia','Mackenzie')
+        self.assertEqual([r['nome'] for r in registros],['Carolina Nóbrega Dantas'])
+        self.assertIsNone(registros[0]['instituicao'])
+        self.assertEqual(registros[0]['ano'],2025)
+
     @patch.object(s.time,'sleep')
     def test_tres_falhas_pausam_e_retomam_primeira_pendente(self,sleep):
         repo=Repo(); chamadas=[]
