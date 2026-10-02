@@ -5,6 +5,11 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_artigo_em_ingles_tenta_endereco_portugues(self):
+        with patch.object(f,'_carregar_url',return_value=([{'nome':'Ana Silva'}],[])) as leitura:
+            f.carregar_fonte('https://eventoscopq.mackenzie.br/jornada/en/article/view/2554','Mackenzie')
+        self.assertEqual(leitura.call_args.args[0],'https://eventoscopq.mackenzie.br/jornada/pt_BR/article/view/2554')
+
     @patch.object(s.time,'sleep')
     def test_pdf_oficial_sem_instituicao_no_resumo_continua_lido(self,sleep):
         repo=Repo(); lidas=[]

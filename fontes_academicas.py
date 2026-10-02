@@ -428,6 +428,10 @@ def carregar_fonte(url, instituicao, alias=None):
     """Reabre cópias públicas oficiais; nunca contorna login ou paywall."""
     alternativas=[url]
     p=urlparse(url)
+    if (p.hostname or '') in {'www.mackenzie.br','portal.mackenzie.br'} and p.path.startswith('/en/'):
+        alternativas.insert(0,url.replace('/en/','/',1))
+    if (p.hostname or '') == 'eventoscopq.mackenzie.br' and '/jornada/en/article/view/' in p.path:
+        alternativas.insert(0,url.replace('/jornada/en/','/jornada/pt_BR/',1))
     if (p.hostname or '') in {'www.mackenzie.br','portal.mackenzie.br'} and '/n/a/i/' in p.path:
         slug=p.path.split('/n/a/i/',1)[1]
         alternativas += ['https://portal.mackenzie.br/noticias/artigo/n/a/i/'+slug,

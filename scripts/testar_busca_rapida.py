@@ -21,8 +21,8 @@ for consulta in consultas:
     if time.monotonic()-inicio>=360: break
     consultas_feitas+=1
     try:
-        # Uma tentativa no diagnóstico; falhas ficam explícitas para revisão.
-        resultados=executar(lambda:s.ddgs_texto(consulta,max_results=6),20)
+        resultados=executar(lambda:s.buscar_web(consulta,max_results=6),30)
+        if resultados is None: raise RuntimeError('Buscador indisponível após verificar e repetir')
         print('BUSCA REAL',json.dumps({'consulta':consulta,'resultados':resultados},ensure_ascii=False),flush=True)
         for resultado in resultados:
             url=resultado.get('href') or resultado.get('url') or ''
@@ -30,6 +30,9 @@ for consulta in consultas:
             for r in registros: nomes[f.norm(r['nome'])]=r
             host=s.urlparse(url).hostname or ''
             if url in fontes or not (host=='mackenzie.br' or host.endswith('.mackenzie.br')): continue
+            if s.urlparse(url).path.rstrip('/').endswith('/pg'):
+                print('PAGINA DE NAVEGACAO, FORA DO DIAGNOSTICO RAPIDO',url,flush=True)
+                continue
             fontes.add(url)
             try:
                 registros,_=executar(lambda:f.carregar_fonte(url,ies,'Mackenzie'),20)
