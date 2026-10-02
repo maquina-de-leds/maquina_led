@@ -6,7 +6,7 @@ on:
       - 'scraper.py'
       - 'fontes_academicas.py'
       - 'enriquecimento.py'
-      - 'test_scraper.py'
+      - 'test_*.py'
       - '.github/workflows/testes.yml'
   pull_request:
   workflow_dispatch:

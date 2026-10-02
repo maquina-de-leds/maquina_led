@@ -5,6 +5,21 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_captacao_salva_indice_apos_503_e_preserva_pendencia(self,sleep):
+        repo=Repo(); u='https://example.org/noticias/alunos-de-nutricao-criam-livro'
+        def busca(q,*a):
+            if q.startswith('site:'):
+                return [{'href':u,'title':'Alunos de Nutrição criam livro','body':'2025. As alunas Ana Silva e as professoras Maria Souza, do curso de Nutrição da Universidade Teste, desenvolveram o livro.'}]
+            return [{'href':u,'title':'Alunos de Nutrição criam livro'}]
+        def fonte(*a): raise RuntimeError('503')
+        with patch.object(s,'consultas_leads',return_value=['consulta']):
+            s.processar_instituicao(repo,repo.item,search_fn=busca,source_fn=fonte)
+        self.assertEqual([x['nome'] for x in repo.saved],['Ana Silva'])
+        self.assertEqual(repo.cp['status'],'erro')
+        self.assertIn('Fontes inacessíveis',repo.cp['ultimo_erro'])
+        self.assertIn('índice público',repo.saved[0]['evidencia'])
+
     def test_lista_indexada_separa_alunas_das_professoras(self):
         r={'title':'Alunos de Nutrição criam e-book','body':'19 de maio de 2025. As alunas Ana Silva, Beatriz Santos e as professoras Maria Souza, do curso de Nutrição da Mackenzie, desenvolveram o livro.'}
         self.assertEqual([x['nome'] for x in f.extrair_resultado_busca(r,'Mackenzie')],['Ana Silva','Beatriz Santos'])
