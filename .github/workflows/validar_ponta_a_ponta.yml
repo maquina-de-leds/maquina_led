@@ -1,0 +1,25 @@
+name: Validar descoberta e deduplicacao reais
+on:
+  push:
+    branches: [validacao-fontes-v58]
+    paths: ['validar_ponta_a_ponta.py', '.github/workflows/validar_ponta_a_ponta.yml']
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf
+      - name: Conferir busca, fonte, local e duplicacao
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u validar_ponta_a_ponta.py
