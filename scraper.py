@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.5"
+VERSAO = "v5.5"  # smoke dedupe CESMAC
 ETAPA_CARGA_IES = "carga_inep_nutricao_v55"
 ETAPA_CAPTACAO = "captacao_nacional_nutricao_v55"
 ORIGEM_IES = "inep_censo_superior_v55"
