@@ -482,24 +482,22 @@ def alias_instituicao(item):
 
 
 def consultas_leads(instituicao, alias=None):
-    # Máquina 1 procura NOMES. Instagram fica para a Máquina 2.
-    # As buscas são deliberadamente mais amplas e a qualificação é feita
-    # depois, usando apenas a evidência real do perfil retornado.
+    # Primeiro buscamos sinais fortes de fase final; depois usamos aluno/estudante
+    # como descoberta ampla. A qualificação continua usando somente a evidência
+    # real do perfil retornado.
     termo = limpar_espacos(alias or instituicao)
-    consultas = [
+    return [
+        f'site:linkedin.com/in {termo} Nutrição "último período"',
+        f'site:linkedin.com/in {termo} Nutrição "último semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "8º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "7º semestre"',
+        f'site:linkedin.com/in {termo} Nutrição "recém-formada"',
+        f'site:linkedin.com/in {termo} Nutrição "recém-formado"',
+        f'site:linkedin.com/in {termo} "aluno de Nutrição"',
+        f'site:linkedin.com/in {termo} "estudante de Nutrição"',
         f'site:linkedin.com/in {termo} "graduanda em Nutrição"',
-        f'site:linkedin.com/in {termo} "graduanda de Nutrição"',
-        f'site:linkedin.com/in {termo} Nutrição "formatura prevista"',
-        f'site:linkedin.com/in {termo} Nutrição TCC',
+        f'site:linkedin.com/in {termo} "graduando em Nutrição"',
     ]
-
-    # Quando há sigla oficial, fazemos uma única busca adicional por período,
-    # porque perfis de 7º/8º semestre frequentemente não trazem o ano no snippet.
-    if alias:
-        consultas.append(
-            f'site:linkedin.com/in {termo} Nutrição "7º semestre" OR "8º semestre"'
-        )
-    return consultas
 
 
 SINAIS_FASE_FINAL = [
@@ -534,6 +532,7 @@ def identificar_periodo(texto):
     grupos = [
         ("8º período/semestre", ["8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8"]),
         ("7º período/semestre", ["7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8"]),
+        ("último período/semestre", ["ultimo periodo", "ultimo semestre"]),
         ("TCC", ["tcc", "trabalho de conclusao"]),
         ("estágio final/obrigatório", ["estagio obrigatorio", "estagio supervisionado", "estagio final"]),
         ("formando", ["formanda", "formando", "concluinte", "colacao de grau", "formatura"]),
@@ -550,20 +549,25 @@ def lead_qualificado(texto):
     if "nutricao" not in n and "nutricionista" not in n:
         return False
 
-    # 7º/8º semestre ou período já prova a fase acadêmica desejada.
-    if any(s in n for s in [
+    # Fase final explícita: não exige que o snippet também traga o ano.
+    sinais_diretos = [
         "7º periodo", "7o periodo", "7 periodo", "7º semestre", "7o semestre", "7 semestre", "7/8",
         "8º periodo", "8o periodo", "8 periodo", "8º semestre", "8o semestre", "8 semestre", "8/8",
-    ]):
+        "ultimo periodo", "ultimo semestre",
+        "recem formada", "recem-formada", "recem formado", "recem-formado",
+        "concluinte",
+    ]
+    if any(s in n for s in sinais_diretos):
         return True
 
-    # Nos demais casos, o ano precisa estar ligado ao curso/conclusão da pessoa,
-    # não apenas aparecer solto em uma data da página.
+    # TCC/formatura/estágio: exige 2025/2026 no contexto para evitar páginas antigas.
     padroes = [
-        r"(?:formatura|conclusao|concluir|formando|formanda|concluinte)[^.!;]{0,100}202[56]",
-        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda|concluinte)",
+        r"(?:formatura|conclusao|concluir|formando|formanda)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:formatura|conclusao|concluir|formando|formanda)",
         r"(?:tcc|trabalho de conclusao)[^.!;]{0,100}202[56]",
         r"202[56][^.!;]{0,100}(?:tcc|trabalho de conclusao)",
+        r"(?:estagio obrigatorio|estagio supervisionado|estagio final)[^.!;]{0,100}202[56]",
+        r"202[56][^.!;]{0,100}(?:estagio obrigatorio|estagio supervisionado|estagio final)",
         r"(?:nutricao)[^.!;]{0,120}20\d{2}\s*[-–—]\s*202[56]",
         r"20\d{2}\s*[-–—]\s*202[56][^.!;]{0,120}(?:nutricao)",
     ]
@@ -946,8 +950,8 @@ def executar():
 
     processadas = 0
     for uf, estado_nome in ESTADOS:
-        # TESTE ISOLADO: valida Mackenzie/SP antes de promover à main.
-        if uf != "SP":
+        # TESTE ISOLADO: valida CESMAC/AL antes de promover à main.
+        if uf != "AL":
             continue
         print("\n" + "#" * 72, flush=True)
         print(f"📍 ESTADO: {estado_nome} ({uf})", flush=True)
@@ -956,7 +960,7 @@ def executar():
             fila = repo.fila_estado(uf)
             fila = [
                 x for x in fila
-                if normalizar(x.get("instituicao")) == "universidade presbiteriana mackenzie"
+                if "cesmac" in normalizar(x.get("instituicao"))
             ]
         except Exception as exc:
             stats["erros"] += 1
