@@ -50,3 +50,5 @@ resultado={"busca_terminou":ok,"consultas_planejadas":len(consultas),"base_antes
 print("COMPARACAO FINAL:",json.dumps(resultado,ensure_ascii=False),flush=True)
 print("Teste isolado: não conclui nem avança outras faculdades.",flush=True)
 if not ok or s.stats["erros"]: raise SystemExit(2)
+
+# Revalidar descoberta e gravação com cópias oficiais e filtro institucional corrigidos.
