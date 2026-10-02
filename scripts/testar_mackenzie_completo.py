@@ -1,4 +1,4 @@
-"""Validação curta de fontes reais, gravação e duplicação; sem varredura nacional. Confirma a releitura após a correção de parágrafos."""
+"""Validação curta de fontes reais, gravação e duplicação; sem varredura nacional. Confirma a leitura e o banco após corrigir a retomada de checkpoints."""
 import json,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
