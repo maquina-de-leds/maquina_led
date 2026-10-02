@@ -1,0 +1,18 @@
+name: Validacao real de fontes
+on:
+  push:
+    branches: [validacao-fontes-v58]
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pypdf
+      - name: Validar download e paginas reais sem banco
+        run: python -u validar_fontes_reais.py
