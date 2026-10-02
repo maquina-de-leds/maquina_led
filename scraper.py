@@ -932,26 +932,27 @@ def resumo():
 
 
 def executar():
-    print("🔬 DIAGNÓSTICO FASE FINAL V5.2", flush=True)
+    print("🔬 VALIDAÇÃO INDIVIDUAL DE CANDIDATOS", flush=True)
     consultas = [
-        'site:linkedin.com/in UFAC "Nutrição" "7º semestre"',
-        'site:linkedin.com/in UFAC "Nutrição" "8º semestre"',
-        'site:linkedin.com/in UFAC "Nutrição" formanda',
-        'site:linkedin.com/in CESMAC "Nutrição" "7º período"',
-        'site:linkedin.com/in CESMAC "Nutrição" "8º período"',
-        'site:linkedin.com/in CESMAC "Nutrição" formanda',
+        '"Isadora Trevisan" "Universidade Presbiteriana Mackenzie" Nutrição',
+        '"Laura Rodrigues" "Universidade Presbiteriana Mackenzie" Nutrição',
+        '"Emanuelly Matos" "Universidade Federal do Acre" Nutrição',
+        '"Bruna Maria Pinto Acioly Melo" CESMAC Nutrição',
     ]
     for consulta in consultas:
         print("\n" + "="*72, flush=True)
         print("CONSULTA:", consulta, flush=True)
-        rs = buscar_web(consulta, max_results=10)
+        rs=buscar_web(consulta,max_results=8)
         if rs is None:
-            print("STATUS: INDISPONÍVEL", flush=True); continue
-        print("TOTAL:", len(rs), flush=True)
-        for i,r in enumerate(rs[:10],1):
-            print(f"[{i}] {limpar_espacos(r.get('title',''))}", flush=True)
-            print("URL:", r.get('href') or r.get('url') or '', flush=True)
-            print("BODY:", limpar_espacos(r.get('body',''))[:700], flush=True)
+            print("INDISPONÍVEL", flush=True); continue
+        print("TOTAL:",len(rs),flush=True)
+        for i,r in enumerate(rs[:8],1):
+            titulo=limpar_espacos(r.get("title",""))
+            corpo=limpar_espacos(r.get("body",""))
+            url=r.get("href") or r.get("url") or ""
+            print(f"[{i}] {titulo}",flush=True)
+            print("URL:",url,flush=True)
+            print("BODY:",corpo[:1000],flush=True)
 
 
 if __name__ == "__main__":
