@@ -37,7 +37,7 @@ class FontesTests(unittest.TestCase):
         <h2>Professores homenageados</h2><p>Nutrição: Maria Silva.</p>''')
         self.assertEqual(out,[])
     def test_ano_de_publicacao_sozinho_nao_comprova_turma(self):
-        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><p>Publicado em 29/04/2026</p>
+        out=self.extract('''<title>Universidade Teste — Outorga de grau</title><meta property="article:published_time" content="2026-04-29"><p>Publicado em 29/04/2026</p>
         <p>Formandos receberam a outorga de grau.</p><p>Nutrição: Ana Silva.</p>''')
         self.assertEqual(out,[])
     def extract(self,html):
@@ -152,6 +152,20 @@ class FluxoTests(unittest.TestCase):
 
 
 class MunicipiosTests(unittest.TestCase):
+    def arquivo_ead(self, linhas):
+        import tempfile,zipfile
+        tmp=tempfile.NamedTemporaryFile(suffix='.zip')
+        with zipfile.ZipFile(tmp.name,'w') as z:
+            z.writestr('MICRODADOS_ED_SUP_IES_2024.CSV','CO_IES;NO_IES;SG_IES\n1;Universidade Teste;UT\n2;Faculdade Outra;FO\n')
+            z.writestr('MICRODADOS_CADASTRO_CURSOS_2024.CSV','CO_IES;SG_UF;NO_MUNICIPIO;NO_CINE_ROTULO;NU_ANO_CENSO;TP_MODALIDADE_ENSINO\n'+linhas)
+        return tmp
+    def test_sede_ead_nao_inventa_municipio_quando_polo_existe(self):
+        with self.arquivo_ead('1;;;Nutrição;2024;2\n1;SP;Itu;Nutrição;2024;2\n') as tmp:
+            rows=s.ler_fila_inep_zip(tmp.name)
+        self.assertEqual([(r['estado'],r['cidade']) for r in rows],[('SP','Itu')])
+    def test_sede_ead_sem_oferta_municipal_exige_conferencia(self):
+        with self.arquivo_ead('1;;;Nutrição;2024;2\n2;SP;Itu;Nutrição;2024;1\n') as tmp:
+            with self.assertRaises(RuntimeError):s.ler_fila_inep_zip(tmp.name)
     def test_fila_usa_municipio_do_curso_e_nao_sede(self):
         import tempfile,zipfile
         ies='CO_IES;NO_IES;SG_IES;NO_MUNICIPIO_IES\n1;Universidade Teste;UT;Capital\n'

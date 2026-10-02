@@ -276,7 +276,7 @@ def ler_fila_inep_zip(caminho, ano=2024):
         if not required.issubset({str(c).upper() for c in (rows.fieldnames or [])}):
             texto.close()
             raise RuntimeError("Cadastro INEP sem campos necessários para curso/município")
-        registros = {}; sem_vinculo = 0
+        registros = {}; sem_vinculo = 0; sedes_ead = []; ies_municipais = set()
         try:
             for row in rows:
                 if normalizar(valor(row,"NO_CINE_ROTULO")) != "nutricao": continue
@@ -284,8 +284,14 @@ def ler_fila_inep_zip(caminho, ano=2024):
                     raise RuntimeError("Ano divergente no cadastro de cursos")
                 cod = valor(row,"CO_IES")
                 uf, cidade = valor(row,"SG_UF").upper(),limpar_espacos(valor(row,"NO_MUNICIPIO"))
+                # A linha sede EaD não é um município de oferta. Os polos da
+                # mesma IES estão em linhas próprias; não usar cidade da sede.
+                if cod in ies and not uf and not cidade and valor(row,"TP_MODALIDADE_ENSINO") == "2":
+                    sedes_ead.append(cod)
+                    continue
                 if cod not in ies or uf not in {e[0] for e in ESTADOS} or not cidade:
                     sem_vinculo += 1; continue
+                ies_municipais.add(cod)
                 nome, sigla = ies[cod]
                 key = (uf,normalizar(cidade),normalizar(nome))
                 registros[key] = dict(estado=uf,cidade=cidade,instituicao=nome,curso="Nutrição",
@@ -293,6 +299,9 @@ def ler_fila_inep_zip(caminho, ano=2024):
                                       fonte_validacao=f"INEP {ano} cadastro de cursos por município | CO_IES={cod} | SIGLA={sigla}",
                                       validada=True,tentativa_descoberta=0)
         finally: texto.close()
+        sem_vinculo += sum(cod not in ies_municipais for cod in sedes_ead)
+        if sedes_ead:
+            print(f"ℹ️ INEP: {len(sedes_ead)} linhas sede EaD; {sum(cod in ies_municipais for cod in sedes_ead)} com faculdade já representada nas ofertas municipais.",flush=True)
         if sem_vinculo:
             raise RuntimeError(f"{sem_vinculo} ofertas de Nutrição sem município/instituição; carga incompleta")
         return list(registros.values())
@@ -347,7 +356,6 @@ def garantir_fila_oficial(repo):
         ano, registros = carregar_instituicoes_municipais_inep()
         if not registros:
             raise RuntimeError("o filtro oficial nao encontrou nenhum curso de Nutricao")
-        repo.limpar_residuos_v4()
         repo.upsert_ies(registros)
         total = repo.contar_ies_v5()
         if total < len(registros):
