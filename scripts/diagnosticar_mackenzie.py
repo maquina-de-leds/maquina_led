@@ -22,7 +22,18 @@ urls=[
 vistos={}; erros=[];novos=0
 for url in urls:
     try:
-        registros,_=carregar_fonte(url,ies,'Mackenzie')
+        registros=[]
+        alternativas=[url]
+        if 'e-book' in url:
+            slug='alunos-de-nutricao-criam-e-book-de-receitas-saudaveis-e-praticas'
+            alternativas += ['https://www.mackenzie.br/colegios/agnes-recife/noticias/arquivo/n/a/i/'+slug,'https://portal.mackenzie.br/noticias/artigo/n/a/i/'+slug]
+        ultimo=None
+        for alternativa in alternativas:
+            try:
+                registros,_=carregar_fonte(alternativa,ies,'Mackenzie')
+                if registros: url=alternativa; break
+            except Exception as exc: ultimo=exc
+        if not registros and ultimo: raise ultimo
         print('LEITURA REAL:',url,'|',json.dumps(registros,ensure_ascii=False),flush=True)
         for r in registros:
             vistos[s.normalizar(r['nome'])]=r['nome']

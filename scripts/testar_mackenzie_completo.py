@@ -9,7 +9,7 @@ rows=repo.client.table("instituicoes_nutricao").select("*").eq("origem",s.ORIGEM
 base=next(x for x in s.agrupar_faculdades(rows) if s.normalizar(x["instituicao"])==s.normalizar("Universidade Presbiteriana Mackenzie"))
 alias=s.alias_instituicao(base)
 if s.normalizar(alias) not in {"mackenzie","upm"}:
-    base["sigla"]="Mackenzie"
+    base["fonte_validacao"]=(base.get("fonte_validacao") or "")+" | SIGLA=Mackenzie"
 def nomes_banco():
     nomes={}
     for offset in range(0,100000,1000):
@@ -21,6 +21,11 @@ def nomes_banco():
 antes=nomes_banco()
 print("BASE ANTES:",json.dumps(list(antes.values()),ensure_ascii=False),flush=True)
 vistos={}
+original_salvar=s.salvar_lead
+def salvar_observado(repo,nome,*args,**kw):
+    vistos[s.normalizar(s.formatar_nome_pessoa(nome))]=s.formatar_nome_pessoa(nome)
+    return original_salvar(repo,nome,*args,**kw)
+s.salvar_lead=salvar_observado
 class Piloto:
     def __getattr__(self,n): return getattr(repo,n)
     def atualizar_instituicao(self,*a,**kw): pass
@@ -39,7 +44,7 @@ def busca(q,max_results):
 item=dict(base,id="mackenzie_completo_"+os.environ.get("GITHUB_RUN_ID","local"))
 consultas=s.consultas_leads(item["instituicao"],s.alias_instituicao(item))
 print("CONSULTAS PLANEJADAS:",len(consultas),flush=True)
-ok=s.processar_instituicao(Piloto(),item,search_fn=busca,source_fn=fonte)
+ok=s.processar_instituicao(Piloto(),item,search_fn=busca,source_fn=fonte,continuar_falhas=True)
 depois=nomes_banco()
 resultado={"busca_terminou":ok,"consultas_planejadas":len(consultas),"base_antes":len(antes),"nomes_unicos_encontrados":len(vistos),"nomes_anteriores_reencontrados":[antes[k] for k in antes.keys() & vistos.keys()],"nomes_anteriores_nao_reencontrados":[antes[k] for k in antes.keys()-vistos.keys()],"novos_confirmados":[depois[k] for k in depois.keys()-antes.keys()],"base_depois":len(depois),"stats":s.stats}
 print("COMPARACAO FINAL:",json.dumps(resultado,ensure_ascii=False),flush=True)

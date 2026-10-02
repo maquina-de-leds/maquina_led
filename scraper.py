@@ -284,6 +284,17 @@ class SupabaseRepo:
     def inserir_lead(self, dados):
         self.client.table("leds").insert(dados).execute()
 
+    def fontes_da_instituicao(self, instituicao):
+        fontes=[]
+        for offset in range(0,100000,1000):
+            rows=(self.client.table("leds").select("fonte_url").eq("instituicao",instituicao)
+                  .eq("nao_contatar",False).order("id").range(offset,offset+999).execute()).data or []
+            for row in rows:
+                if row.get("fonte_url") and row["fonte_url"] not in fontes:
+                    fontes.append(row["fonte_url"])
+            if len(rows)<1000: return fontes
+        raise RuntimeError("Paginação das fontes incompleta")
+
 
 # ============================================================
 # CARGA DETERMINISTICA DA FILA DE INSTITUICOES
@@ -707,6 +718,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     cidade = item.get("cidade") or "Não identificado"
     alias = alias_instituicao(item)
     consultas = consultas_leads(instituicao, alias, None if item.get("escopo_faculdade") else cidade, uf)
+    fontes_conhecidas=repo.fontes_da_instituicao(instituicao) if hasattr(repo,"fontes_da_instituicao") else []
+    if fontes_conhecidas: consultas.insert(0,"FONTES PÚBLICAS JÁ DESCOBERTAS")
     total = len(consultas)
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
@@ -725,7 +738,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
         checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,
                             encontrados=encontrados_local,salvos=stats["leads_salvos"]-salvos_antes)
-        resultados = search_fn(consulta, MAX_RESULTADOS)
+        resultados = ([{"href":url} for url in fontes_conhecidas] if consulta=="FONTES PÚBLICAS JÁ DESCOBERTAS"
+                      else search_fn(consulta, MAX_RESULTADOS))
         if resultados is None:
             if continuar_falhas:
                 falhas_fontes += 1

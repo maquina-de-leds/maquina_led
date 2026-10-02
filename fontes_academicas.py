@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 ANOS = {2025, 2026}
 OUTROS_CURSOS = r'educacao fisica|enfermagem|fisioterapia|psicologia|medicina|direito|engenharia|farmacia|pedagogia|letras|biomedicina'
-FASE = r'tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
+FASE = r'graduand[oa]s?|tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
 PAPEL = r'orientador|coorientador|professor|docente|coordenador|paraninf|patron|reitor|banca'
 
 
@@ -174,6 +174,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         for line,tag in linhas:
             match=re.match(r'^(.+?)\s+CCBS\s+Higienópolis\s+Nutrição\b',line,re.I)
             if match: add(pessoa(match.group(1)),line,table_year,table_period)
+        return list({norm(r['nome']):r for r in out}.values())
     # Repositórios institucionais com metadados de autor/data acadêmica.
     meta_text = ' '.join(metas.get('citation_title', []) + metas.get('dc.title', []) + metas.get('dc.description', []))
     dates = metas.get('dc.date.issued', []) + metas.get('citation_date', []) + metas.get('citation_publication_date', [])

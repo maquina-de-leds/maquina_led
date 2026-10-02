@@ -42,3 +42,17 @@ class CorrecaoBuscaTests(unittest.TestCase):
             s.processar_instituicao(repo,repo.item,search_fn=busca,continuar_falhas=True)
         self.assertEqual(calls,['falha','seguinte'])
         self.assertEqual(repo.cp['status'],'erro')
+
+class FormatosReaisTests(unittest.TestCase):
+    def test_tabela_separa_aluno_do_orientador(self):
+        linhas=[('Programa Mackenzie — alunos até 25/06/2025','pdf'),('Nome completo do aluno (a) Campus Curso Nome do Orientador','pdf'),('Fernanda Carolina dos Santos CCBS Higienópolis Nutrição','pdf'),('Andrea Carvalheiro Guerra Matias CCBS Mackenzie','pdf')]
+        r=f.extrair_documento(linhas,'Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual([x['nome'] for x in r],['Fernanda Carolina dos Santos'])
+    def test_biografia_estudante_nao_inclui_coordenadora(self):
+        html='<title>Jornada de Iniciação Científica Mackenzie</title><meta name="citation_publication_date" content="2025-11-06"><div>Geovanna Romeiro de Paiva, Universidade Presbiteriana Mackenzie</div><p>Graduanda do curso de nutrição</p><div>Juliana Masami Morimoto, Universidade Presbiteriana Mackenzie</div><p>Coordenadora do curso de nutrição</p>'
+        r,_=f.ler_html(html,'https://eventoscopq.mackenzie.br/jornada','Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual([x['nome'] for x in r],['Geovanna Romeiro de Paiva'])
+    def test_lista_em_noticia_separa_professoras(self):
+        html='<title>Mackenzie Nutrição</title><meta property="article:published_time" content="2025-05-19"><p>As alunas Ana Raquel Alves de Pontes, Sara Silva Santos e as professoras Ana Cristina Cabral e Rosana Farah, do curso de Nutrição da Universidade Presbiteriana Mackenzie, desenvolveram um projeto.</p>'
+        r,_=f.ler_html(html,'https://mackenzie.br/noticia','Universidade Presbiteriana Mackenzie','Mackenzie')
+        self.assertEqual({x['nome'] for x in r},{'Ana Raquel Alves de Pontes','Sara Silva Santos'})
