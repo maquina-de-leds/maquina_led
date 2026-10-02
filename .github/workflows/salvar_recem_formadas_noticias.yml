@@ -1,4 +1,4 @@
-name: Salvar duas recém-formadas autorizadas
+name: Salvar candidatos de fontes públicas
 on:
   push:
     paths:
@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install supabase
-      - name: Salvar e confirmar somente os dois nomes autorizados
+      - name: Salvar e confirmar somente o lote de evidências conferidas
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
