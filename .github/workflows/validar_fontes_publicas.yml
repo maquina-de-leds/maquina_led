@@ -1,0 +1,20 @@
+name: Validar fontes públicas sem gravar
+on:
+  push:
+    paths:
+      - 'scripts/validar_fontes_publicas.py'
+      - '.github/workflows/validar_fontes_publicas.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  leitura:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests lxml pypdf
+      - run: python -u scripts/validar_fontes_publicas.py
