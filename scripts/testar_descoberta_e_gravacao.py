@@ -1,4 +1,4 @@
-"""Teste curto de descoberta e gravação real, sem alterar a fila nacional.
+"""Reteste curto de descoberta e gravação real, sem alterar a fila nacional.
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
 Confere também parágrafos que misturam notícias de alunos com falas de docentes.
 """
