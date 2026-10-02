@@ -1,0 +1,27 @@
+name: Validar captura atual sem gravar
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/validar_captacao_atual.py'
+      - '.github/workflows/validar_captacao_atual.yml'
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf
+      - name: Testes de qualificação
+        run: python -m unittest discover -p 'test_*.py' -v
+      - name: Conferir fila e fontes reais sem escrever dados
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/validar_captacao_atual.py

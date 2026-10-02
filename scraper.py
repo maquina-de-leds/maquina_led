@@ -571,7 +571,8 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
               '"defesa" "TCC"', '"apresentação" "trabalho de conclusão"',
               '"repositório"', '"lista de formandos"',
               '"cerimônia de formatura"', '"concluíram"',
-              '"jornada acadêmica" "trabalhos"', '"entrega" "TCC"')
+              '"jornada acadêmica" "trabalhos"', '"entrega" "TCC"', '"aluno"', '"aluna"',
+              '"grupo de alunos"', '"estudante" "apresentação"')
     consultas = [f'"{termo}" Nutrição {sinal} {ano} -site:linkedin.com'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":

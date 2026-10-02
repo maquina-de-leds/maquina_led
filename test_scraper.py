@@ -203,7 +203,6 @@ class MunicipiosTests(unittest.TestCase):
         out=f.ler_html('<title>Universidade Teste — Mostra de TCC</title><h2>Nutrição 2026.1</h2><p>1 - Ana Silva e Bruna Souza</p>', 'https://universidade.edu.br/tcc','Universidade Teste')[0]
         self.assertEqual([r['nome'] for r in out],['Ana Silva','Bruna Souza'])
 
-if __name__=='__main__': unittest.main(verbosity=2)
 
 class FilaFaculdadesTests(unittest.TestCase):
     def test_polos_estados_e_status_nao_repetem_faculdade(self):
@@ -240,3 +239,33 @@ class ConsultasDiversificadasTests(unittest.TestCase):
         self.assertTrue(all("Nutrição" in q and "-site:linkedin.com" in q for q in consultas))
         self.assertTrue(any("2025" in q for q in consultas))
         self.assertTrue(any("2026" in q for q in consultas))
+
+class AlunoIndividualTests(unittest.TestCase):
+    def extrair(self, trecho):
+        return f.ler_html('<title>Universidade Teste — Nutrição</title>'+trecho,
+                          'https://universidade.edu.br/noticia', 'Universidade Teste')[0]
+
+    def test_aluno_individual_sem_turma_tcc_ou_instagram(self):
+        out=self.extrair('<p>Em 2026, a aluna Ana Silva, do curso de Nutrição, apresentou seu trabalho.</p>')
+        self.assertEqual([x['nome'] for x in out], ['Ana Silva'])
+        self.assertEqual(out[0]['ano'], 2026)
+        self.assertIsNone(out[0]['instagram'])
+
+    def test_estudante_sem_prefixo_curso(self):
+        out=self.extrair('<p>Em 2025, o estudante Bruno Santos de Nutrição participou da jornada acadêmica.</p>')
+        self.assertEqual([x['nome'] for x in out], ['Bruno Santos'])
+
+    def test_grupo_com_aluno_identificado(self):
+        out=self.extrair('<h1>Grupo de alunos de Nutrição — 2026/2</h1><p>Alunos: Ana Silva</p>')
+        self.assertEqual([x['nome'] for x in out], ['Ana Silva'])
+        self.assertEqual(out[0]['periodo'], '2026/2')
+
+    def test_publicacao_recente_sem_periodo_academico_nao_inventa_ano(self):
+        out=self.extrair('<p>Publicado em 2026</p><p>A aluna Ana Silva, do curso de Nutrição, apresentou seu trabalho.</p>')
+        self.assertEqual(out, [])
+
+    def test_professora_nao_entra_como_aluna(self):
+        out=self.extrair('<p>Em 2026, a professora Ana Silva do curso de Nutrição orientou os alunos.</p>')
+        self.assertEqual(out, [])
+
+if __name__=='__main__': unittest.main(verbosity=2)
