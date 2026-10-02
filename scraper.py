@@ -932,27 +932,37 @@ def resumo():
 
 
 def executar():
-    print("🔬 VALIDAÇÃO INDIVIDUAL DE CANDIDATOS", flush=True)
+    print("🔬 TESTE DAS EXPRESSÕES DE BUSCA SUGERIDAS", flush=True)
     consultas = [
-        '"Isadora Trevisan" "Universidade Presbiteriana Mackenzie" Nutrição',
-        '"Laura Rodrigues" "Universidade Presbiteriana Mackenzie" Nutrição',
-        '"Emanuelly Matos" "Universidade Federal do Acre" Nutrição',
-        '"Bruna Maria Pinto Acioly Melo" CESMAC Nutrição',
+        'site:linkedin.com/in Mackenzie "aluno de Nutrição"',
+        'site:linkedin.com/in Mackenzie "estudante de Nutrição"',
+        'site:linkedin.com/in Mackenzie Nutrição "último período"',
+        'site:linkedin.com/in Mackenzie Nutrição "recém-formada"',
+        'site:linkedin.com/in UFAC "aluno de Nutrição"',
+        'site:linkedin.com/in UFAC "estudante de Nutrição"',
+        'site:linkedin.com/in UFAC Nutrição "último período"',
+        'site:linkedin.com/in UFAC Nutrição "recém-formada"',
+        'site:linkedin.com/in CESMAC "aluno de Nutrição"',
+        'site:linkedin.com/in CESMAC "estudante de Nutrição"',
+        'site:linkedin.com/in CESMAC Nutrição "último período"',
+        'site:linkedin.com/in CESMAC Nutrição "recém-formada"',
     ]
     for consulta in consultas:
         print("\n" + "="*72, flush=True)
         print("CONSULTA:", consulta, flush=True)
-        rs=buscar_web(consulta,max_results=8)
+        rs = buscar_web(consulta, max_results=10)
         if rs is None:
-            print("INDISPONÍVEL", flush=True); continue
-        print("TOTAL:",len(rs),flush=True)
-        for i,r in enumerate(rs[:8],1):
-            titulo=limpar_espacos(r.get("title",""))
-            corpo=limpar_espacos(r.get("body",""))
-            url=r.get("href") or r.get("url") or ""
-            print(f"[{i}] {titulo}",flush=True)
-            print("URL:",url,flush=True)
-            print("BODY:",corpo[:1000],flush=True)
+            print("STATUS: INDISPONÍVEL", flush=True)
+            continue
+        print("TOTAL:", len(rs), flush=True)
+        for i, r in enumerate(rs[:10], 1):
+            titulo = limpar_espacos(r.get("title",""))
+            url = r.get("href") or r.get("url") or ""
+            corpo = limpar_espacos(r.get("body",""))
+            print(f"[{i}] TITLE: {titulo}", flush=True)
+            print(f"    URL: {url}", flush=True)
+            print(f"    BODY: {corpo[:700]}", flush=True)
+            print(f"    NOME: {extrair_nome_resultado(r)}", flush=True)
 
 
 if __name__ == "__main__":
