@@ -584,7 +584,8 @@ def consultas_documentos_alunos(instituicao, alias=None):
               'centro acadêmico diretoria', 'juramentista oradora formanda',
               'boletim de serviços concluintes', 'aptos a colar grau')
     simples=[f'{termo} Nutrição {sinal}' for sinal in ('e-book','graduandas artigo','mostra TCC','liga integrantes')]
-    return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais]
+    perfis=[f'{termo} Nutrição "{fase}º semestre"' for fase in (7,8)]
+    return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais] + perfis
 
 
 def consultas_leads(instituicao, alias=None, cidade=None, uf=None):

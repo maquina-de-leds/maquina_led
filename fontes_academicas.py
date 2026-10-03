@@ -321,6 +321,12 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',norm(titulo)):
         return []
     vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
+    fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
+    # Perfis públicos podem informar ingresso em 2023 e fase final atual.
+    # O intervalo não confirma conclusão: conservar somente a fase explícita.
+    perfil_fase=bool(fase and re.search(r'linkedin\.com/in/',str(resultado.get('href') or resultado.get('url') or ''))
+                     and re.search(r'estudante|graduand[oa]|alun[oa]',norm(trecho))
+                     and pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0]))
     texto_periodo=texto
     if re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
         # Uma menção histórica em outra frase não anula o vínculo recente.
@@ -329,10 +335,12 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
                     and re.search(r'\b202[56]\b',frase)
                     and not re.search(r'\b(?:20[01]\d|202[0-4])\b|indexad|republicad',frase)
                     ]
-        if not recentes: return []
+        if not recentes and not perfil_fase: return []
         texto_periodo=' '.join(recentes)
     ano,periodo=periodo_academico(texto_periodo)
-    fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
+    if perfil_fase:
+        ano=None
+        periodo=f'{fase.group(1)}º período/semestre (data e conclusão a validar)'
     if ano not in ANOS and not fase: return []
     # Capa de TCC indexada: o próprio trecho identifica ano e nome do autor.
     # O endereço só identifica o tipo de documento, nunca fornece seu ano.
