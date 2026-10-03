@@ -84,6 +84,8 @@ class CorrecaoBuscaTests(unittest.TestCase):
         r={'href':u,'title':'Nutrição','body':'2025. As alunas Ana Silva e as professoras Maria Souza, do curso de Nutrição, desenvolveram o livro.'}
         self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,lambda *a:[r])[0][0]['nome'],'Ana Silva')
         r['href']='https://outra.org/noticias/alunos-de-nutricao-criam-livro'
+        self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,lambda *a:[r])[0][0]['nome'],'Ana Silva')
+        r['href']='https://outra.org/noticias/noticia-de-outro-assunto'
         self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,lambda *a:[r])[0],[])
 
     @patch.object(s.time,'sleep')
