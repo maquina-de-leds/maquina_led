@@ -733,7 +733,7 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
     })
 
 
-def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False):
+def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False, limite_consultas=None):
     from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca, acesso_reservado_maquina2
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
@@ -752,6 +752,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         elif cp.get("status") == "processando" and not cp.get("ultimo_erro") and cp.get("total_pesquisas") == total:
             # Interrupção do runner: continuar da próxima consulta ainda não concluída.
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total)
+        if cp.get('status')=='processando' and not cp.get('ultimo_erro') and cp.get('consulta_atual') in consultas:
+            inicio=consultas.index(cp['consulta_atual'])
     print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
     salvos_antes = stats["leads_salvos"]
@@ -760,7 +762,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     fontes_vistas = set()
     falhas_fontes = 0
     falhas_busca_seguidas = 0
-    for idx in range(inicio, total):
+    fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
+    for idx in range(inicio, fim):
         consulta = consultas[idx]
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
         checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
@@ -847,10 +850,17 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                             uf if cidade_confirmada else None,registro["evidencia"],registro.get("fonte_url",url),
                             instagram=registro.get("instagram"),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
-        checkpoint_captacao(repo,item,"processando",idx+1,total,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
+        checkpoint_captacao(repo,item,"processando",idx+1,total,consulta=consultas[idx+1] if idx+1<total else None,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
         time.sleep(PAUSA_ENTRE_BUSCAS)
     novos = stats["leads_salvos"]-salvos_antes
+    if fim<total:
+        if falhas_fontes:
+            checkpoint_captacao(repo,item,"erro",0,total,erro="Fontes pendentes; repetir varredura",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
+            repo.atualizar_instituicao(iid,status="erro")
+        stats["instituicoes_processadas"]+=1
+        print(f"   JANELA LIMITADA: {fim}/{total}; faculdade ainda não concluída; novos: {novos}",flush=True)
+        return True
     tentativas = int(item.get("tentativa_descoberta") or 0)
     repetir_zero = encontrados_local == 0 and tentativas < 1
     if falhas_fontes or repetir_zero:

@@ -5,6 +5,30 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_janela_curta_retoma_e_nao_conclui_faculdade(self,sleep):
+        repo=Repo(); chamadas=[]
+        def busca(q,*a): chamadas.append(q); return []
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=busca,limite_consultas=1)
+            self.assertEqual(repo.cp['status'],'processando')
+            self.assertEqual(repo.cp['consulta_atual'],'b')
+            s.processar_instituicao(repo,repo.item,search_fn=busca,limite_consultas=1)
+        self.assertEqual(chamadas,['a','b'])
+        self.assertEqual(repo.cp['indice_pesquisa'],2)
+        self.assertEqual(repo.cp['status'],'processando')
+
+    @patch.object(s.time,'sleep')
+    def test_fonte_nova_nao_desloca_consulta_pendente(self,sleep):
+        repo=Repo(); chamadas=[]
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[],limite_consultas=1)
+            repo.fontes_da_instituicao=lambda *a:['https://example.org/fonte']
+            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [],limite_consultas=1)
+        self.assertEqual(chamadas,['b'])
+        self.assertEqual(repo.cp['total_pesquisas'],4)
+        self.assertEqual(repo.cp['consulta_atual'],'c')
+
     def test_fila_nacional_le_checkpoints_em_lote_e_preserva_ordem(self):
         from types import SimpleNamespace
         dados=[{'id':1,'instituicao':'Faculdade A','estado':'SP'},
