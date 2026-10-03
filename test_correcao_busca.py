@@ -5,6 +5,16 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    @patch.object(s.time,'sleep')
+    def test_noticia_falecimento_nao_e_aberta_pela_captacao(self,sleep):
+        repo=Repo()
+        resultado={'href':'https://example.org/noticia','title':'Recém-formada em Nutrição morre em acidente','body':'2026 Ana Silva'}
+        with patch.object(s,'consultas_leads',return_value=['teste']):
+            with patch('fontes_academicas.carregar_fonte') as fonte:
+                s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[resultado])
+                fonte.assert_not_called()
+        self.assertEqual(repo.saved,[])
+
     def test_duplicado_sem_instituicao_nao_e_inserido(self):
         repo=Repo(); repo.lead_existe=lambda *a:True
         self.assertFalse(s.salvar_lead(repo,'Ana Silva',None,None,None,'Nutrição 2026','https://example.org',ano_forcado=2026,periodo_forcado='2026'))

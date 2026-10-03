@@ -1,6 +1,6 @@
-"""Reteste curto de descoberta e gravação real, sem alterar a fila nacional.
+"""Teste curto de descoberta e gravação real, sem alterar a fila nacional.
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
-Confere também parágrafos que misturam notícias de alunos com falas de docentes.
+Confere também a data editorial quando ela aparece depois do menu.
 """
 import json,re,signal,sys,time
 from pathlib import Path
@@ -55,6 +55,9 @@ for consulta in consultas:
             registrar(registros,url)
             if url in fontes or not f.url_permitida(url): continue
             resumo=f.norm(str(resultado.get('title') or '')+' '+str(resultado.get('body') or ''))
+            if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',f.norm(str(resultado.get('title') or ''))):
+                adiadas.append({'fonte':url,'motivo':'Notícia de falecimento; pessoa fora do público de captura'})
+                continue
             host=s.urlparse(url).hostname or ''
             if 'nutricao' not in resumo and not (host.endswith('mackenzie.br') and any(t in url for t in ['mostra-de-tcc','.pdf'])):
                 adiadas.append({'fonte':url,'motivo':'Sem evidência de Nutrição no resumo; fora do diagnóstico rápido'})

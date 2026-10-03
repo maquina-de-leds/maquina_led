@@ -792,6 +792,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         resultados_relacionados=[]
         for resultado in resultados:
             texto=normalizar(str(resultado.get("title") or "")+" "+str(resultado.get("body") or resultado.get("snippet") or ""))
+            if re.search(r"\b(?:morre|morreu|falecimento|obito)\b",normalizar(str(resultado.get("title") or ""))):
+                print("      NOTÍCIA DE FALECIMENTO: fora da captura",flush=True)
+                continue
             # Fontes conhecidas e resultados sem resumo continuam sendo lidos.
             host=(urlparse(str(resultado.get("href") or resultado.get("url") or "")).hostname or "").lower()
             hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
