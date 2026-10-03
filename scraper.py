@@ -585,6 +585,7 @@ def consultas_documentos_alunos(instituicao, alias=None):
               'boletim de serviços concluintes', 'aptos a colar grau')
     simples=[f'{termo} Nutrição {sinal}' for sinal in ('e-book','graduandas artigo','mostra TCC','liga integrantes')]
     perfis=[f'{termo} Nutrição "{fase}º semestre"' for fase in (7,8)]
+    perfis += [f'{termo} Nutrição site:linkedin.com/in "{fase}º semestre"' for fase in (7,8)]
     return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais] + perfis
 
 

@@ -9,7 +9,7 @@ runpy.run_path(str(Path(__file__).with_name('testar_mackenzie_completo.py')),run
 nomes={};metricas=[];pendentes=[]
 def limite(*args):raise TimeoutError('Limite da consulta')
 signal.signal(signal.SIGALRM,limite)
-consultas=[q for q in s.consultas_documentos_alunos(ies,'Mackenzie') if 'º semestre' in q]
+consultas=[q for q in s.consultas_documentos_alunos(ies,'Mackenzie') if 'º semestre' in q and 'site:linkedin.com/in' in q]
 for q in consultas:
     if time.monotonic()-inicio>300:break
     try:
