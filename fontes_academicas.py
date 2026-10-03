@@ -267,7 +267,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
                     year, period = local_y, local_p
                 else:
                     year, period = default_year, default_period
-                mode = 'lista' if re.search(FASE,n) else (mode if mode and (n=='nutricao' or local_y in ANOS) else None)
+                mode = 'lista' if re.search(FASE,n) or (local_y in ANOS and any(re.search(FASE,norm(t)) for t,k in linhas if k in {'title','h1'})) else (mode if mode and (n=='nutricao' or local_y in ANOS) else None)
         # Listas em notícia: o rótulo pode explicitar o curso mesmo numa página multicurso.
         label = re.search(r'(?:formand[oa]s?|concluintes?|alun[oa]s?|discentes?|autores?|integrantes?|membros?|participantes?)[^:]{0,130}:\s*(.+)', line, re.I)
         if label:
