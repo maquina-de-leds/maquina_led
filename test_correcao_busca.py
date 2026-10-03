@@ -32,6 +32,8 @@ class CorrecaoBuscaTests(unittest.TestCase):
         self.assertEqual([x['nome'] for x in r],['Ana Silva'])
         self.assertEqual(r[0]['ano'],2025)
         self.assertEqual(r[0]['fonte_url'],alternativa['href'])
+        alternativa['title']='Recém-formada em Nutrição ...'
+        self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,busca)[0][0]['nome'],'Ana Silva')
         alternativa['body']=alternativa['body'].replace('2025','2024')
         with patch.object(f,'carregar_fonte',return_value=([],[])):
             self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,busca)[0],[])

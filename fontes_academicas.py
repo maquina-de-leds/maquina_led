@@ -532,7 +532,10 @@ def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
     for resultado in alternativas:
         origem=resultado.get('href') or resultado.get('url') or ''
         if not url_permitida(origem) or urlparse(origem).hostname==p.hostname: continue
-        termos=set(re.findall(r'[a-z0-9]+',norm(str(resultado.get('title') or ''))))
+        # O buscador pode truncar o título; o slug identifica a matéria,
+        # mas nunca fornece a data de qualificação do aluno.
+        slug_alternativo=urlparse(origem).path.rstrip('/').split('/')[-1].replace('-',' ')
+        termos=set(re.findall(r'[a-z0-9]+',norm(str(resultado.get('title') or '')+' '+slug_alternativo)))
         if len(palavras & termos)<max(5,int(len(palavras)*0.7)): continue
         recuperados=extrair_resultado_busca(resultado,instituicao,alias)
         if not recuperados:

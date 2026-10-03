@@ -42,7 +42,7 @@ def executar(fn,limite):
     signal.setitimer(signal.ITIMER_REAL,min(limite,restante))
     try: return fn()
     finally: signal.setitimer(signal.ITIMER_REAL,0)
-# Reteste da consulta de publicação alternativa. Caso controlado do jornal que bloqueou os retestes anteriores.
+# Reteste com identificação de títulos truncados. Caso controlado do jornal que bloqueou os retestes anteriores.
 url_jornal='https://www.votunews.com.br/recem-formada-em-nutricao-pela-unifev-julia-bernini-conquista-vaga-em-especializacao-na-unesp/'
 try:
     try: registros,_=executar(lambda:f.carregar_fonte(url_jornal,None,None),20)
