@@ -637,7 +637,7 @@ def formatar_nome_pessoa(nome):
     return " ".join(saida)
 
 
-def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None):
+def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False):
     from fontes_academicas import pessoa
     if not pessoa(nome):
         stats["rejeitados"] += 1
@@ -674,7 +674,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "status": "novo",
         "app_baixado": False,
         "nao_contatar": False,
-        "qualificado": True,
+        "qualificado": not candidato_indicio,
         "data_primeiro_contato": None,
         "data_ultimo_contato": None,
         "proxima_acao": "primeiro_contato_instagram" if instagram else "buscar_instagram",
@@ -692,7 +692,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
-        "fonte_validacao": "fonte_publica_validada_v58",
+        "fonte_validacao": "candidato_autoral_curso_a_validar" if candidato_indicio else "fonte_publica_validada_v58",
     }
     repo.inserir_lead(dados)
     stats["leads_salvos"] += 1
@@ -858,7 +858,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 cidade_confirmada = bool(cidade and re.search(r'(?<!\w)'+re.escape(normalizar(cidade))+r'(?!\w)',contexto))
                 salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),cidade if cidade_confirmada else None,
                             uf if cidade_confirmada else None,registro["evidencia"],registro.get("fonte_url",url),
-                            instagram=registro.get("instagram"),
+                            instagram=registro.get("instagram"),candidato_indicio=registro.get("candidato_indicio",False),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
         checkpoint_captacao(repo,item,"processando",idx+1,total,consulta=consultas[idx+1] if idx+1<total else None,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)

@@ -411,6 +411,22 @@ def ler_html(html, url, instituicao, alias=None):
     for key in ('citation_title', 'dc.title', 'dc.description'):
         for value in page.metas.get(key,[]): page.linhas.append((value, 'meta'))
     records = extrair_documento(page.linhas,instituicao,alias,' '.join(page.textos),page.metas)
+    # Indício autoral, distinto de comprovação de matrícula: uma pesquisa
+    # recente sobre alimentação pode revelar candidato sem biografia de aluno.
+    # Não qualifica coautores docentes nem afirma formatura.
+    titulo_artigo=' '.join(page.metas.get('citation_title',[]))
+    data_artigo=' '.join(page.metas.get('citation_date',[])+page.metas.get('citation_publication_date',[]))
+    ano_artigo,per_artigo=periodo_academico(data_artigo)
+    edicao=re.search(r'\bv\.?\s*\d+\s*n\.?\s*\d+\s*\((20\d{2})\)',norm(' '.join(page.textos)))
+    autores=page.metas.get('citation_author',[])
+    if not records and '/article/view/' in url and ano_artigo in ANOS and autores and (not edicao or int(edicao.group(1)) in ANOS):
+        primeiro=pessoa(autores[0])
+        bios=raiz.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," author_bio ")]')
+        bio_autor=' '.join(' '.join(b.itertext()) for b in bios if primeiro and norm(primeiro) in norm(' '.join(b.itertext())))
+        if primeiro and re.search(r'nutri|alimenta|consumo alimentar',norm(titulo_artigo)) and 'nutricao' in norm(' '.join(page.textos)) and not re.search(PAPEL+'|'+OUTROS_CURSOS,norm(bio_autor)):
+            records.append(dict(nome=primeiro,ano=ano_artigo,periodo=per_artigo,instagram=None,candidato_indicio=True,
+                evidencia=f'{instituicao or "Faculdade não informada"} | Candidato por autoria de pesquisa ligada à Nutrição em {ano_artigo}: {titulo_artigo}. Nome consta nos metadados; matrícula, curso do autor e conclusão NÃO confirmados. Máquina 2 deve validar identidade, curso e fase acadêmica.',
+                contexto_academico=titulo_artigo))
     from colecoes_academicas import ler_colecao
     colecao=ler_colecao(html,url,instituicao,alias)
     records.extend(r for item in colecao['documentos'] for r in item['registros'])
@@ -418,6 +434,19 @@ def ler_html(html, url, instituicao, alias=None):
         records=extrair_documento(page.linhas,None,None,' '.join(page.textos),page.metas)
         for registro in records: registro['instituicao']=None
     links = []
+    # Edições OJS recentes: seguir os artigos pelo título, sem extrair
+    # os nomes da lista geral de autores como se já fossem alunos.
+    heading=' '.join(raiz.xpath('//h1//text()'))
+    if re.search(r'/issue/view/\d+',url) and re.search(r'\b202[56]\b',heading):
+        for node in raiz.xpath('//div[contains(concat(" ",normalize-space(@class)," ")," obj_article_summary ")]'):
+            for a in node.xpath('.//a[contains(@href,"/article/view/")]'):
+                if re.search(r'nutri|alimenta|consumo alimentar',norm(' '.join(a.itertext()))):
+                    target=urljoin(url,a.get('href'))
+                    if url_permitida(target) and urlparse(target).hostname==urlparse(url).hostname and target not in links:links.append(target)
+    # Downloads OJS nem sempre terminam em .pdf.
+    for href in page.metas.get('citation_pdf_url',[]):
+        target=urljoin(url,href)
+        if url_permitida(target) and urlparse(target).hostname==urlparse(url).hostname and target not in links:links.append(target)
     # Coleções DSpace usam identificadores numéricos: seguir apenas títulos
     # de itens recentes, nunca menus, autores ou filtros da coleção.
     if 'nutricao' in norm(' '.join(page.textos)) and re.search(r'tcc|conclusao', norm(' '.join(page.textos))):

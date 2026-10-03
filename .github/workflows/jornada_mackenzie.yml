@@ -1,0 +1,27 @@
+name: Mackenzie descoberta por jornada academica
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/testar_jornada_mackenzie.py', '.github/workflows/jornada_mackenzie.yml']
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  capturar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf lxml
+      - run: python -m unittest discover -p 'test_*.py'
+      - name: Descobrir e gravar candidatos automaticamente
+        run: timeout 360 python -u scripts/testar_jornada_mackenzie.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
