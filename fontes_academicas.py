@@ -522,7 +522,10 @@ def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
         return list({norm(r['nome']):r for r in registros}.values()),[]
     # Se o índice da origem não trouxer evidência, procurar outra publicação
     # da matéria. Toda alternativa precisa fornecer sua própria data e nomes.
-    alternativas=search_fn('"'+titulo.replace('-',' ')+'"',6)
+    consulta_alternativa=' '.join(titulo.replace('-',' ').split()[:12])
+    alternativas=search_fn(consulta_alternativa,6)
+    import json
+    print('BUSCA DE PUBLICAÇÃO ALTERNATIVA',json.dumps({'consulta':consulta_alternativa,'resultados':alternativas},ensure_ascii=False),flush=True)
     if alternativas is None: raise RuntimeError('Buscador indisponível nas publicações alternativas')
     palavras=set(re.findall(r'[a-z0-9]+',norm(titulo.replace('-',' '))))
     lidas=0
