@@ -1,0 +1,27 @@
+name: Mackenzie novas fontes publicas
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scripts/capturar_novas_fontes_mackenzie.py', '.github/workflows/novas_fontes_mackenzie.yml']
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  confirmar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf lxml
+      - run: python -m unittest discover -p 'test_*.py'
+      - name: Gravar candidatos publicos e preservar quatro fontes reais
+        run: timeout 360 python -u scripts/capturar_novas_fontes_mackenzie.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
