@@ -441,13 +441,20 @@ def _carregar_url(url, instituicao, alias=None):
             target=urljoin(url,response.headers.get('Location',''))
             response.close()
             if not url_permitida(target): return [], []
+            destino=urlparse(target)
+            if (destino.hostname or '').endswith('instagram.com') and destino.path.startswith('/accounts/login'):
+                raise PermissionError('Fonte pública redireciona para login do Instagram; acesso direto pendente')
             url=target; continue
-        if response.status_code in {429,500,502,503,504} and _ < 2:
+        if response.status_code in {500,502,503,504} and _ < 2:
             response.close()
             import time
             time.sleep(2 * (_ + 1))
             continue
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception:
+            response.close()
+            raise
         chunks=[]; size=0
         for chunk in response.iter_content(65536):
             size+=len(chunk)

@@ -1,10 +1,29 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import fontes_academicas as f
 import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_limite_429_nao_repete_requisicao(self):
+        response=Mock(status_code=429)
+        response.raise_for_status.side_effect=RuntimeError('429')
+        requests=Mock(); requests.get.return_value=response
+        with patch.dict('sys.modules',{'requests':requests}):
+            with self.assertRaisesRegex(RuntimeError,'429'):
+                f._carregar_url('https://www.instagram.com/nutriformandos/',None)
+        self.assertEqual(requests.get.call_count,1)
+        response.close.assert_called_once()
+
+    def test_redirecionamento_login_instagram_nao_e_seguido(self):
+        response=Mock(status_code=302,headers={'Location':'https://www.instagram.com/accounts/login/?next=perfil'})
+        requests=Mock(); requests.get.return_value=response
+        with patch.dict('sys.modules',{'requests':requests}):
+            with self.assertRaises(PermissionError):
+                f._carregar_url('https://www.instagram.com/nutriformandos/',None)
+        self.assertEqual(requests.get.call_count,1)
+        response.close.assert_called_once()
+
     def test_alternativa_tem_data_propria_e_preserva_url(self):
         u='https://jornal.org/noticia/recem-formada-em-nutricao-conquista-vaga'
         alternativa={'href':'https://universidade.edu.br/noticia/recem-formada-em-nutricao-conquista-vaga','title':'Recém-formada em Nutrição conquista vaga','body':'28 Jan 2025. Recém-formada em Nutrição, Ana Silva foi aprovada.'}
