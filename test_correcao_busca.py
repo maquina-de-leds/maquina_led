@@ -5,6 +5,18 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_alternativa_tem_data_propria_e_preserva_url(self):
+        u='https://jornal.org/noticia/recem-formada-em-nutricao-conquista-vaga'
+        alternativa={'href':'https://universidade.edu.br/noticia/recem-formada-em-nutricao-conquista-vaga','title':'Recém-formada em Nutrição conquista vaga','body':'28 Jan 2025. Recém-formada em Nutrição, Ana Silva foi aprovada.'}
+        def busca(q,*a): return [] if q.startswith('site:') else [alternativa]
+        r,_=f.recuperar_fonte_na_busca(u,None,None,busca)
+        self.assertEqual([x['nome'] for x in r],['Ana Silva'])
+        self.assertEqual(r[0]['ano'],2025)
+        self.assertEqual(r[0]['fonte_url'],alternativa['href'])
+        alternativa['body']=alternativa['body'].replace('2025','2024')
+        with patch.object(f,'carregar_fonte',return_value=([],[])):
+            self.assertEqual(f.recuperar_fonte_na_busca(u,None,None,busca)[0],[])
+
     @patch.object(s.time,'sleep')
     def test_noticia_falecimento_nao_e_aberta_pela_captacao(self,sleep):
         repo=Repo()

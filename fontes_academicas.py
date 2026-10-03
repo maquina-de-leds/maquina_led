@@ -511,4 +511,28 @@ def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
             r['fonte_url']=origem
             r['evidencia']+=' | Recuperado do índice público; página original indisponível'
             registros.append(r)
+    if registros:
+        return list({norm(r['nome']):r for r in registros}.values()),[]
+    # Se o índice da origem não trouxer evidência, procurar outra publicação
+    # da matéria. Toda alternativa precisa fornecer sua própria data e nomes.
+    alternativas=search_fn('"'+titulo.replace('-',' ')+'"',6)
+    if alternativas is None: raise RuntimeError('Buscador indisponível nas publicações alternativas')
+    palavras=set(re.findall(r'[a-z0-9]+',norm(titulo.replace('-',' '))))
+    lidas=0
+    for resultado in alternativas:
+        origem=resultado.get('href') or resultado.get('url') or ''
+        if not url_permitida(origem) or urlparse(origem).hostname==p.hostname: continue
+        termos=set(re.findall(r'[a-z0-9]+',norm(str(resultado.get('title') or ''))))
+        if len(palavras & termos)<max(5,int(len(palavras)*0.7)): continue
+        recuperados=extrair_resultado_busca(resultado,instituicao,alias)
+        if not recuperados:
+            if lidas>=2: continue
+            lidas+=1
+            try: recuperados,_=carregar_fonte(origem,instituicao,alias)
+            except Exception: continue
+        for r in recuperados:
+            r['fonte_url']=origem
+            r['evidencia']+=' | Publicação alternativa da matéria; fonte inacessível: '+url
+            registros.append(r)
+        if registros: break
     return list({norm(r['nome']):r for r in registros}.values()),[]

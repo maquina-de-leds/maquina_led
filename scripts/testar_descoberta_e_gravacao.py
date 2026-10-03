@@ -9,7 +9,7 @@ import scraper as s
 import fontes_academicas as f
 
 repo=s.SupabaseRepo.from_env(); gravados=[]; existentes=[]
-inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]
+inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]; acessos_indisponiveis=[]; recuperadas=[]
 ies='Universidade Presbiteriana Mackenzie'
 consultas=['"Nutrição" "recém-formada" 2025 notícia',
            '"Nutrição" "formada em fevereiro" 2025',
@@ -19,6 +19,7 @@ def registrar(registros,url):
     for r in registros:
         chave=f.norm(r['nome'])
         if chave in nomes: continue
+        url=r.get('fonte_url') or url
         r['fonte_url']=url
         nomes[chave]=r
         try:
@@ -77,7 +78,14 @@ for consulta in consultas:
                 print('FONTE REAL',url,json.dumps(registros,ensure_ascii=False),flush=True)
                 registrar(registros,url)
             except Exception as exc:
-                pendentes.append({'fonte':url,'erro':str(exc)[:150]})
+                acessos_indisponiveis.append({'fonte':url,'erro':str(exc)[:150]})
+                try:
+                    registros,_=executar(lambda:f.recuperar_fonte_na_busca(url,ies,'Mackenzie',s.buscar_web),30)
+                    if not registros: raise RuntimeError('Nenhuma evidência recuperada em publicação alternativa')
+                    registrar(registros,url)
+                    recuperadas.append({'fonte':url,'nomes':len(registros),'fontes_usadas':list({r.get('fonte_url') for r in registros})})
+                except Exception as recuperacao:
+                    pendentes.append({'fonte':url,'erro':str(exc)[:150],'recuperacao':str(recuperacao)[:150]})
     except Exception as exc:
         pendentes.append({'consulta':consulta,'erro':str(exc)[:150]})
     finally:
@@ -85,6 +93,6 @@ for consulta in consultas:
         metricas.append(metrica)
         print('TEMPO E RESULTADO',json.dumps(metrica,ensure_ascii=False),flush=True)
 nao_executadas=consultas[consultas_feitas:]
-print('DIAGNOSTICO RAPIDO',json.dumps({'segundos':round(time.monotonic()-inicio,1),'consultas_executadas':consultas_feitas,'consultas_nao_executadas':nao_executadas,'nomes_unicos':len(nomes),'registros':list(nomes.values()),'pendencias':pendentes,'gravacoes_no_banco':len(gravados),'novos_confirmados':gravados,'duplicados_confirmados':existentes,'varredura_completa':False},ensure_ascii=False),flush=True)
+print('DIAGNOSTICO RAPIDO',json.dumps({'segundos':round(time.monotonic()-inicio,1),'consultas_executadas':consultas_feitas,'consultas_nao_executadas':nao_executadas,'nomes_unicos':len(nomes),'registros':list(nomes.values()),'pendencias':pendentes,'acessos_diretos_indisponiveis':acessos_indisponiveis,'fontes_recuperadas':recuperadas,'gravacoes_no_banco':len(gravados),'novos_confirmados':gravados,'duplicados_confirmados':existentes,'varredura_completa':False},ensure_ascii=False),flush=True)
 print('EFICIENCIA',json.dumps({'buscas':metricas,'fontes_adiadas':adiadas},ensure_ascii=False),flush=True)
 if pendentes or nao_executadas: raise SystemExit(2)
