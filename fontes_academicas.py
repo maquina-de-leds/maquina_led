@@ -395,6 +395,9 @@ def ler_html(html, url, instituicao, alias=None):
     for key in ('citation_title', 'dc.title', 'dc.description'):
         for value in page.metas.get(key,[]): page.linhas.append((value, 'meta'))
     records = extrair_documento(page.linhas,instituicao,alias,' '.join(page.textos),page.metas)
+    from colecoes_academicas import ler_colecao
+    colecao=ler_colecao(html,url,instituicao,alias)
+    records.extend(r for item in colecao['documentos'] for r in item['registros'])
     if not records:
         records=extrair_documento(page.linhas,None,None,' '.join(page.textos),page.metas)
         for registro in records: registro['instituicao']=None
