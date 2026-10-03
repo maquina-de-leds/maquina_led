@@ -69,3 +69,22 @@ for item in itens:
         problemas.append({'faculdade':item['instituicao'],'erro':str(e)[:180],'checkpoint_preservado':real.controle_get(etapa)})
 print('RESULTADO LOTE ESTADUAL',json.dumps({'uf':uf,'segundos':round(time.monotonic()-inicio,1),'faculdades':resultados,'novos_confirmados':repo.novos,'existentes_confirmados':sorted(set(repo.existentes)),'nomes_unicos_encontrados':sorted(set(repo.candidatos)),'fontes_inacessiveis':fontes_falhas,'pendencias':problemas,'agendamento_ativado':False},ensure_ascii=False),flush=True)
 if problemas or len(resultados)!=2: raise SystemExit(2)
+
+# Fontes reais identificadas em pesquisa assistida; não contam como descoberta automática.
+fontes_ufsc=["https://repositorio.ufsc.br/handle/123456789/270578?show=full", "https://repositorio.ufsc.br/handle/123456789/270580?show=full"]
+ufsc=[]
+for url in fontes_ufsc:
+    registros,_=executar(lambda:f.carregar_fonte(url,"Universidade Federal de Santa Catarina","UFSC"),25)
+    assert registros, "Fonte UFSC não forneceu autores qualificados"
+    for r in registros:
+        assert r["ano"]==2025 and f.pessoa(r["nome"]), "Autor fora do critério"
+        args=dict(repo=real,nome=r["nome"],instituicao="Universidade Federal de Santa Catarina",cidade=None,uf=None,texto=r["evidencia"],url=url,ano_forcado=r["ano"],periodo_forcado=r["periodo"],instituicao_alias="UFSC")
+        novo=executar(lambda:s.salvar_lead(**args),20)
+        confirmado=executar(lambda:real.lead_existe(r["nome"],args["instituicao"]),20)
+        assert confirmado, "Gravação não confirmada no Supabase"
+        antes=executar(lambda:real.lead_da_fonte(r["nome"],url),20)
+        repetido=executar(lambda:s.salvar_lead(**args),20)
+        depois=executar(lambda:real.lead_da_fonte(r["nome"],url),20)
+        assert not repetido and antes and depois and antes["id"]==depois["id"], "Releitura duplicou ou trocou registro"
+        ufsc.append(dict(nome=r["nome"],id=depois["id"],novo=novo,confirmado=confirmado,releitura_duplicada_ignorada=True,fonte=url))
+print("RESULTADO REPOSITORIO SC",json.dumps(dict(tipo="fontes_identificadas_em_pesquisa_assistida",nomes_unicos=len({r["nome"] for r in ufsc}),novos_confirmados=sum(r["novo"] for r in ufsc),existentes_confirmados=sum(not r["novo"] for r in ufsc),releituras_duplicadas_ignoradas=len(ufsc),leads=ufsc,segundos_totais=round(time.monotonic()-inicio,1)),ensure_ascii=False),flush=True)

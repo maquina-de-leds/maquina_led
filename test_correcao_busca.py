@@ -347,3 +347,10 @@ class FormatosReaisTests(unittest.TestCase):
         html='<title>Nutrição Mackenzie</title><p>O aluno realiza TCC e estágio em 2026.</p><ul><li>Avaliações e Premiações</li><li>Currículo Lattes</li><li>Indústria de Alimentos</li><li>Área Comercial</li></ul>'
         r,_=f.ler_html(html,'https://mackenzie.br/nutricao','Universidade Presbiteriana Mackenzie','Mackenzie')
         self.assertEqual(r,[])
+
+class RepositorioXHTMLTests(unittest.TestCase):
+    def test_tcc_com_declaracao_xml_decodificada(self):
+        pagina = '<?xml version="1.0" encoding="UTF-8"?><html><head><title>TCC Nutrição</title><meta name="dc.date.issued" content="2025-12-06"><meta name="dc.contributor.author" content="Farias, Valesca Maria de"></head><body><p>TCC (graduação) - Universidade Federal de Santa Catarina, Nutrição.</p></body></html>'
+        registros,_=f.ler_html(pagina,'https://repositorio.ufsc.br/handle/123456789/270578','Universidade Federal de Santa Catarina','UFSC')
+        self.assertEqual([r['nome'] for r in registros],['Valesca Maria de Farias'])
+        self.assertEqual(registros[0]['ano'],2025)

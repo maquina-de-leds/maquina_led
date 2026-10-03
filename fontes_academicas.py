@@ -351,6 +351,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
 
 def ler_html(html, url, instituicao, alias=None):
     from lxml import html as html_dom
+    # A resposta já foi decodificada; XHTML de repositórios pode repetir a codificação.
+    html = re.sub(r'^\s*<\?xml\b[^?]*\?>', '', html, count=1, flags=re.I)
     raiz = html_dom.fromstring(html)
     page = Pagina()
     # DOM tolerante a HTML mal formado; não propaga estado de um menu ao artigo.
