@@ -1,0 +1,26 @@
+name: Revalidar UFSC apos teste multifaculdades
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/revalidar_ufsc.yml']
+permissions:
+  contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
+jobs:
+  capturar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase ddgs pypdf lxml
+      - run: python -m unittest discover -p 'test_*.py'
+      - run: python -u scripts/testar_colecao_completa_ufsc.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
