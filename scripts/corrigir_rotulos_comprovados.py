@@ -14,7 +14,8 @@ revisoes=[]
 for url,nomes in casos.items():
     for nome in nomes:
         assert f.pessoa(nome) is None
-        rows=repo.client.table('leds').select('id,nome,status,qualificado,nao_contatar').ilike('nome',nome).eq('fonte_url',url).execute().data or []
+        rows=repo.client.table('leds').select('id,nome,status,qualificado,nao_contatar,fonte_url').ilike('nome','%'.join(nome.split())).execute().data or []
+        rows=[r for r in rows if s.normalizar(r['nome'])==s.normalizar(nome) and (r['fonte_url'] or '').rstrip('/')==url.rstrip('/')]
         for row in rows:
             repo.client.table('leds').update(dict(status='revisao',qualificado=False,nao_contatar=True)).eq('id',row['id']).eq('nome',row['nome']).eq('fonte_url',url).execute()
             atual=repo.client.table('leds').select('id,status,qualificado,nao_contatar').eq('id',row['id']).execute().data[0]
