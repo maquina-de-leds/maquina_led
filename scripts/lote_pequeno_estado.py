@@ -1,4 +1,4 @@
-"""Reteste com capa de TCC no índice, sem exclusões de pronto/modelo; corrigido do lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
+"""Reteste com contexto local de seção e capa de TCC no índice, sem exclusões de pronto/modelo; corrigido do lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
 import json,os,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))

@@ -400,3 +400,12 @@ class CapaTCCIndiceTests(unittest.TestCase):
     def test_ano_so_no_arquivo_nao_qualifica(self):
         r={'title':'CURSO DE NUTRIÇÃO','href':'https://repositorio.ufsc.br/TCC_2025.pdf','body':'Florianópolis Ariane Machado'}
         self.assertEqual(f.extrair_resultado_busca(r,'UFSC'),[])
+
+class ContextoPaginaInicialTests(unittest.TestCase):
+    def test_mencao_global_a_tcc_nao_abre_lista_no_menu(self):
+        pagina='<title>Coordenação do curso de Nutrição</title><meta name="date" content="2026"><h2>Nutrição</h2><ul><li>Ana Silva</li></ul><p>Procedimentos de entrega do TCC</p>'
+        registros,_=f.ler_html(pagina,'https://nutricao.ufsc.br/','Universidade Federal de Santa Catarina','UFSC')
+        self.assertEqual(registros,[])
+    def test_rotulos_e_nome_com_classificacao_nao_sao_pessoas(self):
+        for nome in ['Acessos Rápidos','Pardos e Indígenas','Candidaturas Deferidas Categoria Alínea Classificação','Bianca Martins Geral e Homologada']:
+            self.assertIsNone(f.pessoa(nome))

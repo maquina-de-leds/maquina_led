@@ -8,7 +8,8 @@ inicio=time.monotonic()
 signal.signal(signal.SIGALRM,lambda *a:(_ for _ in ()).throw(TimeoutError('Limite de três minutos')))
 signal.alarm(180)
 repo=s.SupabaseRepo.from_env()
-casos={'https://www.unirio.br/ccbs/nutricao/':['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Programa de Discipinas','Horários de Disciplinas','Residência Multiprofissional'],
+casos={'https://nutricao.ufsc.br/':['Acessos Rápidos','Pardos e Indígenas','Candidaturas Deferidas Categoria Alínea Classificação','Bianca Martins Geral e Homologada'],
+       'https://www.unirio.br/ccbs/nutricao/':['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Programa de Discipinas','Horários de Disciplinas','Residência Multiprofissional'],
        'https://www.passeidireto.com/arquivo/201106163/protocolo-tcc-para-imagem-corporal':['Aula Hortaliças']}
 revisoes=[]
 for url,nomes in casos.items():

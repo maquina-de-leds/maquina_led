@@ -109,7 +109,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:acessos|rapidos|candidaturas|deferidas|classificacao|homologada|pardos|indigenas|aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -267,7 +267,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
                     year, period = local_y, local_p
                 else:
                     year, period = default_year, default_period
-                mode = 'lista' if re.search(FASE, n+' '+norm(context)) else None
+                mode = 'lista' if re.search(FASE,n) else (mode if mode and (n=='nutricao' or local_y in ANOS) else None)
         # Listas em notícia: o rótulo pode explicitar o curso mesmo numa página multicurso.
         label = re.search(r'(?:formand[oa]s?|concluintes?|alun[oa]s?|discentes?|autores?|integrantes?|membros?|participantes?)[^:]{0,130}:\s*(.+)', line, re.I)
         if label:
