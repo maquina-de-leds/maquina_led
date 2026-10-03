@@ -305,6 +305,10 @@ class SupabaseRepo:
         casos = (
             ("São Luís", "https://www.saoluis.br/"),
             ("Versão Final do Tcc", "https://uni20.com.br/course/view.php?id=6447"),
+            ("Semana Acadêmica", "https://cursos.unipampa.edu.br/cursos/nutricao/2025/"),
+            ("Material e Métodos", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
+            ("Consentimento Livre e Esclarecido", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
+            ("Del Ré", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
         )
         for nome, url in casos:
             r = (self.client.table("leds").update({
