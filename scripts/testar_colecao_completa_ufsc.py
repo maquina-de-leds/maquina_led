@@ -1,5 +1,6 @@
 """Lê todas as páginas dos TCCs 2025/2026 e grava nomes com confirmação real."""
 import json,signal,sys,time
+from datetime import datetime,timezone
 from pathlib import Path
 from urllib.parse import urlparse
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -18,15 +19,25 @@ for ano in (2025,2026):
         if atual in vistas: continue
         assert urlparse(atual).hostname=='repositorio.ufsc.br'
         vistas.add(atual)
-        resposta=requests.get(atual,timeout=(10,25)); resposta.raise_for_status()
-        from lxml import html
-        dom=html.fromstring(resposta.content)
-        emails_publicos.update(a[7:].split('?')[0] for a in dom.xpath('//a[starts-with(@href,"mailto:")]/@href'))
-        resultado=ler_colecao(resposta.text,resposta.url,'Universidade Federal de Santa Catarina','UFSC')
+        origem_leitura='acesso_direto_github'; url_final=atual
+        try:
+            resposta=requests.get(atual,timeout=(10,25)); resposta.raise_for_status()
+            from lxml import html
+            dom=html.fromstring(resposta.content)
+            emails_publicos.update(a[7:].split('?')[0] for a in dom.xpath('//a[starts-with(@href,"mailto:")]/@href'))
+            resultado=ler_colecao(resposta.text,resposta.url,'Universidade Federal de Santa Catarina','UFSC')
+            url_final=resposta.url
+        except requests.RequestException as erro:
+            copia=json.loads((Path(__file__).resolve().parents[1]/'fontes_publicas/ufsc_tcc_2025_2026.json').read_text())
+            fonte=next(p for p in copia['paginas'] if p['ano']==ano and p['url']==atual)
+            idade=(datetime.now(timezone.utc)-datetime.fromisoformat(fonte['coletado_em'])).total_seconds()
+            assert 0<=idade<=86400,'Leitura pública expirada; coletar novamente'
+            resultado=fonte['resultado']; origem_leitura='copia_de_leitura_publica_real_feita_no_ambiente_de_pesquisa'
+            print('ACESSO DIRETO INDISPONIVEL',json.dumps(dict(url=atual,erro=type(erro).__name__,coletado_em=fonte['coletado_em'],alternativa=origem_leitura),ensure_ascii=False),flush=True)
         assert resultado['total'] is not None,'A página não confirmou total da coleção filtrada'
         if ano not in totais: totais[ano]=resultado['total']
         assert resultado['total']==totais[ano],'Total mudou durante a leitura'
-        paginas.append(dict(ano=ano,url=resposta.url,documentos=len(resultado['documentos']),total=resultado['total']))
+        paginas.append(dict(ano=ano,url=url_final,origem_leitura=origem_leitura,documentos=len(resultado['documentos']),total=resultado['total']))
         print('PAGINA DA COLECAO',json.dumps(paginas[-1],ensure_ascii=False),flush=True)
         for doc in resultado['documentos']:
             assert all(r['ano']==ano for r in doc['registros']),'Filtro de ano não foi respeitado'
