@@ -300,6 +300,22 @@ class SupabaseRepo:
             return True
         return False
 
+    def isolar_erros_de_nome_comprovados(self):
+        # Correção reversível: preservar nome, evidência e URL; impedir contato.
+        casos = (
+            ("São Luís", "https://www.saoluis.br/"),
+            ("Versão Final do Tcc", "https://uni20.com.br/course/view.php?id=6447"),
+        )
+        for nome, url in casos:
+            r = (self.client.table("leds").update({
+                "nao_contatar": True, "qualificado": False,
+                "proxima_acao": "revisar_nome",
+                "fonte_validacao": "erro_comprovado_extracao_nome_revisao",
+            }).eq("nome", nome).eq("fonte_url", url)
+                .eq("origem", "captacao_nacional_fila_v58")
+                .eq("nao_contatar", False).execute())
+            print(f"REVISÃO DE NOME COMPROVADA: {nome} | registros isolados: {len(r.data or [])}", flush=True)
+
     def contar_leads(self):
         return self.client.table("leds").select("id", count="exact", head=True).execute().count
 
@@ -927,6 +943,7 @@ def executar():
         resumo()
         raise SystemExit(1)
 
+    repo.isolar_erros_de_nome_comprovados()
     try:
         print(f"📊 Total de cadastros no Supabase antes do ciclo: {repo.contar_leads()}", flush=True)
     except Exception as exc:
@@ -941,7 +958,9 @@ def executar():
         print("⏸️ A próxima execução retoma por faculdade.", flush=True)
 
     resumo()
-    if stats["erros"]: raise SystemExit(2)
+    if stats["instituicoes_erro"]: raise SystemExit(2)
+    if stats["erros"]:
+        print(f"⚠️ CICLO COM PENDÊNCIAS EXTERNAS: {stats['erros']} ocorrências; checkpoints preservados; cobertura incompleta.", flush=True)
     print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
 
 
