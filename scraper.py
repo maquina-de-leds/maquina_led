@@ -618,7 +618,7 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     # Consultas menos restritas antecipam documentos com autores, sem exigir
     # que a página use a razão social ou a palavra exata "formandos".
     curto = limpar_espacos(alias or instituicao)
-    prioritarias = [f'{curto} Nutrição {ano} {sinal}'
+    prioritarias = [f'{curto} Nutrição {ano} {sinal} -"pronto" -"modelo"'
                    for ano in (2025, 2026)
                    for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
     consultas = prioritarias + [f'"{termo}" Nutrição {sinal} {ano}'
@@ -816,6 +816,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             texto=normalizar(str(resultado.get("title") or "")+" "+str(resultado.get("body") or resultado.get("snippet") or ""))
             if re.search(r"\b(?:morre|morreu|falecimento|obito)\b",normalizar(str(resultado.get("title") or ""))):
                 print("      NOTÍCIA DE FALECIMENTO: fora da captura",flush=True)
+                continue
+            if re.search(r'(?:tcc|trabalho|portfolio|portifolio).{0,100}pront[oa]|modelo de (?:trabalho|tcc)|projetos e portfolios prontos',texto):
+                print("MODELO OU TRABALHO PRONTO: sem evidência de autor aluno",resultado.get("href"),flush=True)
                 continue
             # Fontes conhecidas e resultados sem resumo continuam sendo lidos.
             host=(urlparse(str(resultado.get("href") or resultado.get("url") or "")).hostname or "").lower()

@@ -109,7 +109,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:aula|aulas|hortalicas|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
@@ -387,6 +387,16 @@ def ler_html(html, url, instituicao, alias=None):
         records=extrair_documento(page.linhas,None,None,' '.join(page.textos),page.metas)
         for registro in records: registro['instituicao']=None
     links = []
+    # Coleções DSpace usam identificadores numéricos: seguir apenas títulos
+    # de itens recentes, nunca menus, autores ou filtros da coleção.
+    if 'nutricao' in norm(' '.join(page.textos)) and re.search(r'tcc|conclusao', norm(' '.join(page.textos))):
+        for node in raiz.xpath('//div[contains(concat(" ",normalize-space(@class)," ")," artifact-description ")]'):
+            datas=' '.join(node.xpath('.//span[contains(concat(" ",normalize-space(@class)," ")," date ")]/text()'))
+            if not re.search(r'\b202[56]\b',datas): continue
+            for href in node.xpath('.//div[contains(concat(" ",normalize-space(@class)," ")," artifact-title ")]//a/@href'):
+                target=urljoin(url,href).split('#',1)[0]
+                if url_permitida(target) and urlparse(target).hostname==urlparse(url).hostname and re.fullmatch(r'/handle/\d+/\d+',urlparse(target).path):
+                    if target not in links: links.append(target)
     for href in page.links:
         target=urljoin(url,href).split('#',1)[0]
         n=norm(target)

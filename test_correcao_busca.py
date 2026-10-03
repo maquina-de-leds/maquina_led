@@ -358,7 +358,15 @@ class RepositorioXHTMLTests(unittest.TestCase):
 class DescobertaRepositorioTests(unittest.TestCase):
     def test_prioriza_autores_sem_prender_razao_social(self):
         q=s.consultas_leads("Universidade Federal de Santa Catarina","UFSC")
-        self.assertEqual(q[0],"UFSC Nutrição 2025 TCC repositório")
-        self.assertIn("UFSC Nutrição 2026 TCC repositório",q)
+        self.assertEqual(q[0],'UFSC Nutrição 2025 TCC repositório -"pronto" -"modelo"')
+        self.assertIn('UFSC Nutrição 2026 TCC repositório -"pronto" -"modelo"',q)
         self.assertTrue(any('"grupo de alunos"' in x for x in q))
         self.assertTrue(any('"formandos"' in x for x in q))
+
+class ColecaoRepositorioTests(unittest.TestCase):
+    def test_rotulo_aula_nao_e_nome(self):
+        self.assertIsNone(f.pessoa("Aula Hortaliças"))
+    def test_colecao_segue_itens_recentes_nao_menu(self):
+        pagina='<title>TCC Nutrição</title><a href="/handle/123456789/99">menu</a><div class="artifact-description"><div class="artifact-title"><a href="/handle/123456789/123">Pesquisa</a></div><span class="date">2026</span></div><div class="artifact-description"><div class="artifact-title"><a href="/handle/123456789/124">Antigo</a></div><span class="date">2024</span></div>'
+        _,links=f.ler_html(pagina,'https://repositorio.ufsc.br/handle/123456789/7441','Universidade Federal de Santa Catarina','UFSC')
+        self.assertEqual(links,['https://repositorio.ufsc.br/handle/123456789/123'])

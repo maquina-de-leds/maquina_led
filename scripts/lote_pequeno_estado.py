@@ -34,6 +34,7 @@ class Observador:
         executar(lambda:real.inserir_lead(dados),20)
         assert executar(lambda:real.lead_existe(dados['nome'],dados['instituicao']),20), 'Novo lead não confirmado'
         self.novos.append({'nome':dados['nome'],'instituicao':dados['instituicao'],'fonte':dados['fonte_url']})
+    def fontes_da_instituicao(self,*a): return [] # Este teste mede busca nova, sem injetar fontes já salvas.
     def lead_da_fonte(self,nome,url):
         self.candidatos.append(nome)
         r=executar(lambda:real.lead_da_fonte(nome,url),20)
@@ -43,6 +44,12 @@ class Observador:
         r=executar(lambda:real.lead_existe(nome,inst),20)
         if r: self.existentes.append(nome)
         return r
+# Correção reversível do único rótulo comprovadamente salvo como pessoa.
+erro_url="https://www.passeidireto.com/arquivo/201106163/protocolo-tcc-para-imagem-corporal"
+rotulo=executar(lambda:real.lead_da_fonte("Aula Hortaliças",erro_url),20)
+if rotulo:
+    executar(lambda:real.client.table('leds').update(dict(qualificado=False,nao_contatar=True,status="revisao")).eq('id',rotulo['id']).eq('nome','Aula Hortaliças').eq('fonte_url',erro_url).execute(),20)
+    print("ROTULO EM REVISAO REVERSIVEL",json.dumps(dict(id=rotulo['id'],nome=rotulo['nome'],estado_anterior={k:rotulo.get(k) for k in ['qualificado','nao_contatar','status']}),ensure_ascii=False),flush=True)
 repo=Observador(); s.PAUSA_ENTRE_BUSCAS=0; resultados=[]
 def buscar(q,max_results):
     antes=time.monotonic()
