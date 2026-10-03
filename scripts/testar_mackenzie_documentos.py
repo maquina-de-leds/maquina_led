@@ -27,16 +27,17 @@ def executar(fn,segundos):
  signal.setitimer(signal.ITIMER_REAL,min(segundos,restante))
  try:return fn()
  finally:signal.setitimer(signal.ITIMER_REAL,0)
-def registrar(registros):
+def registrar(registros,fonte):
  for r in registros:
   chave=f.norm(r['nome'])
   if chave in nomes:continue
-  nomes[chave]=r
-  ies=r.get('instituicao')
+  r.setdefault('fonte_url',fonte)
+  ies=r.get('instituicao','Universidade Presbiteriana Mackenzie')
   novo=s.salvar_lead(repo,r['nome'],ies,None,None,r['evidencia'],r['fonte_url'],ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if ies=='Universidade Presbiteriana Mackenzie' else None)
   assert repo.lead_existe(r['nome'],ies)
+  nomes[chave]=r
   (novos if novo else existentes).append(r['nome'])
-consultas=[c for c in s.consultas_documentos_alunos('Universidade Presbiteriana Mackenzie','Mackenzie') if any(t in c for t in ['outorga','calendário','projeto integrador','juramentista'])]
+consultas=s.consultas_documentos_alunos('Universidade Presbiteriana Mackenzie','Mackenzie')[:4]
 for consulta in consultas:
  comeco=time.monotonic();antes=len(nomes)
  try:
@@ -45,14 +46,23 @@ for consulta in consultas:
   print('BUSCA DOCUMENTAL',json.dumps(dict(consulta=consulta,resultados=resultados),ensure_ascii=False),flush=True)
   for resultado in resultados:
    url=resultado.get('href') or resultado.get('url') or ''
-   registrar(f.extrair_resultado_busca(resultado,'Universidade Presbiteriana Mackenzie','Mackenzie'))
+   registrar(f.extrair_resultado_busca(resultado,'Universidade Presbiteriana Mackenzie','Mackenzie'),url)
    if url in fontes or not f.url_permitida(url):continue
    texto=f.norm(str(resultado.get('title',''))+' '+str(resultado.get('body','')))
    if 'nutricao' not in texto:continue
    fontes.add(url)
    try:
-    registros,_=executar(lambda:f.carregar_fonte(url,'Universidade Presbiteriana Mackenzie','Mackenzie'),12)
-    registrar(registros)
+    registros,links=executar(lambda:f.carregar_fonte(url,'Universidade Presbiteriana Mackenzie','Mackenzie'),12)
+    registrar(registros,url)
+    print('LEITURA E ANEXOS',json.dumps(dict(url=url,nomes=len(registros),links_disponiveis=len(links)),ensure_ascii=False),flush=True)
+    for link in links[:3]:
+     if link in fontes or not f.url_permitida(link):continue
+     fontes.add(link)
+     try:
+      outros,_=executar(lambda:f.carregar_fonte(link,'Universidade Presbiteriana Mackenzie','Mackenzie'),12)
+      registrar(outros,link)
+      print('ANEXO LIDO',json.dumps(dict(url=link,nomes=len(outros)),ensure_ascii=False),flush=True)
+     except Exception as e:pendentes.append(dict(fonte=link,erro=type(e).__name__))
    except Exception as e:pendentes.append(dict(fonte=url,erro=type(e).__name__))
  except Exception as e:pendentes.append(dict(consulta=consulta,erro=type(e).__name__))
  metricas.append(dict(consulta=consulta,segundos=round(time.monotonic()-comeco,1),nomes_adicionados=len(nomes)-antes))

@@ -321,9 +321,17 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',norm(titulo)):
         return []
     vinculada=bool(any(t and norm(t) in n for t in (instituicao,alias)))
+    texto_periodo=texto
     if re.search(r'\b(?:20[01]\d|202[0-4])\b',n):
-        return []
-    ano,periodo=periodo_academico(texto)
+        # Uma menção histórica em outra frase não anula o vínculo recente.
+        frases=re.split(r'[.!?;|]+',n)
+        recentes=[frase for frase in frases if 'nutricao' in frase and re.search(r'estud|curs|graduand|formand|formad|academic|discente',frase)
+                    and re.search(r'\b202[56]\b',frase)
+                    and not re.search(r'\b(?:20[01]\d|202[0-4])\b|indexad|republicad',frase)
+                    ]
+        if not recentes: return []
+        texto_periodo=' '.join(recentes)
+    ano,periodo=periodo_academico(texto_periodo)
     fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
     if ano not in ANOS and not fase: return []
     # Capa de TCC indexada: o próprio trecho identifica ano e nome do autor.
@@ -417,7 +425,7 @@ def ler_html(html, url, instituicao, alias=None):
         n=norm(target)
         if url_permitida(target) and (urlparse(target).hostname==urlparse(url).hostname) and re.search(r'\.pdf(?:\?|$)|nutri|tcc|formand|colacao|concluint', n):
             if target not in links and target != url: links.append(target)
-    return records, links[:6]
+    return records, list(dict.fromkeys(colecao["proximas"] + links[:6]))
 
 
 def extrair_autores_alunos_pdf(linhas, instituicao, alias=None):

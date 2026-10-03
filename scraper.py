@@ -602,7 +602,8 @@ def consultas_documentos_alunos(instituicao, alias=None):
               'projeto integrador alunas autores', 'liga acadêmica nova gestão integrantes',
               'centro acadêmico diretoria', 'juramentista oradora formanda',
               'boletim de serviços concluintes', 'aptos a colar grau')
-    return [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais]
+    simples=[f'{termo} Nutrição {sinal}' for sinal in ('e-book','graduandas artigo','mostra TCC','liga integrantes')]
+    return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais]
 
 
 def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
@@ -860,8 +861,13 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 if not registros: continue
                 print(f"      RECUPERADO NO ÍNDICE: {len(registros)} nomes; acesso direto ainda pendente",flush=True)
             print(f"      📄 FONTE: {url} | pessoas: {len(registros)}",flush=True)
-            if depth == 0:
-                fila.extend((link,1) for link in links if url_permitida(link))
+            from urllib.parse import parse_qs
+            for link in links:
+                destino=urlparse(link); atual=urlparse(url)
+                pagina=(destino.hostname==atual.hostname and destino.path==atual.path
+                        and bool({'offset','page'} & set(parse_qs(destino.query))))
+                if url_permitida(link) and (depth==0 or pagina):
+                    fila.append((link,depth if pagina else 1))
             for registro in registros:
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
