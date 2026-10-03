@@ -23,7 +23,9 @@ nomes_estado={s.normalizar(r['instituicao']) for r in registros if r['estado']==
 fila=executar(real.fila_nacional,40)
 # Seleção estável permite repetir o mesmo lote sem saltar para novas faculdades.
 itens=sorted([x for x in fila if s.normalizar(x['instituicao']) in nomes_estado],key=lambda x:s.normalizar(x['instituicao']))[:2]
-assert len(itens)==2, 'Não há duas faculdades elegíveis na fila para este lote'
+ufsc_item=next(x for x in fila if s.normalizar(x['instituicao'])=='universidade federal de santa catarina')
+itens.append(ufsc_item)
+assert len(itens)==3, 'Não há duas faculdades elegíveis na fila para este lote'
 print('LOTE SELECIONADO',json.dumps({'uf':uf,'rodada':os.getenv('GITHUB_RUN_ATTEMPT','1'),'faculdades':[x['instituicao'] for x in itens],'consultas_por_faculdade':2,'limite_pesquisa_segundos':360},ensure_ascii=False),flush=True)
 class Observador:
     def __init__(self): self.novos=[]; self.existentes=[]; self.candidatos=[]
@@ -68,7 +70,7 @@ for item in itens:
     except Exception as e:
         problemas.append({'faculdade':item['instituicao'],'erro':str(e)[:180],'checkpoint_preservado':real.controle_get(etapa)})
 print('RESULTADO LOTE ESTADUAL',json.dumps({'uf':uf,'segundos':round(time.monotonic()-inicio,1),'faculdades':resultados,'novos_confirmados':repo.novos,'existentes_confirmados':sorted(set(repo.existentes)),'nomes_unicos_encontrados':sorted(set(repo.candidatos)),'fontes_inacessiveis':fontes_falhas,'pendencias':problemas,'agendamento_ativado':False},ensure_ascii=False),flush=True)
-if problemas or len(resultados)!=2: raise SystemExit(2)
+if problemas or len(resultados)!=3: raise SystemExit(2)
 
 # Fontes reais identificadas em pesquisa assistida; não contam como descoberta automática.
 fontes_ufsc=["https://repositorio.ufsc.br/handle/123456789/270578?show=full", "https://repositorio.ufsc.br/handle/123456789/270580?show=full"]

@@ -354,3 +354,11 @@ class RepositorioXHTMLTests(unittest.TestCase):
         registros,_=f.ler_html(pagina,'https://repositorio.ufsc.br/handle/123456789/270578','Universidade Federal de Santa Catarina','UFSC')
         self.assertEqual([r['nome'] for r in registros],['Valesca Maria de Farias'])
         self.assertEqual(registros[0]['ano'],2025)
+
+class DescobertaRepositorioTests(unittest.TestCase):
+    def test_prioriza_autores_sem_prender_razao_social(self):
+        q=s.consultas_leads("Universidade Federal de Santa Catarina","UFSC")
+        self.assertEqual(q[0],"UFSC Nutrição 2025 TCC repositório")
+        self.assertIn("UFSC Nutrição 2026 TCC repositório",q)
+        self.assertTrue(any('"grupo de alunos"' in x for x in q))
+        self.assertTrue(any('"formandos"' in x for x in q))

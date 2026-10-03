@@ -615,7 +615,13 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
               '"extensão" "alunos"', '"workshop" "alunos"', '"caderno de resumos"',
               '"anais" "autores"', '"ebook" "alunos"', '"e-book" "alunas"',
               '"semana acadêmica"', '"jornada" "graduanda"')
-    consultas = [f'"{termo}" Nutrição {sinal} {ano}'
+    # Consultas menos restritas antecipam documentos com autores, sem exigir
+    # que a página use a razão social ou a palavra exata "formandos".
+    curto = limpar_espacos(alias or instituicao)
+    prioritarias = [f'{curto} Nutrição {ano} {sinal}'
+                   for ano in (2025, 2026)
+                   for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
+    consultas = prioritarias + [f'"{termo}" Nutrição {sinal} {ano}'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
         consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano}'
