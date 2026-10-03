@@ -1,4 +1,4 @@
-"""Reteste corrigido do lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
+"""Reteste sem exclusões de pronto/modelo; corrigido do lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
 import json,os,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -54,12 +54,14 @@ if rotulo:
 repo=Observador(); s.PAUSA_ENTRE_BUSCAS=0; resultados=[]
 def buscar(q,max_results):
     antes=time.monotonic()
-    r=executar(lambda:s.buscar_web(q,max_results),25)
+    r=executar(lambda:s.buscar_web(q,min(max_results,4)),25)
     consultas_feitas.append(q)
     print('BUSCA LOTE REAL',json.dumps({'consulta':q,'segundos':round(time.monotonic()-antes,1),'resultados':r},ensure_ascii=False),flush=True)
     return r
 def fonte(url,inst,alias):
-    try: return executar(lambda:f.carregar_fonte(url,inst,alias),20)
+    try:
+        registros,links=executar(lambda:f.carregar_fonte(url,inst,alias),20)
+        return registros,links[:2]
     except Exception as e:
         fontes_falhas.append({'fonte':url,'erro':str(e)[:160]}); raise
 for item in itens:

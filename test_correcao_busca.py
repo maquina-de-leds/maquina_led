@@ -358,8 +358,8 @@ class RepositorioXHTMLTests(unittest.TestCase):
 class DescobertaRepositorioTests(unittest.TestCase):
     def test_prioriza_autores_sem_prender_razao_social(self):
         q=s.consultas_leads("Universidade Federal de Santa Catarina","UFSC")
-        self.assertEqual(q[0],'UFSC Nutrição 2025 TCC repositório -"pronto" -"modelo"')
-        self.assertIn('UFSC Nutrição 2026 TCC repositório -"pronto" -"modelo"',q)
+        self.assertEqual(q[0],'UFSC Nutrição 2025 TCC repositório')
+        self.assertIn('UFSC Nutrição 2026 TCC repositório',q)
         self.assertTrue(any('"grupo de alunos"' in x for x in q))
         self.assertTrue(any('"formandos"' in x for x in q))
 
@@ -375,3 +375,18 @@ class RotulosMenuTests(unittest.TestCase):
     def test_rotulos_reais_de_menu_nao_sao_alunos(self):
         for rotulo in ['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Horários de Disciplinas','Residência Multiprofissional']:
             with self.subTest(rotulo=rotulo): self.assertIsNone(f.pessoa(rotulo))
+
+class TrabalhoProntoTests(unittest.TestCase):
+    def test_entrega_de_trabalho_pronto_continua_sendo_lida(self):
+        repo=Repo(); lidas=[]
+        resultado={'href':'https://publicacao.example/entrega','title':'Trabalho pronto: entrega de TCC de Nutrição 2026','body':'A aluna Ana Silva entregou seu trabalho pronto de Nutrição em 2026.'}
+        def fonte(url,inst,alias):
+            lidas.append(url)
+            return [dict(nome='Ana Silva',ano=2026,periodo='2026',evidencia=resultado['body'],contexto_academico=resultado['body'])],[]
+        with patch.object(s,'consultas_leads',return_value=['entrega']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[resultado],source_fn=fonte)
+        self.assertIn(resultado['href'],lidas)
+    def test_buscas_nao_excluem_pronto_ou_modelo(self):
+        for consulta in s.consultas_leads('Universidade Teste','UT'):
+            self.assertNotIn('-"pronto"',consulta)
+            self.assertNotIn('-"modelo"',consulta)
