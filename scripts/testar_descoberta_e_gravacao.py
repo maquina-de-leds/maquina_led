@@ -42,6 +42,18 @@ def executar(fn,limite):
     signal.setitimer(signal.ITIMER_REAL,min(limite,restante))
     try: return fn()
     finally: signal.setitimer(signal.ITIMER_REAL,0)
+# Caso controlado do jornal que bloqueou os retestes anteriores.
+url_jornal='https://www.votunews.com.br/recem-formada-em-nutricao-pela-unifev-julia-bernini-conquista-vaga-em-especializacao-na-unesp/'
+try:
+    try: registros,_=executar(lambda:f.carregar_fonte(url_jornal,None,None),20)
+    except Exception as erro_jornal:
+        acessos_indisponiveis.append({'fonte':url_jornal,'erro':str(erro_jornal)[:150]})
+        registros,_=executar(lambda:f.recuperar_fonte_na_busca(url_jornal,None,None,s.buscar_web),45)
+    if not registros: raise RuntimeError('Matéria do jornal não recuperada com evidência própria')
+    print('CASO CONTROLADO JORNAL',json.dumps(registros,ensure_ascii=False),flush=True)
+    registrar(registros,url_jornal)
+except Exception as erro_jornal:
+    pendentes.append({'fonte_controlada':url_jornal,'erro':str(erro_jornal)[:150]})
 for consulta in consultas:
     if time.monotonic()-inicio>=360: break
     consultas_feitas+=1
