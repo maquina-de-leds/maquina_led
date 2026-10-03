@@ -8,7 +8,7 @@ inicio=time.monotonic()
 signal.signal(signal.SIGALRM,lambda *a:(_ for _ in ()).throw(TimeoutError('Limite de três minutos')))
 signal.alarm(180)
 repo=s.SupabaseRepo.from_env()
-casos={'https://www.unirio.br/ccbs/nutricao/':['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Horários de Disciplinas','Residência Multiprofissional'],
+casos={'https://www.unirio.br/ccbs/nutricao/':['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Programa de Discipinas','Horários de Disciplinas','Residência Multiprofissional'],
        'https://www.passeidireto.com/arquivo/201106163/protocolo-tcc-para-imagem-corporal':['Aula Hortaliças']}
 revisoes=[]
 for url,nomes in casos.items():
@@ -21,7 +21,6 @@ for url,nomes in casos.items():
             atual=repo.client.table('leds').select('id,status,qualificado,nao_contatar').eq('id',row['id']).execute().data[0]
             assert atual['status']=='revisao' and not atual['qualificado'] and atual['nao_contatar']
             revisoes.append(dict(id=row['id'],nome=nome,antes=row,depois=atual,fonte=url))
-print('REGISTRO DIAGNOSTICO 966',json.dumps(repo.client.table('leds').select('id,nome,fonte_url,status,qualificado').eq('id',966).execute().data,ensure_ascii=False),flush=True)
 print('REVISOES CONFIRMADAS',json.dumps(revisoes,ensure_ascii=False),flush=True)
 # Releitura da fonte que produziu os cinco títulos, sem gravar candidatos.
 registros,_=f.carregar_fonte('https://www.unirio.br/ccbs/nutricao/',None,None)
