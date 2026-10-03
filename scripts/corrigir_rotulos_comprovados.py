@@ -1,4 +1,4 @@
-"""Revisão reversível de seis rótulos comprovados; nenhuma varredura ampla."""
+"""Revisão reversível dos rótulos comprovados da UNIRIO, UFSC e material; nenhuma varredura ampla."""
 import json,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
