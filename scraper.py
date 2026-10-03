@@ -300,6 +300,9 @@ class SupabaseRepo:
             return True
         return False
 
+    def contar_leads(self):
+        return self.client.table("leds").select("id", count="exact", head=True).execute().count
+
     def inserir_lead(self, dados):
         self.client.table("leds").insert(dados).execute()
 
@@ -523,7 +526,7 @@ def preparar_varredura_v58(repo):
 
 def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
     from ddgs import DDGS
-    with DDGS(timeout=20) as ddgs:
+    with DDGS(timeout=10) as ddgs:
         return list(ddgs.text(
             consulta,
             region="br-pt",
@@ -752,11 +755,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     if cp and cp.get("instituicao") == instituicao and cp.get("estado") == (uf or "BR") and cp.get("status") in {"processando", "erro"}:
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
         if cp.get("ultimo_erro") == "Busca externa indisponível":
-            inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1)
-        elif cp.get("status") == "processando" and not cp.get("ultimo_erro") and cp.get("total_pesquisas") == total:
+            inicio = (consultas.index(cp["consulta_atual"]) if cp.get("consulta_atual") in consultas
+                      else min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1))
+        elif cp.get("status") == "processando" and cp.get("ultimo_erro") in (None, "Janela com fontes pendentes; repetir ao finalizar") and cp.get("total_pesquisas") == total:
             # Interrupção do runner: continuar da próxima consulta ainda não concluída.
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total)
-        if cp.get('status')=='processando' and not cp.get('ultimo_erro') and total-int(cp.get('total_pesquisas') or 0) in (0,1) and cp.get('consulta_atual') in consultas:
+        if cp.get('status')=='processando' and cp.get('ultimo_erro') in (None, 'Janela com fontes pendentes; repetir ao finalizar') and total-int(cp.get('total_pesquisas') or 0) in (0,1) and cp.get('consulta_atual') in consultas:
             inicio=consultas.index(cp['consulta_atual'])
     print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
@@ -764,7 +768,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     encontrados_local = int(cp.get("leads_encontrados") or 0) if inicio else 0
     salvos_checkpoint = int(cp.get("leads_salvos") or 0) if inicio else 0
     fontes_vistas = set()
-    falhas_fontes = 0
+    falhas_fontes = int(bool(inicio and cp and cp.get("ultimo_erro") == "Janela com fontes pendentes; repetir ao finalizar"))
     falhas_busca_seguidas = 0
     fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
     for idx in range(inicio, fim):
@@ -866,8 +870,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     novos = stats["leads_salvos"]-salvos_antes
     if fim<total:
         if falhas_fontes:
-            checkpoint_captacao(repo,item,"erro",0,total,erro="Fontes pendentes; repetir varredura",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
-            repo.atualizar_instituicao(iid,status="erro")
+            checkpoint_captacao(repo,item,"processando",fim,total,consulta=consultas[fim],erro="Janela com fontes pendentes; repetir ao finalizar",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
         stats["instituicoes_processadas"]+=1
         print(f"   JANELA LIMITADA: {fim}/{total}; faculdade ainda não concluída; novos: {novos}",flush=True)
         return True
@@ -924,10 +927,14 @@ def executar():
         resumo()
         raise SystemExit(1)
 
+    try:
+        print(f"📊 Total de cadastros no Supabase antes do ciclo: {repo.contar_leads()}", flush=True)
+    except Exception as exc:
+        print(f"⚠️ Contagem do banco indisponível: {type(exc).__name__}", flush=True)
     fila = repo.fila_nacional()
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
     for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
-        if not processar_instituicao(repo, item, continuar_falhas=True):
+        if not processar_instituicao(repo, item, continuar_falhas=True, limite_consultas=6):
             resumo()
             raise SystemExit(2)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:

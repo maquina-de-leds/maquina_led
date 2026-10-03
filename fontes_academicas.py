@@ -111,6 +111,8 @@ def pessoa(text):
     n = norm(text)
     if re.search(r'\b(?:acessos|rapidos|candidaturas|deferidas|classificacao|homologada|pardos|indigenas|aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliação|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
+    # Nomes de instituições ou lugares não são nomes de alunos.
+    if n in {"sao luis", "sao paulo", "rio de janeiro", "belo horizonte"}: return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
     if not all(re.fullmatch(r"[A-Za-zÀ-ÿ'’-]+", w) for w in words): return None

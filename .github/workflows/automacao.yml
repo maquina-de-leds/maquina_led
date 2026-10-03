@@ -3,7 +3,7 @@ name: Automacao Maquina de Leads
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '*/30 * * * *'
   push:
     branches: [main]
     paths: ['.github/workflows/automacao.yml']
