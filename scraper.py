@@ -594,6 +594,17 @@ def alias_instituicao(item):
     return alias if 2 <= len(alias) <= 30 else ('Unopar' if re.search(r'\bunopar\b',normalizar(item.get('instituicao'))) else None)
 
 
+def consultas_documentos_alunos(instituicao, alias=None):
+    """Fontes complementares; curso e período são lidos na evidência encontrada."""
+    termo = limpar_espacos(alias or instituicao)
+    sinais = ('relação de concluintes', 'outorga de grau nomes',
+              'calendário defesas autores', 'filetype:pdf alunos',
+              'projeto integrador alunas autores', 'liga acadêmica nova gestão integrantes',
+              'centro acadêmico diretoria', 'juramentista oradora formanda',
+              'boletim de serviços concluintes', 'aptos a colar grau')
+    return [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais]
+
+
 def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     # Mesma estratégia para toda IES/município; o nome e a sigla são alternativos.
     termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
@@ -621,13 +632,13 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     prioritarias = [f'{curto} Nutrição {ano} {sinal}'
                    for ano in (2025, 2026)
                    for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
-    consultas = prioritarias + [f'"{termo}" Nutrição {sinal} {ano}'
+    consultas = prioritarias + consultas_documentos_alunos(instituicao, alias) + [f'"{termo}" Nutrição {sinal} {ano}'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     if cidade and normalizar(cidade) != "nao identificado":
         consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano}'
                       for ano in (2025,2026)]
     consultas += [f'site:linkedin.com/in "{instituicao}" Nutrição {ano}' for ano in (2025,2026)]
-    return consultas
+    return list(dict.fromkeys(consultas))
 
 
 def formatar_nome_pessoa(nome):
