@@ -586,9 +586,12 @@ def alias_instituicao(item):
     fonte = str(item.get("fonte_validacao") or "")
     m = re.search(r"(?:^|\|)\s*SIGLA=([^|]+)", fonte, flags=re.I)
     if not m:
-        return None
+        nome=normalizar(item.get('instituicao'))
+        return 'Unopar' if re.search(r'\bunopar\b',nome) else None
     alias = limpar_espacos(m.group(1))
-    return alias if 2 <= len(alias) <= 30 else None
+    if 'joinville' in normalizar(item.get('instituicao')):
+        alias=re.sub(r'\bjoinvile\b','Joinville',alias,flags=re.I)
+    return alias if 2 <= len(alias) <= 30 else ('Unopar' if re.search(r'\bunopar\b',normalizar(item.get('instituicao'))) else None)
 
 
 def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
@@ -734,7 +737,7 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
 
 
 def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False, limite_consultas=None):
-    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca, acesso_reservado_maquina2
+    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca, acesso_reservado_maquina2, FASE
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
@@ -752,7 +755,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         elif cp.get("status") == "processando" and not cp.get("ultimo_erro") and cp.get("total_pesquisas") == total:
             # Interrupção do runner: continuar da próxima consulta ainda não concluída.
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total)
-        if cp.get('status')=='processando' and not cp.get('ultimo_erro') and cp.get('consulta_atual') in consultas:
+        if cp.get('status')=='processando' and not cp.get('ultimo_erro') and total-int(cp.get('total_pesquisas') or 0) in (0,1) and cp.get('consulta_atual') in consultas:
             inicio=consultas.index(cp['consulta_atual'])
     print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
@@ -812,10 +815,11 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             host=(urlparse(str(resultado.get("href") or resultado.get("url") or "")).hostname or "").lower()
             hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
             host_institucional=host in hosts_conhecidos or any(t and t.replace(' ','') in host.split('.') for t in termos)
-            if 'nutricao' in texto or host_institucional or not texto.strip() or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos):
+            contexto_academico=bool(re.search(FASE+r'|projetos aprovados|iniciacao cientifica',texto)) or bool(re.search(r'\.pdf(?:\?|$)',str(resultado.get('href') or resultado.get('url') or '')))
+            if host_institucional or not texto.strip() or (contexto_academico and ('nutricao' in texto or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos))):
                 resultados_relacionados.append(resultado)
             else:
-                print("      RESULTADO SEM VÍNCULO INSTITUCIONAL:",resultado.get("href") or resultado.get("url"),flush=True)
+                print("      RESULTADO SEM CONTEXTO ACADÊMICO RELEVANTE:",resultado.get("href") or resultado.get("url"),flush=True)
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
         for url, depth in fila:
             if url in fontes_vistas or not url_permitida(url): continue

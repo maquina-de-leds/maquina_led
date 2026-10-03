@@ -1,4 +1,4 @@
-"""Lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
+"""Reteste corrigido do lote real limitado de Santa Catarina; conserva a fila nacional e retoma consultas pendentes."""
 import json,os,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -58,12 +58,13 @@ for item in itens:
     try:
         ok=s.processar_instituicao(repo,item,search_fn=buscar,source_fn=fonte,continuar_falhas=True,limite_consultas=2)
         depois=real.controle_get(etapa) or {}
-        retomada=bool(antes.get('status')=='processando' and not antes.get('ultimo_erro') and antes.get('consulta_atual'))
+        delta_criterios=int(depois.get('total_pesquisas') or 0)-int(antes.get('total_pesquisas') or 0)
+        retomada=bool(antes.get('status')=='processando' and not antes.get('ultimo_erro') and antes.get('consulta_atual') and delta_criterios in (0,1))
         if retomada and consultas_feitas[q0:]:
             assert consultas_feitas[q0]==antes['consulta_atual'], 'Retomada não começou na consulta persistida'
         assert depois.get('status')!='concluido' or depois.get('indice_pesquisa')==depois.get('total_pesquisas'), 'Faculdade concluída com pesquisa incompleta'
         if not ok or depois.get('status')=='erro': problemas.append({'faculdade':item['instituicao'],'erro':depois.get('ultimo_erro')})
-        resultados.append({'faculdade':item['instituicao'],'checkpoint_real':depois,'retomada_confirmada':retomada,'nomes_unicos_encontrados':sorted(set(repo.candidatos[c0:])),'novos_confirmados':repo.novos[n0:],'existentes_confirmados':sorted(set(repo.existentes[d0:])),'consultas_realizadas':consultas_feitas[q0:]})
+        resultados.append({'faculdade':item['instituicao'],'checkpoint_real':depois,'retomada_confirmada':retomada,'novos_criterios_reabriram_pesquisa':delta_criterios>1,'nomes_unicos_encontrados':sorted(set(repo.candidatos[c0:])),'novos_confirmados':repo.novos[n0:],'existentes_confirmados':sorted(set(repo.existentes[d0:])),'consultas_realizadas':consultas_feitas[q0:]})
     except Exception as e:
         problemas.append({'faculdade':item['instituicao'],'erro':str(e)[:180],'checkpoint_preservado':real.controle_get(etapa)})
 print('RESULTADO LOTE ESTADUAL',json.dumps({'uf':uf,'segundos':round(time.monotonic()-inicio,1),'faculdades':resultados,'novos_confirmados':repo.novos,'existentes_confirmados':sorted(set(repo.existentes)),'nomes_unicos_encontrados':sorted(set(repo.candidatos)),'fontes_inacessiveis':fontes_falhas,'pendencias':problemas,'agendamento_ativado':False},ensure_ascii=False),flush=True)

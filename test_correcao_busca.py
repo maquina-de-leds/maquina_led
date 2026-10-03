@@ -6,6 +6,35 @@ from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
     @patch.object(s.time,'sleep')
+    def test_catalogo_generico_de_curso_nao_trava_captura(self,sleep):
+        repo=Repo(); fonte=Mock(side_effect=RuntimeError('403'))
+        r={'href':'https://carreiras.stoodi.com.br/cursos/nutricao-257/','title':'Curso de Nutrição','body':'Conheça faculdades e mensalidades de Nutrição.'}
+        with patch.object(s,'consultas_leads',return_value=['a','b']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[r],source_fn=fonte,limite_consultas=1)
+        fonte.assert_not_called()
+        self.assertEqual(repo.cp['status'],'processando')
+        self.assertIsNone(repo.cp['ultimo_erro'])
+
+    def test_alias_joinville_corrige_grafia_apenas_na_consulta(self):
+        item={'instituicao':'Católica de Santa Catarina em Joinville','fonte_validacao':'SIGLA=Católica em Joinvile'}
+        self.assertEqual(s.alias_instituicao(item),'Católica em Joinville')
+        self.assertEqual(item['fonte_validacao'],'SIGLA=Católica em Joinvile')
+
+    def test_alias_unopar_quando_nome_longo_nao_tem_sigla(self):
+        self.assertEqual(s.alias_instituicao({'instituicao':'Centro Universitário Anhanguera Pitágoras Unopar de Campo Grande'}),'Unopar')
+        self.assertEqual(s.alias_instituicao({'instituicao':'Centro Universitário Unopar','fonte_validacao':'SIGLA= '}),'Unopar')
+        self.assertIsNone(s.alias_instituicao({'instituicao':'Universidade Teste'}))
+
+    @patch.object(s.time,'sleep')
+    def test_novos_criterios_anteriores_ao_checkpoint_nao_sao_pulados(self,sleep):
+        repo=Repo(); chamadas=[]
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[],limite_consultas=1)
+        with patch.object(s,'consultas_leads',return_value=['a','novo1','b','novo2','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [],limite_consultas=2)
+        self.assertEqual(chamadas,['a','novo1'])
+
+    @patch.object(s.time,'sleep')
     def test_janela_curta_retoma_e_nao_conclui_faculdade(self,sleep):
         repo=Repo(); chamadas=[]
         def busca(q,*a): chamadas.append(q); return []
