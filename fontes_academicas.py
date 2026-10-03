@@ -18,6 +18,11 @@ def norm(text):
     return re.sub(r'\s+', ' ', re.sub('[‐‑‒–—−]', '-', text)).strip()
 
 
+def acesso_reservado_maquina2(url):
+    host=(urlparse(url).hostname or '').lower()
+    return host=='instagram.com' or host.endswith('.instagram.com') or host=='instagr.am'
+
+
 def url_permitida(url):
     p = urlparse(url)
     host = (p.hostname or '').lower()
@@ -433,6 +438,7 @@ def ler_pdf(data, instituicao, alias=None):
 def _carregar_url(url, instituicao, alias=None):
     import requests
     if not url_permitida(url): return [], []
+    if acesso_reservado_maquina2(url): return [], []
     # Redirecionamentos são verificados antes de cada acesso.
     for _ in range(5):
         response=requests.get(url, timeout=(10,25), allow_redirects=False, stream=True,
@@ -441,6 +447,7 @@ def _carregar_url(url, instituicao, alias=None):
             target=urljoin(url,response.headers.get('Location',''))
             response.close()
             if not url_permitida(target): return [], []
+            if acesso_reservado_maquina2(target): return [], []
             destino=urlparse(target)
             if (destino.hostname or '').endswith('instagram.com') and destino.path.startswith('/accounts/login'):
                 raise PermissionError('Fonte pública redireciona para login do Instagram; acesso direto pendente')
@@ -503,6 +510,7 @@ def carregar_fonte(url, instituicao, alias=None):
 def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
     """Alternativa indexada da mesma matéria; requer data e nomes no resultado."""
     p=urlparse(url)
+    if acesso_reservado_maquina2(url): return [],[]
     titulo=p.path.rstrip('/').split('/')[-1]
     if not url_permitida(url) or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+){4,}',titulo):
         return [],[]
@@ -531,7 +539,7 @@ def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
     lidas=0
     for resultado in alternativas:
         origem=resultado.get('href') or resultado.get('url') or ''
-        if not url_permitida(origem) or urlparse(origem).hostname==p.hostname: continue
+        if not url_permitida(origem) or acesso_reservado_maquina2(origem) or urlparse(origem).hostname==p.hostname: continue
         # O buscador pode truncar o título; o slug identifica a matéria,
         # mas nunca fornece a data de qualificação do aluno.
         slug_alternativo=urlparse(origem).path.rstrip('/').split('/')[-1].replace('-',' ')

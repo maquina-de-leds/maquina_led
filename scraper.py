@@ -724,7 +724,7 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
 
 
 def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False):
-    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca
+    from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca, acesso_reservado_maquina2
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
@@ -806,6 +806,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
         for url, depth in fila:
             if url in fontes_vistas or not url_permitida(url): continue
+            if acesso_reservado_maquina2(url):
+                print(f"      ACESSO AO INSTAGRAM RESERVADO À MÁQUINA 2: {url}; evidências da busca já processadas",flush=True)
+                continue
             fontes_vistas.add(url)
             try:
                 stats["fontes_visitadas"] += 1

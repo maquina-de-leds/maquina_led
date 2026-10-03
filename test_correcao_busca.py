@@ -11,7 +11,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
         requests=Mock(); requests.get.return_value=response
         with patch.dict('sys.modules',{'requests':requests}):
             with self.assertRaisesRegex(RuntimeError,'429'):
-                f._carregar_url('https://www.instagram.com/nutriformandos/',None)
+                f._carregar_url('https://example.org/fonte',None)
         self.assertEqual(requests.get.call_count,1)
         response.close.assert_called_once()
 
@@ -19,10 +19,27 @@ class CorrecaoBuscaTests(unittest.TestCase):
         response=Mock(status_code=302,headers={'Location':'https://www.instagram.com/accounts/login/?next=perfil'})
         requests=Mock(); requests.get.return_value=response
         with patch.dict('sys.modules',{'requests':requests}):
-            with self.assertRaises(PermissionError):
-                f._carregar_url('https://www.instagram.com/nutriformandos/',None)
+            self.assertEqual(f._carregar_url('https://example.org/fonte',None),([],[]))
         self.assertEqual(requests.get.call_count,1)
         response.close.assert_called_once()
+
+    def test_maquina1_nao_faz_requisicao_ao_instagram(self):
+        requests=Mock()
+        with patch.dict('sys.modules',{'requests':requests}):
+            self.assertEqual(f._carregar_url('https://www.instagram.com/nutriformandos/',None),([],[]))
+        requests.get.assert_not_called()
+
+    @patch.object(s.time,'sleep')
+    def test_maquina1_salva_evidencia_indexada_sem_acessar_perfil(self,sleep):
+        repo=Repo()
+        resultado={'href':'https://www.instagram.com/ana.nutricao/','title':'Ana Silva','body':'Graduanda em Nutrição, formando em 2026.'}
+        fonte=Mock()
+        with patch.object(s,'consultas_leads',return_value=['teste']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[resultado],source_fn=fonte)
+        fonte.assert_not_called()
+        self.assertEqual([x['nome'] for x in repo.saved],['Ana Silva'])
+        self.assertEqual(repo.cp['status'],'concluido')
+        self.assertIsNone(repo.saved[0]['instagram'])
 
     def test_alternativa_tem_data_propria_e_preserva_url(self):
         u='https://jornal.org/noticia/recem-formada-em-nutricao-conquista-vaga'

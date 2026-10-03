@@ -67,6 +67,9 @@ for consulta in consultas:
             registros=f.extrair_resultado_busca(resultado,ies,'Mackenzie')
             registrar(registros,url)
             if url in fontes or not f.url_permitida(url): continue
+            if f.acesso_reservado_maquina2(url):
+                adiadas.append({'fonte':url,'motivo':'Acesso ao Instagram pertence à Máquina 2; evidência da busca já processada'})
+                continue
             resumo=f.norm(str(resultado.get('title') or '')+' '+str(resultado.get('body') or ''))
             if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',f.norm(str(resultado.get('title') or ''))):
                 adiadas.append({'fonte':url,'motivo':'Notícia de falecimento; pessoa fora do público de captura'})
