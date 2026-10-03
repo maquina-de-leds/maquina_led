@@ -37,11 +37,11 @@ def registrar(registros,fonte):
   assert repo.lead_existe(r['nome'],ies)
   nomes[chave]=r
   (novos if novo else existentes).append(r['nome'])
-consultas=s.consultas_documentos_alunos('Universidade Presbiteriana Mackenzie','Mackenzie')[:4]
+consultas=s.consultas_documentos_alunos('Universidade Presbiteriana Mackenzie','Mackenzie')[:4]+['site:mackenzie.br "mostra-de-tcc"']
 for consulta in consultas:
  comeco=time.monotonic();antes=len(nomes)
  try:
-  resultados=executar(lambda:s.buscar_web(consulta,max_results=5),20)
+  resultados=executar(lambda:s.buscar_web(consulta,max_results=5),45)
   if resultados is None:raise RuntimeError('Buscador indisponível')
   print('BUSCA DOCUMENTAL',json.dumps(dict(consulta=consulta,resultados=resultados),ensure_ascii=False),flush=True)
   for resultado in resultados:

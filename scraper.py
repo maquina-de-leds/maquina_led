@@ -534,51 +534,29 @@ def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca robusta para o runner do GitHub.
-
-    Testes reais mostraram que forçar Brave/Bing podia retornar zero para a
-    mesma consulta que o metabusca backend='auto' encontrava corretamente.
-    Também repetimos uma vez quando a resposta vem vazia, porque o índice pode
-    oscilar entre chamadas consecutivas no mesmo runner.
-    """
-    ultimo_erro = None
-
-    for tentativa in range(1, 3):
+    """Automático com repetição e Bing alternativo, comprovados no runner."""
+    erros=[]; respondeu_vazio=False
+    for indice,backend in enumerate(('auto','auto','bing')):
         try:
-            try:
-                resultados = fetch_fn(consulta, "auto", max_results)
-            except TypeError:
-                resultados = fetch_fn(consulta, max_results)
-
-            resultados = list(resultados or [])
-            if resultados:
-                return resultados
-
-            if tentativa < 2:
-                time.sleep(4.0)
-                continue
-
-            if ultimo_erro is not None:
-                return None
-            return []
-
+            try: resultados=fetch_fn(consulta,backend,max_results)
+            except TypeError: resultados=fetch_fn(consulta,max_results)
+            resultados=list(resultados or [])
+            print(f"      BUSCADOR: {backend} | resultados: {len(resultados)}",flush=True)
+            if resultados: return resultados
+            respondeu_vazio=True
         except Exception as exc:
-            ultimo_erro = exc
-            msg = str(exc)
-
-            if tentativa < 2:
-                time.sleep(4.0)
-                continue
-
-            if "No results found" in msg:
-                try:
-                    saude = fetch_fn("Brasil", "auto", 1)
-                    if list(saude or []):
-                        return []
-                except Exception:
-                    pass
-
-    print(f"      ⚠️ Busca externa indisponível: {ultimo_erro}", flush=True)
+            erros.append((backend,exc))
+            print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
+        if indice==0: time.sleep(4.0)
+    if respondeu_vazio and not erros: return []
+    # 'No results found' sozinho não comprova que o mecanismo está disponível.
+    for backend in ('auto','bing'):
+        try:
+            if list(fetch_fn('Brasil',backend,1) or []):
+                print(f"      CONTROLE BUSCADOR: {backend} respondeu; consulta sem resultados",flush=True)
+                return []
+        except Exception: pass
+    print("      ⚠️ Busca externa indisponível após controle de funcionamento",flush=True)
     return None
 
 
