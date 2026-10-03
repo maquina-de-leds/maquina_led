@@ -46,7 +46,8 @@ class Observador:
         return r
 # Correção reversível do único rótulo comprovadamente salvo como pessoa.
 erro_url="https://www.passeidireto.com/arquivo/201106163/protocolo-tcc-para-imagem-corporal"
-rotulo=executar(lambda:real.lead_da_fonte("Aula Hortaliças",erro_url),20)
+rotulos=executar(lambda:real.client.table("leds").select("id,nome,qualificado,nao_contatar,status").eq("nome","Aula Hortaliças").eq("fonte_url",erro_url).limit(1).execute(),20).data or []
+rotulo=rotulos[0] if rotulos else None
 if rotulo:
     executar(lambda:real.client.table('leds').update(dict(qualificado=False,nao_contatar=True,status="revisao")).eq('id',rotulo['id']).eq('nome','Aula Hortaliças').eq('fonte_url',erro_url).execute(),20)
     print("ROTULO EM REVISAO REVERSIVEL",json.dumps(dict(id=rotulo['id'],nome=rotulo['nome'],estado_anterior={k:rotulo.get(k) for k in ['qualificado','nao_contatar','status']}),ensure_ascii=False),flush=True)
