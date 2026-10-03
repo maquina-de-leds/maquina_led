@@ -1,4 +1,4 @@
-"""Edição real: descobre artigos pelo índice, sem nomes pré-carregados."""
+"""Edição real: descobre artigos pelo índice OJS preservado, sem nomes pré-carregados."""
 import json,runpy,signal,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))

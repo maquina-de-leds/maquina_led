@@ -6,6 +6,9 @@ class OjsLinksTests(unittest.TestCase):
         r,l=ler_html(h,'https://revista.edu/issue/view/1','Universidade Teste')
         self.assertEqual(r,[])
         self.assertEqual(l,['https://revista.edu/article/view/1'])
+    def test_layout_has_sidebar_preserva_conteudo_principal(self):
+        h='<div class="pkp_structure_content has_sidebar"><h1>Jornada 2025</h1><div class="obj_article_summary"><a href="/article/view/1">Consumo alimentar</a></div><div class="sidebar"><a href="/article/view/2">Nutrição no menu</a></div></div>'
+        self.assertEqual(ler_html(h,'https://revista.edu/issue/view/1','Universidade Teste')[1],['https://revista.edu/article/view/1'])
     def test_edicao_antiga_nao_abre_artigos_pela_data_do_rodape(self):
         h='<h1>Jornada 2024</h1><div class="obj_article_summary"><a href="/article/view/1">Consumo alimentar</a></div><footer>2026</footer>'
         self.assertEqual(ler_html(h,'https://revista.edu/issue/view/1','Universidade Teste')[1],[])

@@ -387,6 +387,9 @@ def ler_html(html, url, instituicao, alias=None):
     for node in list(raiz.iter()):
         if not isinstance(node.tag,str): continue
         region = ' '.join(node.get(k) or '' for k in ('class','id','role')).lower()
+        # OJS usa has_sidebar no contêiner que também contém o artigo.
+        # É uma indicação de layout, não o próprio menu lateral.
+        region = re.sub(r'\bhas_sidebar\b','',region)
         navigation = re.search(r'(?:^|[\s_-])(?:menu|navbar|sidebar|cookie|navigation|rodape)(?:$|[\s_-])',region)
         if node.tag in {'script','style','nav','footer'} or (navigation and not node.xpath('.//article|.//main')):
             if node.getparent() is not None: node.drop_tree()
