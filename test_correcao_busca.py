@@ -370,3 +370,8 @@ class ColecaoRepositorioTests(unittest.TestCase):
         pagina='<title>TCC Nutrição</title><a href="/handle/123456789/99">menu</a><div class="artifact-description"><div class="artifact-title"><a href="/handle/123456789/123">Pesquisa</a></div><span class="date">2026</span></div><div class="artifact-description"><div class="artifact-title"><a href="/handle/123456789/124">Antigo</a></div><span class="date">2024</span></div>'
         _,links=f.ler_html(pagina,'https://repositorio.ufsc.br/handle/123456789/7441','Universidade Federal de Santa Catarina','UFSC')
         self.assertEqual(links,['https://repositorio.ufsc.br/handle/123456789/123'])
+
+class RotulosMenuTests(unittest.TestCase):
+    def test_rotulos_reais_de_menu_nao_sao_alunos(self):
+        for rotulo in ['Mais Notícias','Matriz Curricular','Programa de Disciplinas','Horários de Disciplinas','Residência Multiprofissional']:
+            with self.subTest(rotulo=rotulo): self.assertIsNone(f.pessoa(rotulo))
