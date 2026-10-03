@@ -241,7 +241,8 @@ class SupabaseRepo:
             item["_ultimo_checkpoint"] = cp.get("atualizado_em") or "" if cp else ""
             item["_status_checkpoint"] = cp.get("status") if cp else "pendente"
             fila.append(item)
-        ordem={"pendente":0,"processando":1,"erro":2}
+        # Uma execução interrompida deve retomar antes de abrir outra faculdade.
+        ordem={"processando":0,"pendente":1,"erro":2}
         return sorted(fila,key=lambda x:(ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
 
     def contar_pendentes_uf(self, uf):

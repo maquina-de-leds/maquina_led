@@ -21,6 +21,8 @@ class CorrecaoBuscaTests(unittest.TestCase):
         individual.assert_not_called()
         self.assertEqual([x['instituicao'] for x in fila],['Faculdade C','Faculdade B'])
         self.assertEqual(client.table.call_count,2)
+        cps[1]['status']='processando'
+        self.assertEqual([x['instituicao'] for x in repo.fila_nacional()],['Faculdade B','Faculdade C'])
 
     def test_limite_429_nao_repete_requisicao(self):
         response=Mock(status_code=429)
