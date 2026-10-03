@@ -5,6 +5,23 @@ import scraper as s
 from test_scraper import Repo
 
 class CorrecaoBuscaTests(unittest.TestCase):
+    def test_fila_nacional_le_checkpoints_em_lote_e_preserva_ordem(self):
+        from types import SimpleNamespace
+        dados=[{'id':1,'instituicao':'Faculdade A','estado':'SP'},
+               {'id':2,'instituicao':'Faculdade B','estado':'CE'},
+               {'id':3,'instituicao':'Faculdade C','estado':'SC'}]
+        itens=s.agrupar_faculdades(dados)
+        cps=[{'etapa':s.etapa_captacao_item(itens[0]),'status':'concluido'},
+             {'etapa':s.etapa_captacao_item(itens[1]),'status':'erro'}]
+        client=Mock(); client.table.return_value.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=dados)
+        client.table.return_value.select.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=cps)
+        repo=s.SupabaseRepo(client)
+        with patch.object(repo,'controle_get') as individual:
+            fila=repo.fila_nacional()
+        individual.assert_not_called()
+        self.assertEqual([x['instituicao'] for x in fila],['Faculdade C','Faculdade B'])
+        self.assertEqual(client.table.call_count,2)
+
     def test_limite_429_nao_repete_requisicao(self):
         response=Mock(status_code=429)
         response.raise_for_status.side_effect=RuntimeError('429')

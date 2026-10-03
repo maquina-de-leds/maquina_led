@@ -223,9 +223,18 @@ class SupabaseRepo:
             if len(lote) < 1000:
                 break
             offset += 1000
+        checkpoints={}
+        offset=0
+        while True:
+            r=(self.client.table("controle_busca").select("etapa,status,atualizado_em")
+               .order("id").range(offset,offset+999).execute())
+            lote=r.data or []
+            checkpoints.update({x["etapa"]:x for x in lote})
+            if len(lote)<1000: break
+            offset+=1000
         fila = []
         for item in agrupar_faculdades(dados):
-            cp = self.controle_get(etapa_captacao_item(item))
+            cp = checkpoints.get(etapa_captacao_item(item))
             if cp and cp.get("status") == "concluido":
                 continue
             item["tentativa_descoberta"] = int(item.get("tentativa_descoberta") or 0) if cp else 0

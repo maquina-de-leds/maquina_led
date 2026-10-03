@@ -1,4 +1,4 @@
-name: Validar captura atual sem gravar
+name: Piloto pre Brasil fila e duas faculdades
 on:
   workflow_dispatch:
   push:
@@ -8,6 +8,9 @@ on:
       - '.github/workflows/validar_captacao_atual.yml'
 permissions:
   contents: read
+concurrency:
+  group: maquina-1-fila
+  cancel-in-progress: false
 jobs:
   validar:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
       - run: pip install requests supabase ddgs pypdf lxml
       - name: Testes de qualificação
         run: python -m unittest discover -p 'test_*.py' -v
-      - name: Conferir fila e fontes reais sem escrever dados
+      - name: Conferir fila e capturar nas duas faculdades
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
