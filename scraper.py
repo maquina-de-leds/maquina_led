@@ -549,6 +549,9 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
             print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
         if indice==0: time.sleep(4.0)
     if respondeu_vazio and not erros: return []
+    if erros and not respondeu_vazio and not any('no results' in str(e).lower() for _,e in erros):
+        print("      ⚠️ Busca externa indisponível em automático e Bing",flush=True)
+        return None
     # 'No results found' sozinho não comprova que o mecanismo está disponível.
     for backend in ('auto','bing'):
         try:

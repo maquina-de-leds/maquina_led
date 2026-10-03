@@ -17,7 +17,7 @@ class BuscarWebV58Tests(unittest.TestCase):
         resultado = s.buscar_web("Nutrição turma 2026", max_results=5, fetch_fn=fetch)
 
         self.assertEqual(resultado, [])
-        self.assertEqual(chamadas, [("Nutrição turma 2026", "auto", 5)] * 2)
+        self.assertEqual(chamadas, [("Nutrição turma 2026", "auto", 5)] * 2 + [("Nutrição turma 2026", "bing", 5)])
         sleep.assert_called_once_with(4.0)
 
     @patch.object(s.time, "sleep")
@@ -79,6 +79,7 @@ class BuscarWebV58Tests(unittest.TestCase):
         self.assertEqual(chamadas, [
             ("consulta sem ocorrências", "auto", 3),
             ("consulta sem ocorrências", "auto", 3),
+            ("consulta sem ocorrências", "bing", 3),
             ("Brasil", "auto", 1),
         ])
         sleep.assert_called_once_with(4.0)
@@ -94,8 +95,7 @@ class BuscarWebV58Tests(unittest.TestCase):
         resultado = s.buscar_web("Nutrição 2026", fetch_fn=fetch)
 
         self.assertIsNone(resultado)
-        self.assertEqual(len(chamadas), 2)
-        self.assertTrue(all(chamada[1] == "auto" for chamada in chamadas))
+        self.assertEqual([c[1] for c in chamadas], ["auto", "auto", "bing"])
         sleep.assert_called_once_with(4.0)
 
 
