@@ -326,6 +326,18 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     ano,periodo=periodo_academico(texto)
     fase=re.search(r'\b([78])\s*(?:º|o)?\s*(?:periodo|semestre)\b',n)
     if ano not in ANOS and not fase: return []
+    # Capa de TCC indexada: o próprio trecho identifica ano e nome do autor.
+    # O endereço só identifica o tipo de documento, nunca fornece seu ano.
+    url=str(resultado.get('href') or resultado.get('url') or '')
+    capa_tcc=bool(re.search(r'\.pdf(?:\?|$)',url,re.I) and re.search(r'tcc|trabalho.de.conclus',url,re.I))
+    if capa_tcc and ano in ANOS and 'curso de nutricao' in n:
+        autor=re.search(r'\b202[56]\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ]+(?:\s+(?:[A-ZÀ-Ý][A-Za-zÀ-ÿ]+|de|da|do|dos|das)){1,8})\s*$',trecho)
+        nome_capa=pessoa(autor.group(1)) if autor else None
+        if nome_capa:
+            return [dict(nome=nome_capa,ano=ano,periodo=periodo,instagram=None,
+                         instituicao=instituicao if vinculada else None,
+                         evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | TCC: capa no resultado de busca | '+texto+' | Semestre pendente de confirmação',
+                         contexto_academico=texto)]
     # Lista explicitamente delimitada: alunos antes dos orientadores.
     lista=re.search(r'\bas alunas\s+(.+?)\s+e as professoras',trecho,re.I)
     if lista and 'curso de nutricao' in n and ano in ANOS:

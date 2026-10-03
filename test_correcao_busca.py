@@ -390,3 +390,13 @@ class TrabalhoProntoTests(unittest.TestCase):
         for consulta in s.consultas_leads('Universidade Teste','UT'):
             self.assertNotIn('-"pronto"',consulta)
             self.assertNotIn('-"modelo"',consulta)
+
+class CapaTCCIndiceTests(unittest.TestCase):
+    def test_capa_real_indexada_nome_ano_curso(self):
+        r={'title':'UNIVERSIDADE FEDERAL DE SANTA CATARINA CURSO DE NUTRIÇÃO','href':'https://repositorio.ufsc.br/bitstream/handle/123456789/270654/Ariane_Machado_TCC_2025_Final_08.12.25_assinado.pdf?sequence=1','body':'Terapias nutricionais que auxiliam na remissão das doenças inflamatórias intestinais: revisão de Umbrella. Florianópolis 2025 Ariane Machado'}
+        extraidos=f.extrair_resultado_busca(r,'Universidade Federal de Santa Catarina','UFSC')
+        self.assertEqual([x['nome'] for x in extraidos],['Ariane Machado'])
+        self.assertEqual(extraidos[0]['ano'],2025)
+    def test_ano_so_no_arquivo_nao_qualifica(self):
+        r={'title':'CURSO DE NUTRIÇÃO','href':'https://repositorio.ufsc.br/TCC_2025.pdf','body':'Florianópolis Ariane Machado'}
+        self.assertEqual(f.extrair_resultado_busca(r,'UFSC'),[])
