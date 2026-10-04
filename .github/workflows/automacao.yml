@@ -30,7 +30,7 @@ jobs:
         run: pip install requests supabase ddgs pypdf lxml
       - name: Verificar extracao e fila antes da captura
         run: python -m unittest discover -p 'test_*.py'
-      - name: Executar captura e conferir alternância da fila
+      - name: Executar captura com prazo e deduplicação em memória
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

@@ -51,6 +51,7 @@ stats = {
     "erros": 0,
     "fontes_visitadas": 0,
     "fontes_sem_nomes": 0,
+    "consultas_banco_evitadas": 0,
 }
 
 
@@ -127,6 +128,7 @@ def formatar_nome_instituicao(nome):
 class SupabaseRepo:
     def __init__(self, client):
         self.client = client
+        self._leads_confirmados = {}
 
     @classmethod
     def from_env(cls):
@@ -689,13 +691,22 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         stats["rejeitados"] += 1
         return False
     nome = formatar_nome_pessoa(nome)
-    existente_fonte=repo.lead_da_fonte(nome,url) if hasattr(repo,"lead_da_fonte") else None
+    cache=getattr(repo,"_leads_confirmados",None)
+    chave=(normalizar(nome),url,instituicao,instituicao_alias)
+    reutilizado=isinstance(cache,dict) and bool(url) and chave in cache
+    if reutilizado:
+        existente_fonte={"instituicao":cache[chave]}
+        stats["consultas_banco_evitadas"] += 1
+    else:
+        existente_fonte=repo.lead_da_fonte(nome,url) if hasattr(repo,"lead_da_fonte") else None
     existe=existente_fonte is not None or repo.lead_existe(nome,instituicao)
     instituicao_existente=existente_fonte.get("instituicao") if existente_fonte is not None else instituicao
     if not existe and instituicao_alias and hasattr(repo,"instituicao_de_lead_por_alias"):
         instituicao_existente = repo.instituicao_de_lead_por_alias(nome,instituicao_alias)
         existe=instituicao_existente is not None
     if existe:
+        if isinstance(cache,dict) and url:
+            cache[chave]=instituicao_existente
         if instagram and hasattr(repo,"completar_instagram"):
             if repo.completar_instagram(nome,instituicao_existente,instagram):
                 print(f"      Instagram completado pela fonte: {nome} | {instagram}",flush=True)
@@ -741,6 +752,9 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "fonte_validacao": "candidato_autoral_curso_a_validar" if candidato_indicio else "fonte_publica_validada_v58",
     }
     repo.inserir_lead(dados)
+    if isinstance(cache,dict) and url:
+        if len(cache)>=20000: cache.clear()
+        cache[chave]=instituicao
     stats["leads_salvos"] += 1
     print(f"      ✅ SALVO: {nome}" + (f" | {instagram}" if instagram else " | Instagram pendente"), flush=True)
     return True
@@ -1027,6 +1041,7 @@ def resumo():
         ("Leads candidatos encontrados", "leads_encontrados"),
         ("Novos leads salvos", "leads_salvos"),
         ("Duplicados ignorados", "duplicados"),
+        ("Reconsultas ao banco evitadas neste processo", "consultas_banco_evitadas"),
         ("Resultados rejeitados", "rejeitados"),
         ("Fontes visitadas", "fontes_visitadas"),
         ("Fontes sem nomes extraídos", "fontes_sem_nomes"),
