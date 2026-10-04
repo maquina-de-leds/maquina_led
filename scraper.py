@@ -871,7 +871,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         return retentar_fontes_pendentes(repo,item,cp,source_fn,limite_consultas or 6,prazo=prazo)
     if cp and cp.get("instituicao") == instituicao and cp.get("estado") == (uf or "BR") and cp.get("status") in {"processando", "erro"}:
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
-        if cp.get("ultimo_erro") == "Busca externa indisponível":
+        if cp.get("ultimo_erro") == "Busca externa indisponível" or str(cp.get("ultimo_erro") or "").startswith("Falha isolada na faculdade:"):
             inicio = (consultas.index(cp["consulta_atual"]) if cp.get("consulta_atual") in consultas
                       else min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1))
         elif cp.get("status") == "processando" and cp.get("ultimo_erro") in (None, "Janela encerrada; próxima consulta preservada", "Janela com fontes pendentes; repetir ao finalizar") and cp.get("total_pesquisas") == total:
@@ -1146,6 +1146,34 @@ def selecionar_janela(fila, limite):
     return selecionados[:limite]
 
 
+
+def registrar_falha_instituicao(repo, item, exc):
+    """Registra falha isolada sem apagar o progresso já salvo da faculdade."""
+    stats['erros'] += 1
+    stats['instituicoes_erro'] += 1
+    mensagem = f'{type(exc).__name__}: {str(exc)[:700]}'
+    print(f"FACULDADE COM FALHA: {item.get('instituicao') or item.get('id')} | {mensagem}; seguindo para a próxima", flush=True)
+    try:
+        repo.atualizar_instituicao(item['id'], status='erro')
+    except Exception as registro:
+        print(f'AVISO: falha ao registrar estado da faculdade: {type(registro).__name__}', flush=True)
+    try:
+        etapa = etapa_captacao_item(item)
+        anterior = repo.controle_get(etapa) or {}
+        repo.controle_salvar(etapa, {
+            'estado': item.get('estado'), 'cidade': item.get('cidade'),
+            'instituicao': item.get('instituicao'), 'status': 'erro',
+            'indice_pesquisa': anterior.get('indice_pesquisa', 0),
+            'total_pesquisas': anterior.get('total_pesquisas', 0),
+            'consulta_atual': anterior.get('consulta_atual'),
+            'leads_encontrados': anterior.get('leads_encontrados', 0),
+            'leads_salvos': anterior.get('leads_salvos', 0),
+            'ultimo_erro': 'Falha isolada na faculdade: ' + mensagem,
+        })
+    except Exception as registro:
+        print(f'AVISO: registro da falha indisponível: {type(registro).__name__}; progresso anterior preservado', flush=True)
+
+
 def executar():
     print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
@@ -1159,13 +1187,21 @@ def executar():
         resumo()
         raise SystemExit(1)
 
-    repo.isolar_erros_de_nome_comprovados()
+    try:
+        repo.isolar_erros_de_nome_comprovados()
+    except Exception as exc:
+        stats['erros'] += 1
+        print(f'AVISO: revisão de nomes adiada: {type(exc).__name__}; captura continua', flush=True)
     try:
         print(f"📊 Total de cadastros no Supabase antes do ciclo: {repo.contar_leads()}", flush=True)
     except Exception as exc:
         print(f"⚠️ Contagem do banco indisponível: {type(exc).__name__}", flush=True)
     fila = repo.fila_nacional()
-    recuperar_pendencias_registradas(repo,fila)
+    try:
+        recuperar_pendencias_registradas(repo,fila)
+    except Exception as exc:
+        stats['erros'] += 1
+        print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
     prazo=time.monotonic()+360
     falhas_instituicoes = 0
@@ -1173,9 +1209,13 @@ def executar():
         if time.monotonic() >= prazo:
             print("LIMITE DO CICLO: faculdades restantes preservadas na fila",flush=True)
             break
-        if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6, prazo=prazo):
+        try:
+            if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6, prazo=prazo):
+                falhas_instituicoes += 1
+                print("FACULDADE PENDENTE: ciclo continua nas demais; checkpoint preservado", flush=True)
+        except Exception as exc:
             falhas_instituicoes += 1
-            print("FACULDADE PENDENTE: ciclo continua nas demais; checkpoint preservado", flush=True)
+            registrar_falha_instituicao(repo, item, exc)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
         print("⏸️ A próxima execução retoma por faculdade.", flush=True)
 
@@ -1185,10 +1225,10 @@ def executar():
     except Exception as exc:
         print(f"AVISO: não foi possível conferir a próxima janela: {type(exc).__name__}",flush=True)
     resumo()
-    if falhas_instituicoes or stats["instituicoes_erro"]: raise SystemExit(2)
-    if stats["erros"]:
-        print(f"⚠️ CICLO COM PENDÊNCIAS EXTERNAS: {stats['erros']} ocorrências; checkpoints preservados; cobertura incompleta.", flush=True)
-    print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
+    if falhas_instituicoes or stats["instituicoes_erro"] or stats["erros"]:
+        print(f"⚠️ CICLO FINALIZADO COM PENDÊNCIAS: {falhas_instituicoes} faculdades com falha, {stats['erros']} ocorrências; checkpoints preservados; cobertura incompleta; próximo ciclo continua a fila.", flush=True)
+    else:
+        print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
 
 
 def preparar_lista():

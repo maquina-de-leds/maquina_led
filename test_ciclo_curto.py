@@ -39,11 +39,12 @@ class ResultadoCicloTests(unittest.TestCase):
         with patch.object(s.SupabaseRepo,'from_env',return_value=repo), patch.object(s,'garantir_fila_oficial',return_value=True), patch.object(s,'preparar_varredura_v58',return_value=True), patch.object(s,'processar_instituicao',return_value=True), patch.dict(s.stats,{'erros':2,'instituicoes_erro':0}):
             s.executar()
 
-    def test_busca_indisponivel_continua_sendo_falha(self):
+    def test_busca_indisponivel_e_aviso_sem_abortar_ciclo(self):
         from unittest.mock import Mock
         repo=Mock(); repo.fila_nacional.return_value=[{'id':1}]
         with patch.object(s.SupabaseRepo,'from_env',return_value=repo), patch.object(s,'garantir_fila_oficial',return_value=True), patch.object(s,'preparar_varredura_v58',return_value=True), patch.object(s,'processar_instituicao',return_value=False):
-            with self.assertRaises(SystemExit) as exc: s.executar()
-            self.assertEqual(exc.exception.code,2)
+            with patch('builtins.print') as imprimir: s.executar()
+            self.assertTrue(any('CICLO FINALIZADO COM PENDÊNCIAS' in str(c) for c in imprimir.call_args_list))
 
 if __name__=='__main__': unittest.main()
+

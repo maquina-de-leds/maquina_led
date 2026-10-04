@@ -14,7 +14,7 @@ class OperacaoNacionalTests(unittest.TestCase):
     def test_falha_nao_impede_segunda_faculdade(self):
         repo = Mock(); repo.fila_nacional.return_value = [{'id': 1}, {'id': 2}]
         with patch.object(s.SupabaseRepo, 'from_env', return_value=repo), patch.object(s, 'garantir_fila_oficial', return_value=True), patch.object(s, 'preparar_varredura_v58', return_value=True), patch.object(s, 'processar_instituicao', side_effect=[False, True]) as processar, patch.dict(s.stats, {k: 0 for k in s.stats}):
-            with self.assertRaises(SystemExit): s.executar()
+            s.executar()
             self.assertEqual(processar.call_count, 2)
 
     def test_host_instagram_falso_rejeitado(self):
@@ -52,3 +52,48 @@ class OperacaoNacionalTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): e.executar()
             self.assertEqual(processar.call_count,2)
             self.assertEqual(q.update.call_count,2)
+
+    def test_excecao_inesperada_nao_interrompe_outras_faculdades(self):
+        repo=Mock(); repo.fila_nacional.return_value=[{'id':1,'instituicao':'A'},{'id':2,'instituicao':'B'}]
+        repo.controle_get.return_value={'indice_pesquisa':9,'total_pesquisas':20,'leads_salvos':3,'leads_encontrados':4,'consulta_atual':'TCC'}
+        with patch.object(s.SupabaseRepo,'from_env',return_value=repo), patch.object(s,'garantir_fila_oficial',return_value=True), patch.object(s,'preparar_varredura_v58',return_value=True), patch.object(s,'processar_instituicao',side_effect=[ValueError('documento malformado'),True]) as processar, patch.dict(s.stats,{k:0 for k in s.stats}):
+            s.executar()
+            self.assertEqual(processar.call_count,2)
+        dados=repo.controle_salvar.call_args.args[1]
+        self.assertEqual(dados['indice_pesquisa'],9)
+        self.assertEqual(dados['leads_salvos'],3)
+        self.assertEqual(dados['status'],'erro')
+
+    def test_falha_no_registro_do_erro_nao_interrompe_proxima(self):
+        repo=Mock(); repo.fila_nacional.return_value=[{'id':1,'instituicao':'A'},{'id':2,'instituicao':'B'}]
+        repo.atualizar_instituicao.side_effect=ConnectionError('banco')
+        repo.controle_get.side_effect=ConnectionError('banco')
+        with patch.object(s.SupabaseRepo,'from_env',return_value=repo), patch.object(s,'garantir_fila_oficial',return_value=True), patch.object(s,'preparar_varredura_v58',return_value=True), patch.object(s,'processar_instituicao',side_effect=[ValueError('site'),True]) as processar, patch.dict(s.stats,{k:0 for k in s.stats}):
+            s.executar()
+            self.assertEqual(processar.call_count,2)
+
+    @patch.object(s.time,'sleep')
+    def test_fonte_com_erro_pula_para_proximo_site_e_salva(self, dormir):
+        from test_retomada_fontes import RepoPendencias
+        import fontes_academicas as f
+        repo=RepoPendencias()
+        resultados=[{'href':'https://example.org/erro','title':'Universidade Teste Nutrição TCC 2026'}, {'href':'https://example.org/ok','title':'Universidade Teste Nutrição TCC 2026'}]
+        registro={'nome':'Ana Silva','instituicao':'Universidade Teste','ano':2026,'periodo':'2026/1','evidencia':'Nutrição TCC 2026 Universidade Teste'}
+        fonte=Mock(side_effect=[ValueError('HTML inválido'),([registro],[])])
+        with patch.object(s,'consultas_leads',return_value=['TCC']), patch.object(f,'recuperar_fonte_na_busca',return_value=([],[])), patch.dict(s.stats,{k:0 for k in s.stats}):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:resultados,source_fn=fonte)
+        self.assertEqual(fonte.call_count,2)
+        self.assertEqual(repo.saved[0]['nome'],'Ana Silva')
+        self.assertIn('https://example.org/erro',repo.pendentes)
+
+    @patch.object(s.time,'sleep')
+    def test_falha_isolada_retoma_consulta_sem_reiniciar(self, dormir):
+        from test_scraper import Repo
+        repo=Repo()
+        repo.cp={'instituicao':'Universidade Teste','estado':'SP','status':'erro','ultimo_erro':'Falha isolada na faculdade: ValueError','indice_pesquisa':1,'total_pesquisas':3,'consulta_atual':'b','leads_salvos':2}
+        chamadas=[]
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [],limite_consultas=1)
+        self.assertEqual(chamadas,['b'])
+        self.assertEqual(repo.cp['indice_pesquisa'],2)
+        self.assertEqual(repo.cp['leads_salvos'],2)
