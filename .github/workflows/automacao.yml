@@ -28,6 +28,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
       - name: Verificar extracao e fila antes da captura
+        id: validacao
         run: python -m unittest discover -p 'test_*.py'
       - name: Executar captura com prazo e deduplicação em memória
         env:
@@ -36,7 +37,7 @@ jobs:
         run: python -u scraper.py
 
       - name: Enriquecer os leads do ciclo com a Máquina 2
-        if: success()
+        if: ${{ !cancelled() && steps.validacao.outcome == 'success' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
