@@ -49,6 +49,14 @@ def executar(fn,limite):
     signal.setitimer(signal.ITIMER_REAL,min(limite,restante))
     try: return fn()
     finally: signal.setitimer(signal.ITIMER_REAL,0)
+# Fonte pública descoberta na web; nomes são extraídos pelo leitor, não pré-carregados.
+fonte_alvo='https://pt.scribd.com/document/929685366/Resumo-Ampliado-Pre-TCC-Ariane'
+try:
+    registros,_=executar(lambda:f.carregar_fonte(fonte_alvo,'Universidade Pitágoras Unopar','Unopar'),20)
+    print('CABEÇALHO REAL',json.dumps({'fonte':fonte_alvo,'registros':registros},ensure_ascii=False),flush=True)
+    registrar(registros,fonte_alvo)
+except Exception as exc:
+    pendentes.append({'fonte':fonte_alvo,'erro':str(exc)[:150]})
 for consulta in consultas:
     if time.monotonic()-inicio>=360: break
     consultas_feitas+=1

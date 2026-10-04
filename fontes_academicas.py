@@ -442,6 +442,8 @@ def ler_html(html, url, instituicao, alias=None):
     if not records:
         records=extrair_documento(page.linhas,None,None,' '.join(page.textos),page.metas)
         for registro in records: registro['instituicao']=None
+    conhecidos={norm(r["nome"]) for r in records}
+    records.extend(r for r in extrair_cabecalho_autoral(page.linhas,instituicao,alias) if norm(r["nome"]) not in conhecidos)
     links = []
     # Edições OJS recentes: seguir os artigos pelo título, sem extrair
     # os nomes da lista geral de autores como se já fossem alunos.
@@ -499,6 +501,28 @@ def extrair_autores_alunos_pdf(linhas, instituicao, alias=None):
     return out
 
 
+def extrair_cabecalho_autoral(linhas, instituicao, alias=None):
+    """Campos explícitos de autoria, curso e ano em um mesmo cabeçalho."""
+    textos=[t.strip() for t,tag in linhas if t.strip()]
+    saida=[]
+    for i,texto in enumerate(textos):
+        m=re.fullmatch(r'(?:autora?|autores|autoras)\s*:\s*(.+)',texto,flags=re.I)
+        nome=pessoa(m.group(1)) if m else None
+        if not nome: continue
+        bloco=textos[max(0,i-4):i+5]
+        contexto=' '.join(bloco)
+        cursos=[(abs(j-i),t) for j,t in enumerate(textos[max(0,i-4):i+5],start=max(0,i-4)) if re.match(r'curso\s*:',norm(t))]
+        if not cursos or 'nutricao' not in norm(min(cursos,key=lambda x:x[0])[1]): continue
+        anos=[int(m.group(1)) for t in bloco if (m:=re.fullmatch(r'(?:ano\s*:\s*)?(20\d{2})',norm(t)))]
+        if len(set(anos))!=1 or anos[0] not in ANOS: continue
+        if not re.search(r'tcc|trabalho de conclusao',norm(' '.join(textos[max(0,i-8):i+8]))): continue
+        vinculada=any(t and re.search(r'(?<!\w)'+re.escape(norm(t))+r'(?!\w)',norm(contexto)) for t in (instituicao,alias))
+        saida.append(dict(nome=nome,ano=anos[0],periodo=f'{anos[0]} (autoria de TCC; fase a confirmar)',instagram=None,
+            instituicao=instituicao if vinculada else None,candidato_indicio=True,
+            evidencia=f'Cabeçalho público de TCC: {contexto}. Autoria, curso e ano explícitos; conclusão e identidade a validar pela Máquina 2.',contexto_academico=contexto))
+    return saida
+
+
 def ler_pdf(data, instituicao, alias=None):
     from pypdf import PdfReader
     reader=PdfReader(io.BytesIO(data))
@@ -512,6 +536,8 @@ def ler_pdf(data, instituicao, alias=None):
         records=extrair_documento(lines,None,None,' '.join(x[0] for x in lines))
         records+=extrair_autores_alunos_pdf(lines,None,None)
         for registro in records: registro['instituicao']=None
+    conhecidos={norm(r["nome"]) for r in records}
+    records.extend(r for r in extrair_cabecalho_autoral(lines,instituicao,alias) if norm(r["nome"]) not in conhecidos)
     records = list({(norm(r["nome"]),r["ano"]):r for r in records}.values())
     return records, []
 
