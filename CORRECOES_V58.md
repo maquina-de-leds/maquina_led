@@ -37,3 +37,7 @@ Não houve gravação de leads, exclusão ou requalificação em massa durante a
 - Validação local: 203 testes passaram; oito testes PostgreSQL são executados no serviço descartável do GitHub. Inclui preservação de duplicidades, continuação de lote, retomada e identidade do Instagram.
 
 Validação final no GitHub: 211 testes passaram, incluindo os oito testes PostgreSQL. Evidência: https://github.com/maquina-de-leds/maquina_led/actions/runs/37208369123
+
+## Resultado da execução real de ativação
+
+Execução 37208189934 concluída com sucesso: captura retomou quatro instituições, preservou checkpoints e não gravou novos leads neste lote. Máquina 2 registrou oito tentativas, separou um registro não-pessoa e não confirmou novos Instagrams; seis tentativas atingiram o prazo e seguem pendentes. Base após o lote: 474 registros brutos, cinco testes e 344 marcados como qualificados sem bloqueio de contato. Uma nova execução (37208727026) iniciou a captura; o agendamento continua a cada 30 minutos, sujeito ao serviço do GitHub. Não há garantia de volume, de todos os contatos estarem disponíveis ou de revisão individual dos 344 registros.
