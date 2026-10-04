@@ -251,8 +251,7 @@ def buscar_pendentes():
         )
 
         stats["erros"] += 1
-
-        return []
+        raise RuntimeError('Não foi possível carregar a fila de enriquecimento') from erro
 
 
 # ============================================================
@@ -394,7 +393,7 @@ def instagram_ja_usado(
 
         stats["erros"] += 1
 
-        return False
+        raise RuntimeError('Não foi possível verificar Instagram duplicado') from erro
 
 
 # ============================================================
@@ -667,7 +666,7 @@ def atualizar_lead(
 
     try:
 
-        (
+        resposta = (
             supabase
             .table("leds")
             .update(
@@ -677,8 +676,11 @@ def atualizar_lead(
                 "id",
                 lead_id
             )
+            .eq('nao_contatar', False)
+            .eq('qualificado', True)
             .execute()
         )
+        return bool(resposta.data)
 
     except Exception as erro:
 
@@ -688,6 +690,7 @@ def atualizar_lead(
         )
 
         stats["erros"] += 1
+        raise RuntimeError('Não foi possível confirmar atualização do lead') from erro
 
 
 # ============================================================
@@ -817,10 +820,13 @@ def processar_lead(
             "instagram_encontrado"
         ] += 1
 
-        atualizar_lead(
+        confirmado = atualizar_lead(
             lead["id"],
             instagram=instagram
         )
+        if not confirmado:
+            print('   Atualização não aplicada; estado atual do lead preservado', flush=True)
+            return
 
         print(
             f"   ✅ SALVO NO SUPABASE: {instagram}",
@@ -844,10 +850,13 @@ def processar_lead(
             "instagram_encontrado"
         ] += 1
 
-        atualizar_lead(
+        confirmado = atualizar_lead(
             lead["id"],
             instagram=instagram
         )
+        if not confirmado:
+            print('   Atualização não aplicada; estado atual do lead preservado', flush=True)
+            return
 
         print(
             f"   ✅ SALVO NO SUPABASE: {instagram}",

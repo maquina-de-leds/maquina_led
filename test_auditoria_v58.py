@@ -54,6 +54,20 @@ class QualificacaoTests(unittest.TestCase):
 
 
 class Maquina2Tests(unittest.TestCase):
+    def test_falha_de_banco_nao_vira_fila_vazia_ou_instagram_livre(self):
+        client = Mock(); client.table.side_effect = RuntimeError('banco indisponível')
+        with patch.object(e, 'supabase', client):
+            with self.assertRaises(RuntimeError): e.buscar_pendentes()
+            with self.assertRaises(RuntimeError): e.instagram_ja_usado('@ana.nutri', 7)
+
+    def test_atualizacao_de_contato_condicionada_ao_estado_atual(self):
+        client = Mock(); q = client.table.return_value
+        q.update.return_value = q; q.eq.return_value = q; q.execute.return_value.data = []
+        with patch.object(e, 'supabase', client):
+            self.assertFalse(e.atualizar_lead(7, instagram='@ana.nutri'))
+        self.assertIn(unittest.mock.call('qualificado', True), q.eq.call_args_list)
+        self.assertIn(unittest.mock.call('nao_contatar', False), q.eq.call_args_list)
+
     def candidato(self):
         return {'id': 7, 'nome': 'Ana Silva', 'instituicao': 'Universidade Teste',
                 'qualificado': False, 'instagram': None, 'nao_contatar': False}
