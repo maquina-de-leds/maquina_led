@@ -1,0 +1,16 @@
+{
+  "Centro Universitário - Uniesp": {
+    "https://uniesp.edu.br/": "HTTPSConnectionPool(host='uniesp.edu.br', port=443): Max retries exceeded with url: / (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issue",
+    "https://uniesp.edu.br/sites/unifama/": "HTTPSConnectionPool(host='uniesp.edu.br', port=443): Max retries exceeded with url: /sites/unifama/ (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to g",
+    "https://www.jusbrasil.com.br/jurisprudencia/busca?q=colação+de+grau+uniesp": "403 Client Error: Forbidden for url: https://www.jusbrasil.com.br/jurisprudencia/busca?q=cola%C3%A7%C3%A3o+de+grau+uniesp",
+    "https://uniesp.edu.br/sites/_biblioteca/cursos/arquivos/20180702173759.pdf": "HTTPSConnectionPool(host='uniesp.edu.br', port=443): Max retries exceeded with url: /sites/_biblioteca/cursos/arquivos/20180702173759.pdf (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] ",
+    "https://uniesp.edu.br/sites/filem/repositorio.php?pasta=tcc": "HTTPSConnectionPool(host='uniesp.edu.br', port=443): Max retries exceeded with url: /sites/filem/repositorio.php?pasta=tcc (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate ver",
+    "https://uniesp.edu.br/sites/unifama/noticia.php?id_noticia=7612": "HTTPSConnectionPool(host='uniesp.edu.br', port=443): Max retries exceeded with url: /sites/unifama/noticia.php?id_noticia=7612 (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate"
+  },
+  "Centro Universitário Academia": {
+    "https://repositorio.ufsc.br/handle/123456789/274488": "404 Client Error: Not Found for url: https://repositorio.ufsc.br/handle/123456789/274488",
+    "https://repositorio.ufsc.br/handle/123456789/274487": "404 Client Error: Not Found for url: https://repositorio.ufsc.br/handle/123456789/274487",
+    "https://repositorio.ufsc.br/handle/123456789/271368": "404 Client Error: Not Found for url: https://repositorio.ufsc.br/handle/123456789/271368",
+    "https://www3.unicentro.br/cedeteg/wp-content/uploads/sites/91/2025/08/Nutricao-2-Sem-2025.pdf": "('Connection broken: IncompleteRead(517498 bytes read, 452149 more expected)', IncompleteRead(517498 bytes read, 452149 more expected))"
+  }
+}

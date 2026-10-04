@@ -115,7 +115,7 @@ def pessoa(text):
     # Nomes de instituições ou lugares não são nomes de alunos.
     if n in {"sao luis", "sao paulo", "rio de janeiro", "belo horizonte"}: return None
     if re.search(r"\b(?:tcc|versao|documento|arquivo|anexo|sumario|referencias|bibliografia)\b", n): return None
-    if n in {"semana academica", "material e metodos", "consentimento livre e esclarecido", "del re"}: return None
+    if n in {"conformidade legal", "semana academica", "material e metodos", "consentimento livre e esclarecido", "del re"}: return None
     if re.search(r"\b(?:pdf|abnt)\b", n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None

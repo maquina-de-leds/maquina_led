@@ -305,6 +305,7 @@ class SupabaseRepo:
         casos = (
             ("São Luís", "https://www.saoluis.br/"),
             ("Versão Final do Tcc", "https://uni20.com.br/course/view.php?id=6447"),
+            ("Conformidade Legal", "https://www2.ufjf.br/nutricao/tcc-2025/"),
             ("Semana Acadêmica", "https://cursos.unipampa.edu.br/cursos/nutricao/2025/"),
             ("Material e Métodos", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
             ("Consentimento Livre e Esclarecido", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
@@ -319,6 +320,27 @@ class SupabaseRepo:
                 .eq("origem", "captacao_nacional_fila_v58")
                 .eq("nao_contatar", False).execute())
             print(f"REVISÃO DE NOME COMPROVADA: {nome} | registros isolados: {len(r.data or [])}", flush=True)
+
+    def registrar_pendencia_fonte(self, item, url, erro=None, concluida=False, somente_nova=False):
+        import hashlib
+        etapa = etapa_captacao_item(item) + "_fonte_" + hashlib.sha256(url.encode()).hexdigest()[:20]
+        if somente_nova and self.controle_get(etapa): return
+        self.controle_salvar(etapa, {
+            "instituicao": item["instituicao"], "estado": item.get("estado"),
+            "cidade": item.get("cidade"), "status": "concluido" if concluida else "erro",
+            "consulta_atual": url, "ultimo_erro": None if concluida else str(erro)[:1000],
+        })
+
+    def fontes_pendentes(self, item):
+        rows=[]
+        for offset in range(0,100000,1000):
+            lote=(self.client.table("controle_busca").select("consulta_atual")
+                  .like("etapa", etapa_captacao_item(item) + "_fonte_%")
+                  .eq("status", "erro").order("atualizado_em")
+                  .range(offset,offset+999).execute()).data or []
+            rows.extend(r["consulta_atual"] for r in lote if r.get("consulta_atual"))
+            if len(lote)<1000: return list(dict.fromkeys(rows))
+        raise RuntimeError("Paginação das fontes pendentes incompleta")
 
     def contar_leads(self):
         return self.client.table("leds").select("id", count="exact", head=True).execute().count
@@ -772,6 +794,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     total = len(consultas)
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
+    if cp and cp.get("ultimo_erro", "") and str(cp["ultimo_erro"]).startswith("Fontes inacessíveis") and cp.get("indice_pesquisa") == cp.get("total_pesquisas") and hasattr(repo,"fontes_pendentes"):
+        return retentar_fontes_pendentes(repo,item,cp,source_fn,limite_consultas or 6)
     if cp and cp.get("instituicao") == instituicao and cp.get("estado") == (uf or "BR") and cp.get("status") in {"processando", "erro"}:
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
         if cp.get("ultimo_erro") == "Busca externa indisponível":
@@ -788,6 +812,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     encontrados_local = int(cp.get("leads_encontrados") or 0) if inicio else 0
     salvos_checkpoint = int(cp.get("leads_salvos") or 0) if inicio else 0
     fontes_vistas = set()
+    pendentes_conhecidas=set(repo.fontes_pendentes(item)) if hasattr(repo,"fontes_pendentes") else set()
     falhas_fontes = int(bool(inicio and cp and cp.get("ultimo_erro") == "Janela com fontes pendentes; repetir ao finalizar"))
     falhas_busca_seguidas = 0
     fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
@@ -855,10 +880,16 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             try:
                 stats["fontes_visitadas"] += 1
                 registros, links = source_fn(url,instituicao,alias)
+                if url in pendentes_conhecidas:
+                    repo.registrar_pendencia_fonte(item,url,concluida=True)
+                    pendentes_conhecidas.discard(url)
                 if not registros: stats["fontes_sem_nomes"] += 1
             except Exception as exc:
                 falhas_fontes += 1
                 stats["erros"] += 1
+                if hasattr(repo,"registrar_pendencia_fonte"):
+                    repo.registrar_pendencia_fonte(item,url,exc)
+                    pendentes_conhecidas.add(url)
                 print(f"      ⚠️ FONTE PENDENTE: {url} | {str(exc)[:250]}",flush=True)
                 try:
                     registros,links=recuperar_fonte_na_busca(url,instituicao,alias,search_fn)
@@ -894,6 +925,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         stats["instituicoes_processadas"]+=1
         print(f"   JANELA LIMITADA: {fim}/{total}; faculdade ainda não concluída; novos: {novos}",flush=True)
         return True
+    if hasattr(repo,"fontes_pendentes"):
+        falhas_fontes=len(repo.fontes_pendentes(item))
     tentativas = int(item.get("tentativa_descoberta") or 0)
     repetir_zero = encontrados_local == 0 and tentativas < 1
     if falhas_fontes or repetir_zero:
@@ -902,7 +935,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         stats["instituicoes_erro"] += 1
         motivo = (f"Fontes inacessíveis: {falhas_fontes}; repetir varredura"
                   if falhas_fontes else "Nenhum candidato encontrado; programada segunda varredura")
-        checkpoint_captacao(repo,item,"erro",0,total,erro=motivo,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
+        checkpoint_captacao(repo,item,"erro",total if falhas_fontes and hasattr(repo,"fontes_pendentes") else 0,total,erro=motivo,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
         print(f"   🔁 REVISITAR: {motivo}",flush=True)
     else:
         repo.atualizar_instituicao(iid,status="concluido",tentativa_descoberta=tentativas)
@@ -910,6 +943,50 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         checkpoint_captacao(repo,item,"concluido",total,total,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
     stats["instituicoes_processadas"] += 1
     print(f"   RESUMO | pessoas: {encontrados_local} | novos: {novos} | fontes com falha: {falhas_fontes}",flush=True)
+    return True
+
+
+def retentar_fontes_pendentes(repo, item, cp, source_fn, limite):
+    from fontes_academicas import url_permitida, acesso_reservado_maquina2
+    urls=repo.fontes_pendentes(item)
+    total=int(cp.get("total_pesquisas") or 0)
+    encontrados=int(cp.get("leads_encontrados") or 0)
+    salvos=int(cp.get("leads_salvos") or 0)
+    antes=stats["leads_salvos"]
+    print(f"REPROCESSAR SOMENTE FONTES PENDENTES: {item['instituicao']} | {len(urls)} fontes",flush=True)
+    for url in urls[:limite]:
+        if not url_permitida(url) or acesso_reservado_maquina2(url): continue
+        try:
+            stats["fontes_visitadas"]+=1
+            registros,links=source_fn(url,item["instituicao"],alias_instituicao(item))
+        except Exception as exc:
+            repo.registrar_pendencia_fonte(item,url,exc)
+            stats["erros"]+=1
+            print(f"FONTE AINDA PENDENTE: {url} | {type(exc).__name__}",flush=True)
+            continue
+        for registro in registros:
+            encontrados+=1
+            stats["leads_encontrados"]+=1
+            salvar_lead(repo,registro["nome"],registro.get("instituicao",item["instituicao"]),None,None,
+                        registro["evidencia"],registro.get("fonte_url",url),instagram=registro.get("instagram"),
+                        ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],
+                        candidato_indicio=registro.get("candidato_indicio",False))
+        # Links descobertos também precisam de leitura, sem reiniciar as consultas.
+        for link in links:
+            if url_permitida(link) and not acesso_reservado_maquina2(link):
+                repo.registrar_pendencia_fonte(item,link,"Link descoberto na retomada; leitura pendente",somente_nova=True)
+        repo.registrar_pendencia_fonte(item,url,concluida=True)
+    restantes=repo.fontes_pendentes(item)
+    # Pendências legadas sem URLs persistidas não comprovam cobertura completa.
+    concluida=not restantes and bool(urls)
+    status="concluido" if concluida else "erro"
+    repo.atualizar_instituicao(item["id"],status=status)
+    checkpoint_captacao(repo,item,status,total,total,
+                        erro=None if concluida else f"Fontes inacessíveis: {len(restantes)}; retomada somente das fontes pendentes",
+                        encontrados=encontrados,salvos=salvos+stats["leads_salvos"]-antes)
+    stats["instituicoes_processadas"]+=1
+    if concluida: stats["instituicoes_concluidas"]+=1
+    print(f"FONTES RESTANTES: {len(restantes)} | consultas preservadas: {total}/{total}",flush=True)
     return True
 
 
@@ -934,6 +1011,20 @@ def resumo():
     print("=" * 72, flush=True)
 
 
+def recuperar_pendencias_registradas(repo, fila):
+    # URLs de falhas reais de 04/10, sem nomes de alunos nem credenciais.
+    etapa=ETAPA_CAPTACAO + "_pendencias_logs_20261004"
+    if repo.controle_get(etapa): return
+    from pathlib import Path
+    caminho=Path(__file__).parent / "fontes_publicas" / "pendencias_logs_20261004.json"
+    dados=json.loads(caminho.read_text())
+    for item in fila:
+        for url,erro in dados.get(item["instituicao"],{}).items():
+            repo.registrar_pendencia_fonte(item,url,erro,somente_nova=True)
+    repo.controle_salvar(etapa,{"status":"concluido","instituicao":"Migração de fontes pendentes dos logs"})
+    print("PENDÊNCIAS DOS LOGS PRESERVADAS: retentar as fontes sem reiniciar a faculdade",flush=True)
+
+
 def executar():
     print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
@@ -953,9 +1044,10 @@ def executar():
     except Exception as exc:
         print(f"⚠️ Contagem do banco indisponível: {type(exc).__name__}", flush=True)
     fila = repo.fila_nacional()
+    recuperar_pendencias_registradas(repo,fila)
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
     for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
-        if not processar_instituicao(repo, item, continuar_falhas=True, limite_consultas=6):
+        if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6):
             resumo()
             raise SystemExit(2)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:

@@ -3,7 +3,7 @@ name: Automacao Maquina de Leads
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '7,37 * * * *'
   push:
     branches: [main]
     paths: ['.github/workflows/automacao.yml']
@@ -30,7 +30,7 @@ jobs:
         run: pip install requests supabase ddgs pypdf lxml
       - name: Verificar extracao e fila antes da captura
         run: python -m unittest discover -p 'test_*.py'
-      - name: Executar captura com reutilizacao de documentos
+      - name: Executar captura com fila de fontes pendentes
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
