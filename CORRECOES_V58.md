@@ -32,7 +32,7 @@ Não houve gravação de leads, exclusão ou requalificação em massa durante a
 - A fila INEP contém 620 instituições distintas, com ofertas nos 26 estados e no Distrito Federal. Isso é a base de pesquisa, não prova de varredura completa.
 - Uma vaga por ciclo retoma a faculdade pausada mais antiga; demais vagas avançam a fila. Falha de buscador mantém o checkpoint e não impede as demais faculdades do lote; o ciclo continua sinalizando a falha.
 - Captura agendada a cada 30 minutos, com uma execução de ativação ao publicar mudanças na captura. GitHub pode atrasar ou omitir horários; não há garantia de execução contínua.
-- Máquina 2 roda após captura bem-sucedida, no mesmo bloqueio de concorrência. Alterna por última tentativa, tem prazo de cinco minutos por lote e 45 segundos por lead, e exige identidade, curso e vínculo público para associar Instagram. Não envia mensagens.
+- Máquina 2 roda após a etapa de captura, mesmo com indisponibilidade de buscador, desde que os testes iniciais tenham passado, no mesmo bloqueio de concorrência. Alterna por última tentativa, tem prazo de cinco minutos por lote e 45 segundos por lead, e exige identidade, curso e vínculo público para associar Instagram. Não envia mensagens.
 - O diagnóstico rápido distingue falha de busca de indisponibilidade de página; esta última continua registrada como cobertura incompleta, não é apagada.
 - Validação local: 203 testes passaram; oito testes PostgreSQL são executados no serviço descartável do GitHub. Inclui preservação de duplicidades, continuação de lote, retomada e identidade do Instagram.
 
