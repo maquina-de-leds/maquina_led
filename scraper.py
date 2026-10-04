@@ -1064,6 +1064,11 @@ def executar():
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
         print("⏸️ A próxima execução retoma por faculdade.", flush=True)
 
+    try:
+        proximas=repo.fila_nacional()[:MAX_INSTITUICOES_POR_EXECUCAO]
+        print("PRÓXIMAS FACULDADES NA FILA:",json.dumps([{ "instituicao":i["instituicao"],"status":i.get("_status_checkpoint"),"janela_encerrada":i.get("_janela_encerrada",False)} for i in proximas],ensure_ascii=False),flush=True)
+    except Exception as exc:
+        print(f"AVISO: não foi possível conferir a próxima janela: {type(exc).__name__}",flush=True)
     resumo()
     if stats["instituicoes_erro"]: raise SystemExit(2)
     if stats["erros"]:
