@@ -45,3 +45,9 @@ Execução 37208189934 concluída com sucesso: captura retomou quatro instituiç
 ## Escopo atual confirmado pelo usuário — somente Máquina 1
 
 Em 04/10/2026, a chamada automática da Máquina 2 foi removida de automacao.yml. A execução anterior 37208727026 foi cancelada durante a captura e sua etapa da Máquina 2 foi ignorada. A execução 37209070737 iniciou apenas testes e captura da Máquina 1, retomando os checkpoints. O agendamento permanece a cada 30 minutos. Publicações de alterações interrompem o ciclo antigo para adotar o novo código; os disparos agendados não cancelam o ciclo ativo. Máquina 2 fica para configuração posterior de busca de Instagram dos leads sem contato. As notas de ativação da Máquina 2 acima descrevem o histórico, não o escopo atual. Foram agendadas três verificações somente de leitura do rendimento às 12h30, 13h30 e 14h30 (Brasília), sem acionar a Máquina 2.
+
+## Continuidade por falha isolada — 04/10/2026
+
+Falha em site continua nas próximas fontes. Exceção inesperada na faculdade é registrada sem apagar índice/consulta/contadores; o lote segue na próxima faculdade e o ciclo seguinte retoma a consulta falhada. Erro ao persistir o aviso ou recuperar pendências legadas também não interrompe os demais itens. Ciclos com falhas isoladas terminam com aviso explícito de cobertura incompleta, sem código de saída fatal. Indisponibilidade dos requisitos globais (credenciais, banco/fila inicial ou testes) continua sendo falha operacional real, não é mascarada. A execução permanece em janelas agendadas de 30 minutos; conclusão de janela não significa falha. Máquina 2 continua fora do workflow.
+
+Validação local: 207 testes passaram; oito PostgreSQL são executados no GitHub. Inclui site defeituoso seguido de site válido com gravação, exceção de faculdade seguida de outra, falha no registro do erro e retomada sem reiniciar.
