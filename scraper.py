@@ -783,7 +783,7 @@ def checkpoint_captacao(repo, item, status, indice, total, consulta=None, erro=N
     })
 
 
-def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False, limite_consultas=None):
+def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, continuar_falhas=False, limite_consultas=None, prazo=None):
     from fontes_academicas import carregar_fonte, url_permitida, extrair_resultado_busca, recuperar_fonte_na_busca, acesso_reservado_maquina2, FASE
     source_fn = source_fn or carregar_fonte
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
@@ -796,7 +796,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
     if cp and cp.get("ultimo_erro", "") and str(cp["ultimo_erro"]).startswith("Fontes inacessíveis") and cp.get("indice_pesquisa") == cp.get("total_pesquisas") and hasattr(repo,"fontes_pendentes"):
-        return retentar_fontes_pendentes(repo,item,cp,source_fn,limite_consultas or 6)
+        return retentar_fontes_pendentes(repo,item,cp,source_fn,limite_consultas or 6,prazo=prazo)
     if cp and cp.get("instituicao") == instituicao and cp.get("estado") == (uf or "BR") and cp.get("status") in {"processando", "erro"}:
         # Nova varredura repete tudo; falha de busca retoma apenas a consulta interrompida.
         if cp.get("ultimo_erro") == "Busca externa indisponível":
@@ -818,6 +818,10 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     falhas_busca_seguidas = 0
     fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
     for idx in range(inicio, fim):
+        if prazo is not None and time.monotonic() >= prazo:
+            fim=idx
+            print("LIMITE DO CICLO: próxima consulta preservada",flush=True)
+            break
         consulta = consultas[idx]
         inicio_consulta=time.monotonic()
         nomes_consulta=set()
@@ -878,7 +882,14 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             else:
                 print("      RESULTADO SEM CONTEXTO ACADÊMICO RELEVANTE:",resultado.get("href") or resultado.get("url"),flush=True)
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
-        for url, depth in fila:
+        for posicao,(url, depth) in enumerate(fila):
+            if prazo is not None and time.monotonic() >= prazo and hasattr(repo,"registrar_pendencia_fonte"):
+                adiadas={u for u,_ in fila[posicao:] if u not in fontes_vistas and url_permitida(u) and not acesso_reservado_maquina2(u)}
+                for adiada in adiadas:
+                    repo.registrar_pendencia_fonte(item,adiada,"Leitura adiada pelo limite de tempo",somente_nova=True)
+                falhas_fontes += len(adiadas)
+                print(f"LIMITE DO CICLO: {len(adiadas)} URLs preservadas para leitura posterior",flush=True)
+                break
             if url in fontes_vistas or not url_permitida(url): continue
             if acesso_reservado_maquina2(url):
                 print(f"      ACESSO AO INSTAGRAM RESERVADO À MÁQUINA 2: {url}; evidências da busca já processadas",flush=True)
@@ -957,7 +968,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     return True
 
 
-def retentar_fontes_pendentes(repo, item, cp, source_fn, limite):
+def retentar_fontes_pendentes(repo, item, cp, source_fn, limite, prazo=None):
     from fontes_academicas import url_permitida, acesso_reservado_maquina2
     urls=repo.fontes_pendentes(item)
     total=int(cp.get("total_pesquisas") or 0)
@@ -966,6 +977,9 @@ def retentar_fontes_pendentes(repo, item, cp, source_fn, limite):
     antes=stats["leads_salvos"]
     print(f"REPROCESSAR SOMENTE FONTES PENDENTES: {item['instituicao']} | {len(urls)} fontes",flush=True)
     for url in urls[:limite]:
+        if prazo is not None and time.monotonic() >= prazo:
+            print("LIMITE DO CICLO: fontes restantes mantidas para retomada",flush=True)
+            break
         if not url_permitida(url) or acesso_reservado_maquina2(url): continue
         try:
             stats["fontes_visitadas"]+=1
@@ -1057,8 +1071,12 @@ def executar():
     fila = repo.fila_nacional()
     recuperar_pendencias_registradas(repo,fila)
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
+    prazo=time.monotonic()+360
     for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
-        if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6):
+        if time.monotonic() >= prazo:
+            print("LIMITE DO CICLO: faculdades restantes preservadas na fila",flush=True)
+            break
+        if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6, prazo=prazo):
             resumo()
             raise SystemExit(2)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
