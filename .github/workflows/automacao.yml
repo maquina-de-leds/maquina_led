@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths: ['scraper.py', '.github/workflows/automacao.yml']
   schedule:
-    - cron: '7,37 * * * *'
+    - cron: '*/30 * * * *'
 permissions:
   contents: read
 
