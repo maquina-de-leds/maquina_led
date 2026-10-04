@@ -235,7 +235,13 @@ class SupabaseRepo:
             if len(lote)<1000: break
             offset+=1000
         fila = []
-        for item in agrupar_faculdades(dados):
+        faculdades = agrupar_faculdades(dados)
+        self._instituicoes_por_dominio_alias = {}
+        for faculdade in faculdades:
+            sigla = normalizar(alias_instituicao(faculdade))
+            if re.fullmatch(r'[a-z0-9-]{4,30}', sigla or ''):
+                self._instituicoes_por_dominio_alias.setdefault(sigla, set()).add(normalizar(faculdade['instituicao']))
+        for item in faculdades:
             cp = checkpoints.get(etapa_captacao_item(item))
             if cp and cp.get("status") == "concluido":
                 continue
@@ -247,6 +253,19 @@ class SupabaseRepo:
         # Uma execução interrompida deve retomar antes de abrir outra faculdade.
         ordem={"processando":0,"pendente":1,"erro":2}
         return sorted(fila,key=lambda x:(1 if x.get("_janela_encerrada") else ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
+
+    def resultado_de_outra_faculdade(self, resultado, instituicao, alias=None):
+        """Domínio de outra IES conhecida não prova vínculo com a IES pesquisada."""
+        url = str(resultado.get('href') or resultado.get('url') or '')
+        host = (urlparse(url).hostname or '').lower()
+        mapa = getattr(self, '_instituicoes_por_dominio_alias', {})
+        donos = set().union(*(mapa.get(parte, set()) for parte in host.split('.')))
+        if not donos or normalizar(instituicao) in donos:
+            return False
+        texto = normalizar(str(resultado.get('title') or '')+' '+str(resultado.get('body') or resultado.get('snippet') or ''))
+        vinculo = any(re.search(r'(?<!\w)'+re.escape(normalizar(termo))+r'(?!\w)', texto)
+                      for termo in (instituicao, alias) if termo)
+        return not vinculo
 
     def contar_pendentes_uf(self, uf):
         r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
@@ -380,6 +399,16 @@ class SupabaseRepo:
             rows.extend(r["consulta_atual"] for r in lote if r.get("consulta_atual"))
             if len(lote)<1000: return list(dict.fromkeys(rows))
         raise RuntimeError("Paginação das fontes pendentes incompleta")
+
+    def fontes_concluidas(self, item):
+        urls=set()
+        for offset in range(0,100000,1000):
+            lote=(self.client.table('controle_busca').select('consulta_atual')
+                  .like('etapa', etapa_captacao_item(item)+'_fonte_%')
+                  .eq('status','concluido').order('id').range(offset,offset+999).execute()).data or []
+            urls.update(r['consulta_atual'] for r in lote if r.get('consulta_atual'))
+            if len(lote)<1000: return urls
+        raise RuntimeError('Paginação das fontes concluídas incompleta')
 
     def contar_leads(self):
         return self.client.table("leds").select("id", count="exact", head=True).execute().count
@@ -884,7 +913,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     salvos_antes = stats["leads_salvos"]
     encontrados_local = int(cp.get("leads_encontrados") or 0) if inicio else 0
     salvos_checkpoint = int(cp.get("leads_salvos") or 0) if inicio else 0
-    fontes_vistas = set()
+    fontes_vistas = set(repo.fontes_concluidas(item)) if hasattr(repo, "fontes_concluidas") else set()
     pendentes_conhecidas=set(repo.fontes_pendentes(item)) if hasattr(repo,"fontes_pendentes") else set()
     falhas_fontes = int(bool(inicio and cp and cp.get("ultimo_erro") == "Janela com fontes pendentes; repetir ao finalizar"))
     falhas_busca_seguidas = 0
@@ -930,6 +959,14 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                                 encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
             return False
         falhas_busca_seguidas = 0
+        if hasattr(repo, 'resultado_de_outra_faculdade') and consulta != 'FONTES PÚBLICAS JÁ DESCOBERTAS':
+            relacionados=[]
+            for resultado in resultados:
+                if repo.resultado_de_outra_faculdade(resultado, instituicao, alias):
+                    print('FONTE DE OUTRA FACULDADE: pesquisa atual segue para outros resultados |', resultado.get('href') or resultado.get('url'), flush=True)
+                else:
+                    relacionados.append(resultado)
+            resultados=relacionados
         for resultado in resultados:
             url_resultado=str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url_resultado): continue
@@ -973,12 +1010,11 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 print(f"      ACESSO AO INSTAGRAM RESERVADO À MÁQUINA 2: {url}; evidências da busca já processadas",flush=True)
                 continue
             fontes_vistas.add(url)
+            fonte_lida = False
             try:
                 stats["fontes_visitadas"] += 1
                 registros, links = source_fn(url,instituicao,alias)
-                if url in pendentes_conhecidas:
-                    repo.registrar_pendencia_fonte(item,url,concluida=True)
-                    pendentes_conhecidas.discard(url)
+                fonte_lida = True
                 if not registros: stats["fontes_sem_nomes"] += 1
             except Exception as exc:
                 falhas_fontes += 1
@@ -1012,6 +1048,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                             uf if cidade_confirmada else None,registro["evidencia"],registro.get("fonte_url",url),
                             instagram=registro.get("instagram"),candidato_indicio=registro.get("candidato_indicio",False),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
+            if fonte_lida and hasattr(repo, 'registrar_pendencia_fonte'):
+                repo.registrar_pendencia_fonte(item, url, concluida=True)
+                pendentes_conhecidas.discard(url)
         indice_cp = primeira_busca_pendente if primeira_busca_pendente is not None else idx + 1
         checkpoint_captacao(repo,item,"erro" if primeira_busca_pendente is not None else "processando",indice_cp,total,consulta=consultas[indice_cp] if indice_cp<total else None,erro="Busca externa indisponível" if primeira_busca_pendente is not None else ("Fontes pendentes; repetir varredura" if falhas_fontes else None),
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
@@ -1139,11 +1178,11 @@ def recuperar_pendencias_registradas(repo, fila):
 
 
 def selecionar_janela(fila, limite):
-    """Reserva uma vaga para a retomada mais antiga; demais vagas avançam a fila."""
-    retomadas = [i for i in fila if i.get('_janela_encerrada')]
-    selecionados = sorted(retomadas, key=lambda i: i.get('_ultimo_checkpoint') or '')[:1]
-    selecionados += [i for i in fila if i not in selecionados][:max(0, limite-len(selecionados))]
-    return selecionados[:limite]
+    """Primeira passagem por todas as faculdades; depois retoma a menos recente."""
+    novas = [i for i in fila if not i.get('_ultimo_checkpoint')]
+    retomadas = sorted([i for i in fila if i not in novas],
+                       key=lambda i: (i.get('_ultimo_checkpoint') or '', normalizar(i.get('instituicao'))))
+    return (novas + retomadas)[:max(0, limite)]
 
 
 

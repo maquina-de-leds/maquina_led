@@ -4,11 +4,11 @@ import scraper as s
 import enriquecimento as e
 
 class OperacaoNacionalTests(unittest.TestCase):
-    def test_retomada_tem_vaga_e_fila_avanca(self):
+    def test_faculdade_nova_tem_prioridade_sobre_retomada(self):
         nova = {'id': 1}
         antiga = {'id': 2, '_janela_encerrada': True, '_ultimo_checkpoint': '2026-10-01'}
         recente = {'id': 3, '_janela_encerrada': True, '_ultimo_checkpoint': '2026-10-04'}
-        self.assertEqual(s.selecionar_janela([nova, recente, antiga], 2), [antiga, nova])
+        self.assertEqual(s.selecionar_janela([nova, recente, antiga], 2), [nova, antiga])
         self.assertEqual(s.selecionar_janela([nova], 0), [])
 
     def test_falha_nao_impede_segunda_faculdade(self):
@@ -97,3 +97,39 @@ class OperacaoNacionalTests(unittest.TestCase):
         self.assertEqual(chamadas,['b'])
         self.assertEqual(repo.cp['indice_pesquisa'],2)
         self.assertEqual(repo.cp['leads_salvos'],2)
+
+    def test_primeira_passagem_nao_reserva_vaga_para_faculdade_antiga(self):
+        antigas=[{'id':1,'_ultimo_checkpoint':'2026-10-01','_janela_encerrada':True}]
+        novas=[{'id':2},{'id':3}]
+        self.assertEqual(s.selecionar_janela(antigas+novas,2),novas)
+
+    def test_sem_faculdade_nova_retomada_alterna_por_ultima_visita(self):
+        itens=[{'id':1,'_ultimo_checkpoint':'2026-10-04'}, {'id':2,'_ultimo_checkpoint':'2026-10-01'}]
+        self.assertEqual([i['id'] for i in s.selecionar_janela(itens,2)],[2,1])
+
+    @patch.object(s.time,'sleep')
+    def test_fonte_concluida_nao_reabre_na_proxima_janela(self, dormir):
+        from test_retomada_fontes import RepoPendencias
+        repo=RepoPendencias(); url='https://example.org/nutricao'
+        repo.fontes_concluidas=lambda item: repo.concluidas
+        resultados=[{'href':url,'title':'Universidade Teste Nutrição alunos 2026'}]
+        fonte=Mock(return_value=([],[]))
+        with patch.object(s,'consultas_leads',return_value=['a','b','c']), patch.dict(s.stats,{k:0 for k in s.stats}):
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:resultados,source_fn=fonte,limite_consultas=1)
+            self.assertIn(url,repo.concluidas)
+            s.processar_instituicao(repo,repo.item,search_fn=lambda *a:resultados,source_fn=fonte,limite_consultas=1)
+        self.assertEqual(fonte.call_count,1)
+        self.assertEqual(repo.cp['indice_pesquisa'],2)
+
+    def test_repositorio_de_outra_faculdade_nao_reprocessa_mesma_lista(self):
+        repo=s.SupabaseRepo(Mock())
+        repo._instituicoes_por_dominio_alias={'univag':{'centro universitario de varzea grande'}}
+        resultado={'href':'https://www.repositoriodigital.univag.com.br/index.php/nutri/issue/view/4','title':'Nutrição TCC 2026'}
+        self.assertTrue(repo.resultado_de_outra_faculdade(resultado,'Centro Universitário Cambury','Cambury'))
+        self.assertFalse(repo.resultado_de_outra_faculdade(resultado,'Centro Universitário de Várzea Grande','Univag'))
+        resultado['body']='Trabalho colaborativo de Nutrição Cambury 2026'
+        self.assertFalse(repo.resultado_de_outra_faculdade(resultado,'Centro Universitário Cambury','Cambury'))
+
+    def test_dominio_desconhecido_continua_disponivel_para_descoberta(self):
+        repo=s.SupabaseRepo(Mock())
+        self.assertFalse(repo.resultado_de_outra_faculdade({'href':'https://revista.example.org/tcc'},'Faculdade A','FA'))
