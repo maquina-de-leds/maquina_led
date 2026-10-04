@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: maquina-1-fila
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   executar:
@@ -35,10 +35,3 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python -u scraper.py
-
-      - name: Enriquecer os leads do ciclo com a Máquina 2
-        if: ${{ !cancelled() && steps.validacao.outcome == 'success' }}
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python -u enriquecimento.py
