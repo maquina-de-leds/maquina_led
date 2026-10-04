@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import scraper as s
 import fontes_academicas as f
 
-repo=s.SupabaseRepo.from_env(); gravados=[]; existentes=[]; falhas_operacionais=[]; repeticoes_confirmadas=[]
+repo=s.SupabaseRepo.from_env(); repo.isolar_erros_de_nome_comprovados(); gravados=[]; existentes=[]; falhas_operacionais=[]; repeticoes_confirmadas=[]
 inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]; acessos_indisponiveis=[]; recuperadas=[]
 ies='Universidade Presbiteriana Mackenzie'
 print('FILA REAL ANTES DO TESTE',json.dumps([{'instituicao':i['instituicao'],'status':i.get('_status_checkpoint'),'janela_encerrada':i.get('_janela_encerrada')} for i in repo.fila_nacional()[:8]],ensure_ascii=False),flush=True)
@@ -53,15 +53,18 @@ for fonte_alvo,instituicao_alvo,alias_alvo in fontes_alvo:
     try:
         registros,_=executar(lambda:f.carregar_fonte(fonte_alvo,instituicao_alvo,alias_alvo),20)
         print('CABEÇALHO REAL',json.dumps({'fonte':fonte_alvo,'registros':registros},ensure_ascii=False),flush=True)
-        registrar(registros,fonte_alvo)
-        if not registros:
+        referencia_edital={'Bruno Santos Abdalla de Oliveira','Gabriel de Bortoli Tibes da Luz','Nicolle Aparecida da Luz','Tiago Valentim Pedroso da Silva','Evelyn Cristina dos Santos Pereira','Grazieli da Silva Caetano','Jessica Camile Favarin','Silas Rodrigues da Silva','Vivian Baseggio'}
+        conferido=alias_alvo!='UNIARP' or {f.norm(r['nome']) for r in registros}=={f.norm(n) for n in referencia_edital}
+        if conferido: registrar(registros,fonte_alvo)
+        else: falhas_operacionais.append({'fonte':fonte_alvo,'erro':'Extração diverge dos nove nomes visíveis no edital; nenhuma gravação autorizada neste teste'})
+        if not registros or not conferido:
             documento=f.CACHE_DOCUMENTOS.get(fonte_alvo)
             print('DIAGNÓSTICO DE FORMATO',json.dumps({'fonte':fonte_alvo,'bytes':len(documento[0]) if documento else None,'tipo':documento[1] if documento else None,'pdf':bool(documento and documento[0].startswith(b'%PDF'))},ensure_ascii=False),flush=True)
             if documento and documento[0].startswith(b'%PDF'):
                 import io,pdfplumber
                 with pdfplumber.open(io.BytesIO(documento[0])) as pdf:
                     for numero,pagina in enumerate(pdf.pages[:2]):
-                        print('DIAGNÓSTICO DE TABELA',json.dumps({'pagina':numero+1,'texto':(pagina.extract_text() or '')[:3000],'tabelas':pagina.extract_tables()},ensure_ascii=False),flush=True)
+                        print('DIAGNÓSTICO DE TABELA',json.dumps({'pagina':numero+1,'texto':(pagina.extract_text() or '')[:3000],'tabelas':pagina.extract_tables(),'palavras':pagina.extract_words()[:120],'bordas':[t.rows[min(3,len(t.rows)-1)].cells for t in pagina.find_tables()[:1]]},ensure_ascii=False),flush=True)
     except Exception as exc:
         pendentes.append({'fonte':fonte_alvo,'erro':str(exc)[:150]})
 for consulta in consultas:

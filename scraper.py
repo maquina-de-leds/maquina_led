@@ -308,6 +308,7 @@ class SupabaseRepo:
         casos = (
             ("São Luís", "https://www.saoluis.br/"),
             ("Versão Final do Tcc", "https://uni20.com.br/course/view.php?id=6447"),
+            ("Nicolle Avaliação Aparecida de da Luz", "https://uniarp.edu.br/wp-content/uploads/2025/11/Edital-Bancas-finais-de-TCC-II-Nutricao.pdf"),
             ("Conformidade Legal", "https://www2.ufjf.br/nutricao/tcc-2025/"),
             ("Semana Acadêmica", "https://cursos.unipampa.edu.br/cursos/nutricao/2025/"),
             ("Material e Métodos", "https://oficial.unimar.br/wp-content/uploads/2026/07/Nutriciencia-2025-.pdf"),
