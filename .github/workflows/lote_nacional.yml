@@ -1,10 +1,6 @@
 name: Lote nacional de uma faculdade
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/lote_nacional.yml'
 permissions:
   contents: read
 concurrency:
@@ -20,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Instalar dependencias
-        run: pip install requests supabase ddgs pypdf lxml
+        run: pip install -r requirements.txt
       - name: Validar antes de capturar
         run: python -m unittest discover -p 'test_*.py'
       - name: Capturar proxima faculdade da fila com todos os criterios

@@ -28,12 +28,12 @@ def registrar(registros,url):
             if rows:
                 existentes.append(r['nome']); print('DUPLICADO CONFIRMADO:',r['nome'],flush=True); continue
             inst=r.get('instituicao',ies)
-            inseriu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None)
+            inseriu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None,candidato_indicio=r.get('candidato_indicio',False))
             assert repo.lead_existe(s.formatar_nome_pessoa(r['nome']),inst), 'Gravação não confirmada'
             if inseriu:
                 gravados.append(r['nome'])
                 antes=s.stats['leads_salvos']
-                repetiu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None)
+                repetiu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None,candidato_indicio=r.get('candidato_indicio',False))
                 assert not repetiu and s.stats['leads_salvos']==antes, 'Repetição inseriu novo registro'
                 repeticoes_confirmadas.append(r['nome'])
             else: existentes.append(r['nome'])

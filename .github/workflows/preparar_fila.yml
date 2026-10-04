@@ -2,11 +2,6 @@ name: Preparar lista de faculdades
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/preparar_fila.yml'
-
 concurrency:
   group: maquina-1-fila
   cancel-in-progress: false
@@ -21,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Instalar dependencias
-        run: pip install requests supabase pypdf lxml
+        run: pip install -r requirements.txt
       - name: Testar montagem da lista e extracao
         run: python -m unittest discover -p 'test_*.py'
       - name: Carregar lista por municipio no Supabase

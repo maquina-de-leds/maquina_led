@@ -1,9 +1,6 @@
 name: Mackenzie buscas documentais e candidatos
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['scripts/testar_mackenzie_documentos.py', '.github/workflows/mackenzie_documentos.yml']
 permissions:
   contents: read
 concurrency:
@@ -18,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests supabase ddgs pypdf lxml
+      - run: pip install -r requirements.txt
       - run: python -m unittest discover -p 'test_*.py'
       - name: Captura real com automatico e Bing alternativo
         run: python -u scripts/testar_mackenzie_documentos.py

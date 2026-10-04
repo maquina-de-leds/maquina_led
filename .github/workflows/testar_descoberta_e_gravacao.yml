@@ -1,9 +1,5 @@
 name: Teste curto de descoberta e gravação
 on:
-  push:
-    paths:
-      - 'scripts/testar_descoberta_e_gravacao.py'
-      - '.github/workflows/testar_descoberta_e_gravacao.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests supabase ddgs pypdf lxml pdfplumber
+      - run: pip install -r requirements.txt
       - name: Descobrir, salvar e confirmar no banco
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

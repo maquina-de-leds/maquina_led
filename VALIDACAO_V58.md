@@ -10,13 +10,13 @@ O cadastro de cursos é cruzado com o de instituições pelo CO_IES. A fila util
 
 ## Captação
 
-Para cada faculdade/município, a Máquina 1 pesquisa nome completo, sigla, Nutrição, 2025/2026 e diferentes sinais: turma, formandos, colação, TCC, concluintes, recém-formados, último período/semestre, estágio final, alunos/conclusão e mostra/autores. Há consultas adicionais com município/UF. LinkedIn é excluído das consultas e seus URLs são bloqueados, inclusive nos redirecionamentos. A Máquina 2 também deixa de pesquisar LinkedIn.
+Para cada faculdade agrupada nacionalmente (polos preservados na base), a Máquina 1 pesquisa nome completo, sigla, Nutrição, 2025/2026 e diferentes sinais: turma, formandos, colação, TCC, concluintes, recém-formados, último período/semestre, estágio final, alunos/conclusão e mostra/autores. Consultas com município/UF continuam disponíveis para execução municipal explícita; o ciclo nacional agrupa polos por faculdade e não atribui cidade sem evidência. Consultas e URLs públicos de LinkedIn são permitidos para evidência acadêmica. A Máquina 2 pesquisa Instagram separadamente; apenas encontrar um perfil não comprova a fase do curso.
 
 Os nomes são extraídos de páginas e PDFs públicos com vínculo institucional e contexto de Nutrição/ano: listas, tabelas, notícias com relação de formandos, linhas numeradas e metadados de autoria de TCC. Páginas também podem apontar documentos no mesmo domínio, lidos até um nível adicional. Não se usa título de resultado web como nome de pessoa. Professores, orientadores e pessoas de outro curso não são incluídos deliberadamente pelos extratores de listas. Trocas de curso/ano encerram ou atualizam o contexto.
 
 A data da turma prevalece sobre a data da notícia: uma colação publicada em 2026 referente a 2025/2 fica em 2025/2. Quando apenas o ano é comprovado, o semestre fica explicitamente não informado. TCC é registrado como evidência de fase acadêmica; não afirma automaticamente que a pessoa já colou grau.
 
-Quando um Instagram pessoal estiver claramente associado a um único nome da fonte, é salvo junto. O Instagram institucional ou de uma lista coletiva não é distribuído aos alunos. Sem Instagram, o nome é salvo imediatamente e fica com `proxima_acao=buscar_instagram` para a Máquina 2. Nome + instituição continuam sendo a chave de deduplicação utilizada pelo repositório.
+Quando um Instagram pessoal estiver claramente associado a um único nome da fonte, é salvo junto. O Instagram institucional ou de uma lista coletiva não é distribuído aos alunos. Sem Instagram, o nome é salvo imediatamente e fica com `proxima_acao=buscar_instagram` para a Máquina 2. A deduplicação consulta nome/instituição, nome/URL e aliases, com normalização de acentos/caixa/espaços e cache. Unicidade atômica depende da aplicação de `migrations/001_unicidade_leads.sql` no Supabase.
 
 ## Verificação e operação
 
@@ -38,6 +38,14 @@ Uma pessoa encontrada em uma fonte da faculdade não recebe automaticamente o mu
 
 `python -m unittest discover -p 'test_*.py'` valida fontes HTML/PDF, cursos e anos distintos, professores, autoria, Instagram associado, filas municipais, repetição de buscas e gravação simulada. Os testes não comprovam desempenho nacional nem substituem validação de uma execução real. O download oficial, schema do Supabase e volume final só são confirmados pelos logs da preparação/captura.
 
-A captura continua em `Automacao Maquina de Leads`, acionada manualmente. Preparação e captura compartilham bloqueio de concorrência. O limite permanece quatro instituições por execução, com checkpoints. Falhas de busca, download ou banco são sinalizadas; uma instituição com fontes inacessíveis fica pendente de revisita. Falha real encerra o job com código diferente de zero.
+A captura continua em `Automacao Maquina de Leads`, acionada manualmente e agendada aos minutos 7 e 37 de cada hora. Publicações de código não disparam os scripts que gravam no banco; a verificação automática é a suíte sem Supabase. Preparação e captura compartilham bloqueio de concorrência. O limite permanece quatro instituições por execução, com checkpoints. Falhas de busca, download ou banco são sinalizadas; uma instituição com fontes inacessíveis fica pendente de revisita. Falha de busca/banco encerra o job com código diferente de zero. Pendências de fontes podem encerrar o ciclo com código zero e aviso de cobertura incompleta; um job verde não prova varredura concluída.
 
 Limitações: páginas que exigem login/JavaScript, imagens e PDFs digitalizados sem texto não fornecem nomes pelos extratores atuais. Formatos não reconhecidos podem produzir zero nomes. Nesses casos, o log identifica a URL e quantidade extraída para orientar adaptação posterior, sem inventar pessoas ou comprovação. Os leads anteriores não são requalificados em massa.
+
+## Correções após auditoria de 04/10/2026
+
+Candidatos sem fase final comprovada são preservados com `qualificado=false` e `proxima_acao=validar_fase_academica`, mesmo com Instagram. A Máquina 2 inclui esses candidatos e os legados autorais, respeita `nao_contatar` e só promove após evidência pública de nome, Nutrição, instituição (quando informada) e fase final. Perfil de contato não promove candidato automaticamente. Leads antigos não são requalificados em massa.
+
+O leitor reconhece `semestre 2/2025`; o edital UNIARP integra a suíte offline com nove nomes e período 2025/2. PDF sem texto, formato não suportado e PDF acima do limite de leitura permanecem inconclusivos, preservando pendências. Falhas reais de uma alternativa não são ocultadas por outra resposta vazia. Busca parcialmente indisponível não vira vazio com base em consulta de saúde.
+
+Fontes com falha usam intervalo crescente de 30/60/120/240 minutos e, após cinco tentativas registradas, permanecem para revisão sem apagar leads ou afirmar conclusão. Tentativas de banco são limitadas e consultam a identidade antes de repetir após timeout. Todas as rotinas usam dependências fixadas em `requirements.txt`. O prazo de 360 segundos é cooperativo; requisições em andamento podem ultrapassá-lo.

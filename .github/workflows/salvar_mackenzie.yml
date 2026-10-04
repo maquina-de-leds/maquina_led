@@ -1,11 +1,6 @@
 name: Salvar alunos conferidos da Mackenzie
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/salvar_mackenzie_conferidos.py'
-      - '.github/workflows/salvar_mackenzie.yml'
 permissions:
   contents: read
 concurrency:
@@ -20,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests supabase ddgs pypdf lxml
+      - run: pip install -r requirements.txt
       - run: python -m unittest discover -p 'test_*.py'
       - name: Salvar nomes conferidos e confirmar duplicacao
         env:

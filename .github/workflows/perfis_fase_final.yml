@@ -1,9 +1,6 @@
 name: Mackenzie descoberta automatica fase final
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['scripts/testar_perfis_fase_final.py', '.github/workflows/perfis_fase_final.yml']
 permissions:
   contents: read
 concurrency:
@@ -18,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests supabase ddgs pypdf lxml
+      - run: pip install -r requirements.txt
       - run: python -m unittest discover -p 'test_*.py'
       - name: Descobrir e gravar candidatos automaticamente
         run: timeout 360 python -u scripts/testar_perfis_fase_final.py

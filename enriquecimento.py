@@ -6,24 +6,18 @@ import unicodedata
 from urllib.parse import urlparse
 from fontes_academicas import url_permitida
 
-from ddgs import DDGS
-from supabase import create_client
-
-
-print("🚀 MÁQUINA 2 - ENRIQUECIMENTO DE CONTATOS", flush=True)
 
 
 # ============================================================
 # SUPABASE
 # ============================================================
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+supabase = None
 
-supabase = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
-)
+
+def conectar_banco():
+    from supabase import create_client
+    return create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
 
 
 # ============================================================
@@ -225,16 +219,11 @@ def buscar_pendentes():
             .select(
                 "id,nome,instagram,linkedin,whatsapp,"
                 "instituicao,cidade,estado,ano_alvo,"
-                "periodo_alvo,proxima_acao,qualificado"
+                "periodo_alvo,proxima_acao,qualificado,nao_contatar,evidencia,fonte_url"
             )
-            .eq(
-                "qualificado",
-                True
-            )
-            .is_(
-                "instagram",
-                "null"
-            )
+            .eq('nao_contatar', False)
+            .or_('and(qualificado.eq.true,instagram.is.null),and(qualificado.eq.false,proxima_acao.eq.validar_fase_academica),and(qualificado.eq.false,fonte_validacao.eq.candidato_autoral_curso_a_validar)')
+            .order('id')
             .limit(
                 LIMITE_POR_EXECUCAO
             )
@@ -705,10 +694,52 @@ def atualizar_lead(
 # PROCESSAR LEAD
 # ============================================================
 
+def validar_candidato(ddgs, lead):
+    """Só promove após evidência pública de nome, curso e fase final."""
+    from fontes_academicas import extrair_resultado_busca, fase_final_comprovada, norm
+    from scraper import buscar_web
+    for fase in ('TCC', 'formandos', 'último semestre'):
+        consulta = f'"{lead["nome"]}" Nutrição "{lead.get("instituicao") or ""}" {fase}'
+        resultados = buscar_web(consulta, fetch_fn=lambda q, backend, limite: list(ddgs.text(q, backend=backend, max_results=limite)))
+        if resultados is None:
+            return False
+        for resultado in resultados:
+            url = str(resultado.get('href') or resultado.get('url') or '')
+            if not url_permitida(url):
+                continue
+            for registro in extrair_resultado_busca(resultado, lead.get('instituicao')):
+                if norm(registro['nome']) != norm(lead['nome']) or not fase_final_comprovada(registro['evidencia']):
+                    continue
+                if registro.get('candidato_indicio'):
+                    continue
+                if lead.get('instituicao') and registro.get('instituicao') != lead['instituicao']:
+                    continue
+                dados = {'qualificado': True, 'proxima_acao': 'primeiro_contato_instagram' if lead.get('instagram') else 'buscar_instagram',
+                         'ano_alvo': registro['ano'], 'periodo_alvo': registro['periodo'],
+                         'evidencia': registro['evidencia'], 'fonte_url': url,
+                         'fonte_validacao': 'fase_academica_validada_maquina2'}
+                resposta = (supabase.table('leds').update(dados).eq('id', lead['id'])
+                            .eq('nao_contatar', False).eq('qualificado', False).execute())
+                if not resposta.data:
+                    return False
+                lead.update(dados)
+                return True
+        pausa()
+    return False
+
 def processar_lead(
     ddgs,
     lead
 ):
+
+    if lead.get('nao_contatar'):
+        return
+    if lead.get('qualificado') is False:
+        if not validar_candidato(ddgs, lead):
+            print('   ⏳ Fase acadêmica ainda não comprovada; candidato preservado', flush=True)
+            return
+        if lead.get('instagram'):
+            return
 
     nome = lead.get(
         "nome",
@@ -831,6 +862,10 @@ def processar_lead(
 
 
 def executar():
+
+    global supabase
+    from ddgs import DDGS
+    supabase = conectar_banco()
 
     print("")
     print(

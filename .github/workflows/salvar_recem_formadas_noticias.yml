@@ -1,9 +1,5 @@
 name: Salvar candidatos de fontes públicas
 on:
-  push:
-    paths:
-      - 'scripts/salvar_recem_formadas_noticias.py'
-      - '.github/workflows/salvar_recem_formadas_noticias.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install supabase
+      - run: pip install -r requirements.txt
       - name: Salvar e confirmar somente o lote de evidências conferidas
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

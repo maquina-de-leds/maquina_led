@@ -1,9 +1,6 @@
 name: Auditar base Mackenzie
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['scripts/auditar_base_mackenzie.py', '.github/workflows/auditar_base_mackenzie.yml']
 permissions:
   contents: read
 jobs:
@@ -15,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install supabase
+      - run: pip install -r requirements.txt
       - name: Ler registros sem alteracoes
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

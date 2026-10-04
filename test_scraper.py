@@ -98,7 +98,8 @@ class FontesTests(unittest.TestCase):
         import io
         pdf=PdfWriter(); pdf.add_blank_page(width=100,height=100)
         data=io.BytesIO(); pdf.write(data)
-        self.assertEqual(f.ler_pdf(data.getvalue(),'Universidade Teste'),([],[]))
+        with self.assertRaises(f.ExtracaoInconclusiva):
+            f.ler_pdf(data.getvalue(),'Universidade Teste')
     def test_links_pdf_e_bloqueio(self):
         _, links=f.ler_html('<a href="/nutricao-2025.pdf">Lista</a><a href="https://linkedin.com/in/aluno">Pessoa</a>', 'https://universidade.edu.br/turma','Universidade Teste')
         self.assertEqual(links,['https://universidade.edu.br/nutricao-2025.pdf'])
