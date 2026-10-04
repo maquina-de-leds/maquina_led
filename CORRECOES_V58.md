@@ -11,7 +11,7 @@
 - Deduplicação inclui normalização de acentos, caixa e espaços; retries de banco confirmam se a identidade foi gravada antes de repetir.
 - Completar Instagram preserva a validação de candidato. A Máquina 2 falha explicitamente quando não pode verificar o banco e condiciona atualização ao estado atual de qualificação e contato.
 - Dependências estão fixadas; CI inclui pdfplumber, fixture documental e PostgreSQL 16 descartável. Alterações em coleções também acionam testes.
-- Publicação de código não dispara rotinas que gravam no Supabase. Captura manual/agendada continua disponível; Máquina 2 compartilha o bloqueio de concorrência.
+- Na auditoria inicial, publicação não disparava gravações. Após ativação autorizada, mudanças na captura disparam um ciclo; captura manual/agendada e Máquina 2 compartilham o bloqueio de concorrência.
 
 ## Validação
 
@@ -21,7 +21,7 @@ PR e evidências de CI: https://github.com/maquina-de-leds/maquina_led/pull/2
 
 ## Ativação no banco e limites
 
-`migrations/001_unicidade_leads.sql` foi preparada e testada em banco descartável. Precisa ser aplicada no Supabase para garantir unicidade entre processos simultâneos; publicar Python não cria o índice. A migração aborta se encontrar duplicados legados, preservando todos os registros. Consulte `migrations/README.md`.
+`migrations/001_unicidade_leads.sql` foi preparada e testada em banco descartável. Foi aplicada no Supabase em 04/10/2026 após revisão reversível dos duplicados legados, garantindo unicidade entre processos simultâneos. A migração aborta se encontrar duplicados legados, preservando todos os registros. Consulte `migrations/README.md`.
 
 Não houve gravação de leads, exclusão ou requalificação em massa durante as correções. Registros antigos qualificados exigem uma revisão separada de suas evidências se for desejada atualização retroativa. A fila segue baseada no INEP 2024; não afirma catálogo integral atualizado em 2026. O prazo de execução é cooperativo, e fontes externas podem continuar indisponíveis. Testes verdes não significam varredura nacional completa nem garantia de rendimento.
 
@@ -34,4 +34,6 @@ Não houve gravação de leads, exclusão ou requalificação em massa durante a
 - Captura agendada a cada 30 minutos, com uma execução de ativação ao publicar mudanças na captura. GitHub pode atrasar ou omitir horários; não há garantia de execução contínua.
 - Máquina 2 roda após captura bem-sucedida, no mesmo bloqueio de concorrência. Alterna por última tentativa, tem prazo de cinco minutos por lote e 45 segundos por lead, e exige identidade, curso e vínculo público para associar Instagram. Não envia mensagens.
 - O diagnóstico rápido distingue falha de busca de indisponibilidade de página; esta última continua registrada como cobertura incompleta, não é apagada.
-- Validação local: 201 testes passaram; oito testes PostgreSQL são executados no serviço descartável do GitHub. Inclui preservação de duplicidades, continuação de lote, retomada e identidade do Instagram.
+- Validação local: 203 testes passaram; oito testes PostgreSQL são executados no serviço descartável do GitHub. Inclui preservação de duplicidades, continuação de lote, retomada e identidade do Instagram.
+
+Validação final no GitHub: 211 testes passaram, incluindo os oito testes PostgreSQL. Evidência: https://github.com/maquina-de-leds/maquina_led/actions/runs/37208369123
