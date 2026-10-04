@@ -13,10 +13,8 @@ repo=s.SupabaseRepo.from_env(); gravados=[]; existentes=[]; falhas_operacionais=
 inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]; acessos_indisponiveis=[]; recuperadas=[]
 ies='Universidade Presbiteriana Mackenzie'
 print('FILA REAL ANTES DO TESTE',json.dumps([{'instituicao':i['instituicao'],'status':i.get('_status_checkpoint'),'janela_encerrada':i.get('_janela_encerrada')} for i in repo.fila_nacional()[:8]],ensure_ascii=False),flush=True)
-consultas=['"Nutrição" "recém-formada" 2025 notícia',
-           '"Nutrição" "recém-formada" 2026 universidade',
-           'Mackenzie Nutrição 2025 TCC autores',
-           'Mackenzie Nutrição 2026 trabalho conclusão curso']
+consultas=[]  # teste focado das fontes descobertas na web; sem repetir as buscas já medidas
+
 def registrar(registros,url):
     for r in registros:
         chave=f.norm(r['nome'])

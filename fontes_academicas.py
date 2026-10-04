@@ -523,6 +523,39 @@ def extrair_cabecalho_autoral(linhas, instituicao, alias=None):
     return saida
 
 
+def nomes_coluna_aluno(pdf):
+    """Alternativa para tabelas cuja coluna de nomes não tem bordas reconhecíveis."""
+    nomes=[]; limite_x=None; fragmento=None
+    for pagina in pdf.pages[:40]:
+        palavras=pagina.extract_words()
+        aluno=next((w for w in palavras if norm(w['text']) in {'aluno','alunos'}),None)
+        titulo=next((w for w in palavras if aluno and norm(w['text'])=='titulo' and abs(w['top']-aluno['top'])<5 and w['x0']>aluno['x0']),None)
+        topo=0
+        if aluno and titulo:
+            limite_x=((aluno['x0']+aluno['x1'])/2+(titulo['x0']+titulo['x1'])/2)/2
+            topo=aluno['bottom']+1
+        if limite_x is None: continue
+        esquerda=sorted((w for w in palavras if w['x0']<limite_x and w['top']>=topo),key=lambda w:(round(w['top'],1),w['x0']))
+        linhas=[]
+        for w in esquerda:
+            if linhas and abs(w['top']-linhas[-1][0])<3:
+                linhas[-1][1].append(w['text'])
+            else: linhas.append([w['top'],[w['text']],w['bottom']-w['top']])
+        grupos=[]
+        anterior=None
+        for y,partes,altura in linhas:
+            if anterior is None or y-anterior>max(18,altura*1.8): grupos.append([])
+            grupos[-1].extend(partes); anterior=y
+        for i,grupo in enumerate(grupos):
+            texto=' '.join(grupo)
+            if fragmento:
+                texto=fragmento+' '+texto; fragmento=None
+            nome=pessoa(texto)
+            if nome: nomes.append(nome)
+            elif i==len(grupos)-1 and re.fullmatch(r'[A-ZÀ-Ý][a-zà-ÿ]+',texto): fragmento=texto
+    return list(dict.fromkeys(nomes))
+
+
 def extrair_alunos_tabela_pdf(data, instituicao, alias=None):
     """Lê somente a coluna Aluno de tabelas de bancas, juntando linhas da célula."""
     try: import pdfplumber
@@ -556,6 +589,10 @@ def extrair_alunos_tabela_pdf(data, instituicao, alias=None):
                         continue
                     saida.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
                         evidencia=f'Nutrição | {periodo} | aluno identificado na coluna Aluno de banca de TCC: {nome}.',contexto_academico=contexto[:1500]))
+        if not saida and not re.search(OUTROS_CURSOS,n):
+            for nome in nomes_coluna_aluno(pdf):
+                saida.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
+                    evidencia=f'Nutrição | {periodo} | nome completo recomposto na coluna Aluno do cronograma de bancas: {nome}.',contexto_academico=contexto[:1500]))
     return saida
 
 
