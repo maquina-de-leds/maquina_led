@@ -523,6 +523,42 @@ def extrair_cabecalho_autoral(linhas, instituicao, alias=None):
     return saida
 
 
+def extrair_alunos_tabela_pdf(data, instituicao, alias=None):
+    """Lê somente a coluna Aluno de tabelas de bancas, juntando linhas da célula."""
+    try: import pdfplumber
+    except ImportError: return []
+    saida=[]; coluna=None; coluna_curso=None; fragmento=None
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        contexto=' '.join((p.extract_text() or '') for p in pdf.pages[:2])
+        n=norm(contexto)
+        ano,periodo=periodo_academico(contexto)
+        if 'nutricao' not in n or not re.search(r'tcc|trabalho de conclusao',n) or ano not in ANOS: return []
+        vinculada=any(t and re.search(r'(?<!\w)'+re.escape(norm(t))+r'(?!\w)',n) for t in (instituicao,alias))
+        for pagina in pdf.pages[:40]:
+            for tabela in pagina.extract_tables():
+                for i,linha in enumerate(tabela):
+                    cabecalho=next((j for j,c in enumerate(linha) if norm(c or '') in {'aluno','alunos','academico','academicos','discente','discentes'}),None)
+                    if cabecalho is not None:
+                        coluna=cabecalho
+                        coluna_curso=next((j for j,c in enumerate(linha) if norm(c or '')=='curso'),None)
+                        continue
+                    if coluna is None or len(linha)<=coluna: continue
+                    if coluna_curso is not None:
+                        if len(linha)<=coluna_curso or 'nutricao' not in norm(linha[coluna_curso] or ''): continue
+                    elif re.search(OUTROS_CURSOS,n): continue
+                    celula=re.sub(r'\s+',' ',linha[coluna] or '').strip()
+                    if not celula: continue
+                    if fragmento:
+                        celula=fragmento+' '+celula; fragmento=None
+                    nome=pessoa(celula)
+                    if not nome:
+                        if i==len(tabela)-1 and re.fullmatch(r'[A-ZÀ-Ý][a-zà-ÿ]+',celula): fragmento=celula
+                        continue
+                    saida.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
+                        evidencia=f'Nutrição | {periodo} | aluno identificado na coluna Aluno de banca de TCC: {nome}.',contexto_academico=contexto[:1500]))
+    return saida
+
+
 def ler_pdf(data, instituicao, alias=None):
     from pypdf import PdfReader
     reader=PdfReader(io.BytesIO(data))
@@ -532,6 +568,7 @@ def ler_pdf(data, instituicao, alias=None):
     # Primeiro cabeçalho em PDF fornece contexto e data da seção.
     records=extrair_documento(lines,instituicao,alias,' '.join(x[0] for x in lines))
     records += extrair_autores_alunos_pdf(lines,instituicao,alias)
+    records += extrair_alunos_tabela_pdf(data,instituicao,alias)
     if not records:
         records=extrair_documento(lines,None,None,' '.join(x[0] for x in lines))
         records+=extrair_autores_alunos_pdf(lines,None,None)

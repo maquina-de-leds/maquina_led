@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Instalar dependencias
-        run: pip install requests supabase ddgs pypdf lxml
+        run: pip install requests supabase ddgs pypdf lxml pdfplumber
       - name: Verificar extracao e fila antes da captura
         run: python -m unittest discover -p 'test_*.py'
       - name: Executar captura com prazo e deduplicação em memória
