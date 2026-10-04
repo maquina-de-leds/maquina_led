@@ -41,6 +41,14 @@ class QualificacaoTests(unittest.TestCase):
     def test_indicio_explicito_prevalece_sobre_tcc(self):
         self.assertFalse(self.salvar('Autoria TCC Nutrição 2026', indicio=True)['qualificado'])
 
+    def test_semestre_calendario_nao_e_semestre_inicial_do_aluno(self):
+        self.assertTrue(f.fase_final_comprovada('Formandos Nutrição referente ao 2º semestre de 2025'))
+        self.assertFalse(f.fase_final_comprovada('Aluna Nutrição cursando 2º semestre, TCC em outro projeto 2026'))
+
+    def test_lista_de_formandos_conserva_evidencia_de_fase_final(self):
+        registros, _ = f.ler_html('<title>Universidade Teste</title><h1>Formandos Nutrição 2026.1</h1><ul><li>Ana Silva</li></ul>', 'https://example.org/lista', 'Universidade Teste')
+        self.assertTrue(self.salvar(registros[0]['evidencia'])['qualificado'])
+
     def test_vinculo_sem_fase_final_preservado_pela_captura(self):
         repo = Repo()
         resultado = {'title': 'Ana Silva', 'body': 'Estudante de Nutrição Universidade Teste 2026.', 'href': 'https://example.org/aluna'}

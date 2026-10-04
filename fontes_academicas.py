@@ -18,9 +18,9 @@ def fase_final_comprovada(texto):
     n = norm(texto)
     if 'nutricao' not in n:
         return False
-    if re.search(r'\b[1-6]\s*(?:º|o)?\s*(?:periodo|semestre)\b|fase (?:do curso )?pendente|fase (?:academica )?a (?:validar|confirmar)|conclusao e identidade a validar|matricula.*nao confirmad', n):
+    if re.search(r'\b[1-6]\s*(?:º|o)?\s*(?:periodo|semestre)\b(?!\s+(?:letivo\s+)?(?:de\s+)?20\d{2}\b)|fase (?:do curso )?pendente|fase (?:academica )?a (?:validar|confirmar)|conclusao e identidade a validar|matricula.*nao confirmad', n):
         return False
-    return bool(re.search(r'\btcc\b|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|recem[- ]formad|ultimo (?:ano|periodo|semestre)|estagio final|\b[78]\s*(?:º|o)?\s*(?:periodo|semestre)', n))
+    return bool(re.search(r'\btcc\b|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|recem[- ]formad|ultimo (?:ano|periodo|semestre)|estagio final|fase final comprovada|\b[78]\s*(?:º|o)?\s*(?:periodo|semestre)', n))
 OUTROS_CURSOS = r'educacao fisica|enfermagem|fisioterapia|psicologia|medicina|direito|engenharia|farmacia|pedagogia|letras|biomedicina'
 FASE = r'graduand[oa]s?|tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
 PAPEL = r'orientador|coorientador|professor|docente|coordenador|paraninf|patron|reitor|banca'
@@ -204,6 +204,8 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     def add(name, evidence, y, per):
         if name and y in ANOS:
             phase = 'TCC' if re.search(r'tcc|trabalho de conclusao', norm(evidence+' '+context)) else 'vínculo acadêmico'
+            if phase != 'TCC' and fase_final_comprovada(evidence + ' ' + context):
+                phase = 'fase final comprovada'
             out.append(dict(nome=name, ano=y, periodo=per, instagram=instagram_associado(evidence,name),
                             evidencia=f'{instituicao} | Nutrição | {per} | {phase} | {evidence}',
                             contexto_academico=context))

@@ -15,7 +15,7 @@
 
 ## Validação
 
-A suíte contém 200 testes: 194 de extração, qualificação, busca, retomada e banco simulado, mais seis com PostgreSQL descartável (migração idempotente, normalização, preservação de homônimos em instituições distintas, proteção por URL, abortar duplicados legados e inserção simultânea). Localmente, os 194 passaram; os seis SQL são executados no GitHub com serviço de teste. Compilação e `pip check` passaram. As validações de fontes públicas são somente de leitura.
+A suíte contém 202 testes: 196 de extração, qualificação, busca, retomada e banco simulado, mais seis com PostgreSQL descartável (migração idempotente, normalização, preservação de homônimos em instituições distintas, proteção por URL, abortar duplicados legados e inserção simultânea). Localmente, os 196 passaram; os seis SQL são executados no GitHub com serviço de teste. Compilação e `pip check` passaram. As validações de fontes públicas são somente de leitura.
 
 PR e evidências de CI: https://github.com/maquina-de-leds/maquina_led/pull/2
 
