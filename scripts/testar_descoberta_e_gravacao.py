@@ -1,6 +1,7 @@
 """Teste curto de descoberta e gravação real, sem alterar a fila nacional.
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
 Confere também a data editorial quando ela aparece depois do menu.
+Valida a captura após a correção da alternância de janelas da fila.
 """
 import json,re,signal,sys,time
 from pathlib import Path
@@ -42,18 +43,6 @@ def executar(fn,limite):
     signal.setitimer(signal.ITIMER_REAL,min(limite,restante))
     try: return fn()
     finally: signal.setitimer(signal.ITIMER_REAL,0)
-# Reteste com identificação de títulos truncados. Caso controlado do jornal que bloqueou os retestes anteriores.
-url_jornal='https://www.votunews.com.br/recem-formada-em-nutricao-pela-unifev-julia-bernini-conquista-vaga-em-especializacao-na-unesp/'
-try:
-    try: registros,_=executar(lambda:f.carregar_fonte(url_jornal,None,None),20)
-    except Exception as erro_jornal:
-        acessos_indisponiveis.append({'fonte':url_jornal,'erro':str(erro_jornal)[:150]})
-        registros,_=executar(lambda:f.recuperar_fonte_na_busca(url_jornal,None,None,s.buscar_web),45)
-    if not registros: raise RuntimeError('Matéria do jornal não recuperada com evidência própria')
-    print('CASO CONTROLADO JORNAL',json.dumps(registros,ensure_ascii=False),flush=True)
-    registrar(registros,url_jornal)
-except Exception as erro_jornal:
-    pendentes.append({'fonte_controlada':url_jornal,'erro':str(erro_jornal)[:150]})
 for consulta in consultas:
     if time.monotonic()-inicio>=360: break
     consultas_feitas+=1
@@ -67,9 +56,6 @@ for consulta in consultas:
             registros=f.extrair_resultado_busca(resultado,ies,'Mackenzie')
             registrar(registros,url)
             if url in fontes or not f.url_permitida(url): continue
-            if f.acesso_reservado_maquina2(url):
-                adiadas.append({'fonte':url,'motivo':'Acesso ao Instagram pertence à Máquina 2; evidência da busca já processada'})
-                continue
             resumo=f.norm(str(resultado.get('title') or '')+' '+str(resultado.get('body') or ''))
             if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',f.norm(str(resultado.get('title') or ''))):
                 adiadas.append({'fonte':url,'motivo':'Notícia de falecimento; pessoa fora do público de captura'})

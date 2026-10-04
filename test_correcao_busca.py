@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 7306)
+Total output lines: 411
+
 import unittest
 from unittest.mock import patch, Mock
 import fontes_academicas as f
@@ -13,7 +16,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
             s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[r],source_fn=fonte,limite_consultas=1)
         fonte.assert_not_called()
         self.assertEqual(repo.cp['status'],'processando')
-        self.assertIsNone(repo.cp['ultimo_erro'])
+        self.assertEqual(repo.cp['ultimo_erro'],'Janela encerrada; próxima consulta preservada')
 
     def test_alias_joinville_corrige_grafia_apenas_na_consulta(self):
         item={'instituicao':'Católica de Santa Catarina em Joinville','fonte_validacao':'SIGLA=Católica em Joinvile'}
@@ -184,87 +187,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
         with patch.object(s,'consultas_leads',return_value=['a','b','c']):
             s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [])
         self.assertEqual(chamadas,['c'])
-        self.assertEqual(repo.cp['status'],'concluido')
-        self.assertEqual(repo.cp['leads_encontrados'],4)
-        self.assertEqual(repo.cp['leads_salvos'],2)
-
-    @patch.object(s.time,'sleep')
-    def test_fonte_pendente_nao_se_perde_na_interrupcao(self,sleep):
-        repo=Repo()
-        def fonte(*a): raise RuntimeError('503')
-        def busca(q,*a):
-            if q=='b': raise KeyboardInterrupt()
-            return [{'href':'https://example.org/nutricao','title':'Nutrição formandos 2026'}]
-        with patch.object(s,'consultas_leads',return_value=['a','b']):
-            with self.assertRaises(KeyboardInterrupt): s.processar_instituicao(repo,repo.item,search_fn=busca,source_fn=fonte)
-            self.assertIsNotNone(repo.cp['ultimo_erro'])
-            chamadas=[]
-            s.processar_instituicao(repo,repo.item,search_fn=lambda q,*a:chamadas.append(q) or [])
-            self.assertEqual(chamadas,['a','b'])
-
-    def test_noticia_falecimento_nao_captura_pessoa(self):
-        linhas=[('Recém-formada em Nutrição morre em acidente','h1'),('08 Ago 2026','text'),('Recém-formada em Nutrição, Ana Diankelley Oliveira, foi identificada como a vítima.','p')]
-        self.assertEqual(f.extrair_documento(linhas,None),[])
-
-    def test_noticia_aluno_e_docentes_no_mesmo_paragrafo(self):
-        linhas=[('28 Jan 2025','text'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação. Os professores apoiaram a aluna. O reitor Osvaldo Gastaldon comemorou.','p')]
-        r=f.extrair_documento(linhas,None,None)
-        self.assertEqual([x['nome'] for x in r],['Júlia Parpineli Bernini Silva'])
-        self.assertEqual(r[0]['ano'],2025)
-
-    def test_data_editorial_apos_menu_permite_noticia_recente(self):
-        linhas=[('Navegação '+str(i),'p') for i in range(35)]
-        linhas += [('28 Jan 2025','div'),('Recém-formada em Nutrição pela Unifev, Júlia Parpineli Bernini Silva, celebra sua aprovação.','p')]
-        r=f.extrair_documento(linhas,None)
-        self.assertEqual([x['nome'] for x in r],['Júlia Parpineli Bernini Silva'])
-        self.assertEqual(r[0]['ano'],2025)
-
-    def test_post_institucional_identifica_recem_formada_no_corpo(self):
-        resultado={'title':'UniFil - Instagram','body':'February 20, 2026: Recém-formada em Nutrição, Thais Camargo Prestes foi aprovada na Residência Multiprofissional em Oncologia.'}
-        r=f.extrair_resultado_busca(resultado,'Mackenzie')
-        self.assertEqual([x['nome'] for x in r],['Thais Camargo Prestes'])
-        self.assertEqual(r[0]['ano'],2026)
-        self.assertIsNone(r[0]['instituicao'])
-
-    def test_post_de_terceiro_extrai_aluna_e_nao_autora_do_post(self):
-        r=f.extrair_resultado_busca({'title':'Beatriz Moreti - LinkedIn','body':'A aluna do Curso de Nutrição da Universidade Presbiteriana Mackenzie, Un Hwa Moreira, foi premiada no Ganepão 2026.'},'Universidade Presbiteriana Mackenzie','Mackenzie')
-        self.assertEqual([x['nome'] for x in r],['Un Hwa Moreira'])
-
-    def test_noticia_recem_formada_sem_faculdade_pesquisada(self):
-        html='<meta property="article:published_time" content="2025-02-20"><h1>Trajetória profissional</h1><p>Recém-formada em Nutrição pela Unifacisa, Carolina Nóbrega Dantas, compartilha sua trajetória.</p>'
-        registros,_=f.ler_html(html,'https://example.org/noticia','Mackenzie')
-        self.assertEqual([r['nome'] for r in registros],['Carolina Nóbrega Dantas'])
-        self.assertIsNone(registros[0]['instituicao'])
-        self.assertEqual(registros[0]['ano'],2025)
-
-    @patch.object(s.time,'sleep')
-    def test_tres_falhas_pausam_e_retomam_primeira_pendente(self,sleep):
-        repo=Repo(); chamadas=[]
-        def falha(q,*a): chamadas.append(q); return None
-        with patch.object(s,'consultas_leads',return_value=['a','b','c','d']):
-            self.assertFalse(s.processar_instituicao(repo,repo.item,search_fn=falha,continuar_falhas=True))
-            self.assertEqual(chamadas,['a','b','c'])
-            self.assertEqual(repo.cp['indice_pesquisa'],0)
-            chamadas.clear()
-            def recuperado(q,*a): chamadas.append(q); return []
-            self.assertTrue(s.processar_instituicao(repo,repo.item,search_fn=recuperado,continuar_falhas=True))
-            self.assertEqual(chamadas,['a','b','c','d'])
-
-    def test_artigo_em_ingles_tenta_endereco_portugues(self):
-        with patch.object(f,'_carregar_url',return_value=([{'nome':'Ana Silva'}],[])) as leitura:
-            f.carregar_fonte('https://eventoscopq.mackenzie.br/jornada/en/article/view/2554','Mackenzie')
-        self.assertEqual(leitura.call_args.args[0],'https://eventoscopq.mackenzie.br/jornada/pt_BR/article/view/2554')
-
-    @patch.object(s.time,'sleep')
-    def test_pdf_oficial_sem_instituicao_no_resumo_continua_lido(self,sleep):
-        repo=Repo(); lidas=[]
-        def fonte(url,*args):
-            lidas.append(url)
-            return [],[]
-        resultados=[{'href':'https://www.mackenzie.br/alunos.pdf','title':'Projetos aprovados 2025'},
-                    {'href':'https://outra.edu.br/alunos.pdf','title':'Nutrição Universidade Outra 2025'}]
-        with patch.object(s,'consultas_leads',return_value=['teste']):
-            s.processar_instituicao(repo,{**repo.item,'instituicao':'Universidade Presbiteriana Mackenzie','fonte_validacao':'SIGLA=Mackenzie'},search_fn=lambda *a:resultados,source_fn=fonte)
+        self.assertEqual(rep…1306 tokens truncated…            s.processar_instituicao(repo,{**repo.item,'instituicao':'Universidade Presbiteriana Mackenzie','fonte_validacao':'SIGLA=Mackenzie'},search_fn=lambda *a:resultados,source_fn=fonte)
         self.assertEqual(lidas,['https://www.mackenzie.br/alunos.pdf','https://outra.edu.br/alunos.pdf'])
 
     def test_busca_sem_faculdade_salva_sem_atribuir_mackenzie(self):

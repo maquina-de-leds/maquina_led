@@ -226,7 +226,7 @@ class SupabaseRepo:
         checkpoints={}
         offset=0
         while True:
-            r=(self.client.table("controle_busca").select("etapa,status,atualizado_em")
+            r=(self.client.table("controle_busca").select("etapa,status,atualizado_em,ultimo_erro")
                .order("id").range(offset,offset+999).execute())
             lote=r.data or []
             checkpoints.update({x["etapa"]:x for x in lote})
@@ -240,10 +240,11 @@ class SupabaseRepo:
             item["tentativa_descoberta"] = int(item.get("tentativa_descoberta") or 0) if cp else 0
             item["_ultimo_checkpoint"] = cp.get("atualizado_em") or "" if cp else ""
             item["_status_checkpoint"] = cp.get("status") if cp else "pendente"
+            item["_janela_encerrada"] = bool(cp and cp.get("ultimo_erro") in ("Janela encerrada; próxima consulta preservada", "Janela com fontes pendentes; repetir ao finalizar"))
             fila.append(item)
         # Uma execução interrompida deve retomar antes de abrir outra faculdade.
         ordem={"processando":0,"pendente":1,"erro":2}
-        return sorted(fila,key=lambda x:(ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
+        return sorted(fila,key=lambda x:(1 if x.get("_janela_encerrada") else ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
 
     def contar_pendentes_uf(self, uf):
         r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
@@ -801,10 +802,10 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         if cp.get("ultimo_erro") == "Busca externa indisponível":
             inicio = (consultas.index(cp["consulta_atual"]) if cp.get("consulta_atual") in consultas
                       else min(max(int(cp.get("indice_pesquisa") or 0), 0), total-1))
-        elif cp.get("status") == "processando" and cp.get("ultimo_erro") in (None, "Janela com fontes pendentes; repetir ao finalizar") and cp.get("total_pesquisas") == total:
+        elif cp.get("status") == "processando" and cp.get("ultimo_erro") in (None, "Janela encerrada; próxima consulta preservada", "Janela com fontes pendentes; repetir ao finalizar") and cp.get("total_pesquisas") == total:
             # Interrupção do runner: continuar da próxima consulta ainda não concluída.
             inicio = min(max(int(cp.get("indice_pesquisa") or 0), 0), total)
-        if cp.get('status')=='processando' and cp.get('ultimo_erro') in (None, 'Janela com fontes pendentes; repetir ao finalizar') and total-int(cp.get('total_pesquisas') or 0) in (0,1) and cp.get('consulta_atual') in consultas:
+        if cp.get('status')=='processando' and cp.get('ultimo_erro') in (None, 'Janela encerrada; próxima consulta preservada', 'Janela com fontes pendentes; repetir ao finalizar') and total-int(cp.get('total_pesquisas') or 0) in (0,1) and cp.get('consulta_atual') in consultas:
             inicio=consultas.index(cp['consulta_atual'])
     print(f"\n🏫 {uf} | {cidade} | {instituicao} | WEB / TURMAS", flush=True)
     repo.atualizar_instituicao(iid, status="processando")
@@ -818,6 +819,11 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
     for idx in range(inicio, fim):
         consulta = consultas[idx]
+        inicio_consulta=time.monotonic()
+        nomes_consulta=set()
+        salvos_consulta=stats["leads_salvos"]
+        duplicados_consulta=stats["duplicados"]
+        fontes_consulta=stats["fontes_visitadas"]
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
         checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
@@ -848,6 +854,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             url_resultado=str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url_resultado): continue
             for registro in extrair_resultado_busca(resultado,instituicao,alias):
+                nomes_consulta.add(normalizar(registro["nome"]))
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 registro["evidencia"] += " | Consultado em "+agora()
@@ -907,6 +914,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 if url_permitida(link) and (depth==0 or pagina):
                     fila.append((link,depth if pagina else 1))
             for registro in registros:
+                nomes_consulta.add(normalizar(registro["nome"]))
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 contexto = normalizar(registro.get("contexto_academico", ""))
@@ -917,9 +925,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
         checkpoint_captacao(repo,item,"processando",idx+1,total,consulta=consultas[idx+1] if idx+1<total else None,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
+        print("RESULTADO DA CONSULTA:",json.dumps({"consulta":consulta,"segundos":round(time.monotonic()-inicio_consulta,1),"nomes_unicos_na_consulta":len(nomes_consulta),"novos_salvos":stats["leads_salvos"]-salvos_consulta,"ocorrencias_duplicadas":stats["duplicados"]-duplicados_consulta,"fontes_visitadas":stats["fontes_visitadas"]-fontes_consulta},ensure_ascii=False),flush=True)
         time.sleep(PAUSA_ENTRE_BUSCAS)
     novos = stats["leads_salvos"]-salvos_antes
     if fim<total:
+        if not falhas_fontes:
+            checkpoint_captacao(repo,item,"processando",fim,total,consulta=consultas[fim],erro="Janela encerrada; próxima consulta preservada",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
         if falhas_fontes:
             checkpoint_captacao(repo,item,"processando",fim,total,consulta=consultas[fim],erro="Janela com fontes pendentes; repetir ao finalizar",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
         stats["instituicoes_processadas"]+=1
