@@ -2,6 +2,8 @@ import os
 import re
 import time
 import random
+import signal
+from datetime import datetime, timezone
 import unicodedata
 from urllib.parse import urlparse
 from fontes_academicas import url_permitida
@@ -11,6 +13,10 @@ from fontes_academicas import url_permitida
 # ============================================================
 # SUPABASE
 # ============================================================
+
+class JanelaEncerrada(BaseException):
+    """Prazo do lote; não pode ser absorvido pelos retries de rede."""
+
 
 supabase = None
 
@@ -219,10 +225,11 @@ def buscar_pendentes():
             .select(
                 "id,nome,instagram,linkedin,whatsapp,"
                 "instituicao,cidade,estado,ano_alvo,"
-                "periodo_alvo,proxima_acao,qualificado,nao_contatar,evidencia,fonte_url"
+                "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,maquina2_tentativas"
             )
             .eq('nao_contatar', False)
-            .or_('and(qualificado.eq.true,instagram.is.null),and(qualificado.eq.false,proxima_acao.eq.validar_fase_academica),and(qualificado.eq.false,fonte_validacao.eq.candidato_autoral_curso_a_validar)')
+            .or_('and(or(não_contatar.is.null,não_contatar.eq.false),or(and(qualificado.eq.true,instagram.is.null),and(qualificado.eq.false,proxima_acao.eq.validar_fase_academica),and(qualificado.eq.false,fonte_validacao.eq.candidato_autoral_curso_a_validar)))')
+            .order('maquina2_verificado_em', nullsfirst=True)
             .order('id')
             .limit(
                 LIMITE_POR_EXECUCAO
@@ -275,7 +282,7 @@ def extrair_instagram_url(url):
             .lower()
         )
 
-        if "instagram.com" not in host:
+        if host != "instagram.com" and not host.endswith(".instagram.com"):
             return None
 
         caminho = (
@@ -453,6 +460,18 @@ def montar_consultas_instagram(lead):
 # BUSCAR INSTAGRAM
 # ============================================================
 
+def resultado_compativel(resultado, lead):
+    """O handle só é aceito com evidência pública da identidade e do curso."""
+    texto = normalizar(str(resultado.get('title') or '') + ' ' + str(resultado.get('body') or ''))
+    nome = normalizar(lead.get('nome'))
+    if not nome or not re.search(r'(?<!\w)' + re.escape(nome) + r'(?!\w)', texto):
+        return False
+    if not re.search(r'nutri(?:cao|cionista)', texto):
+        return False
+    vinculos = [normalizar(lead.get(k)) for k in ('instituicao', 'cidade') if lead.get(k)]
+    return not vinculos or any(v in texto for v in vinculos)
+
+
 def buscar_instagram(
     ddgs,
     lead
@@ -493,6 +512,8 @@ def buscar_instagram(
             continue
 
         for resultado in resultados:
+            if not resultado_compativel(resultado, lead):
+                continue
             if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
                 continue
 
@@ -570,6 +591,8 @@ def buscar_handle_em_texto(
             continue
 
         for resultado in resultados:
+            if not resultado_compativel(resultado, lead):
+                continue
             if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
                 continue
 
@@ -677,6 +700,7 @@ def atualizar_lead(
                 lead_id
             )
             .eq('nao_contatar', False)
+            .or_('não_contatar.is.null,não_contatar.eq.false')
             .eq('qualificado', True)
             .execute()
         )
@@ -722,7 +746,7 @@ def validar_candidato(ddgs, lead):
                          'evidencia': registro['evidencia'], 'fonte_url': url,
                          'fonte_validacao': 'fase_academica_validada_maquina2'}
                 resposta = (supabase.table('leds').update(dados).eq('id', lead['id'])
-                            .eq('nao_contatar', False).eq('qualificado', False).execute())
+                            .eq('nao_contatar', False).or_('não_contatar.is.null,não_contatar.eq.false').eq('qualificado', False).execute())
                 if not resposta.data:
                     return False
                 lead.update(dados)
@@ -735,7 +759,7 @@ def processar_lead(
     lead
 ):
 
-    if lead.get('nao_contatar'):
+    if lead.get('nao_contatar') or lead.get('não_contatar'):
         return
     if lead.get('qualificado') is False:
         if not validar_candidato(ddgs, lead):
@@ -911,14 +935,33 @@ def executar():
 
     with DDGS() as ddgs:
 
-        for lead in leads:
-
-            processar_lead(
-                ddgs,
-                lead
-            )
-
-            pausa()
+        prazo = time.monotonic() + 300
+        anterior = signal.getsignal(signal.SIGALRM)
+        def esgotado(*args):
+            raise JanelaEncerrada('Janela da Máquina 2 encerrada; lead preservado')
+        signal.signal(signal.SIGALRM, esgotado)
+        try:
+            for lead in leads:
+                restante = prazo - time.monotonic()
+                if restante <= 0:
+                    break
+                signal.setitimer(signal.ITIMER_REAL, min(45, restante))
+                try:
+                    processar_lead(ddgs, lead)
+                except JanelaEncerrada:
+                    print('LEAD ADIADO: prazo de busca encerrado', flush=True)
+                except Exception as exc:
+                    stats['erros'] += 1
+                    print(f'FALHA NO ENRIQUECIMENTO: {type(exc).__name__}; lead preservado', flush=True)
+                finally:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+                    (supabase.table('leds').update({
+                        'maquina2_verificado_em': datetime.now(timezone.utc).isoformat(),
+                        'maquina2_tentativas': int(lead.get('maquina2_tentativas') or 0) + 1,
+                    }).eq('id', lead['id']).execute())
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, anterior)
 
     print("")
     print(
@@ -984,6 +1027,8 @@ def executar():
         flush=True
     )
 
+    if stats['erros']:
+        raise RuntimeError('Máquina 2 concluiu com falhas operacionais; consulte o resumo')
 
 if __name__ == "__main__":
 
@@ -993,3 +1038,4 @@ if __name__ == "__main__":
         "✅ MÁQUINA 2 FINALIZADA",
         flush=True
     )
+

@@ -70,7 +70,7 @@ class Maquina2Tests(unittest.TestCase):
 
     def test_atualizacao_de_contato_condicionada_ao_estado_atual(self):
         client = Mock(); q = client.table.return_value
-        q.update.return_value = q; q.eq.return_value = q; q.execute.return_value.data = []
+        q.update.return_value = q; q.eq.return_value = q; q.or_.return_value = q; q.execute.return_value.data = []
         with patch.object(e, 'supabase', client):
             self.assertFalse(e.atualizar_lead(7, instagram='@ana.nutri'))
         self.assertIn(unittest.mock.call('qualificado', True), q.eq.call_args_list)
@@ -104,6 +104,7 @@ class Maquina2Tests(unittest.TestCase):
     def validar(self, resultado, atualizou=True):
         lead = self.candidato(); client = Mock(); q = client.table.return_value
         q.update.return_value = q; q.eq.return_value = q
+        q.or_.return_value = q
         q.execute.return_value.data = [lead] if atualizou else []
         with patch.object(e, 'supabase', client), patch('scraper.buscar_web', return_value=[resultado]), patch.object(e, 'pausa'):
             validou = e.validar_candidato(Mock(), lead)
@@ -237,3 +238,4 @@ class EditalRealTests(unittest.TestCase):
         self.assertEqual(len(registros), 9)
         self.assertEqual({r['periodo'] for r in registros}, {'2025/2'})
         self.assertTrue(all(f.fase_final_comprovada(r['evidencia']) for r in registros))
+

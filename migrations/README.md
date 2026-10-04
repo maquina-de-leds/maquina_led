@@ -9,3 +9,6 @@ Até aplicar a migração, a deduplicação do aplicativo e o bloqueio dos workf
 As normalizações cobrem caixa, espaços, acentos decompostos e variantes de hífen. Não confundem instituições diferentes apenas por nome parecido ou sigla; os aliases continuam sendo resolvidos pela evidência.
 
 Registros antigos não são requalificados automaticamente. Candidatos legados com `fonte_validacao=candidato_autoral_curso_a_validar` já entram na validação da Máquina 2; os novos usam `proxima_acao=validar_fase_academica`.
+
+
+Aplicada em 04/10/2026: índices de identidade/fonte ativos; duplicidades de fonte preservadas em `duplicado_de`, testes excluídos da unicidade. Campos de rotação da Máquina 2 adicionados. RLS continua habilitada e acesso público fechado.

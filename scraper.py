@@ -1138,6 +1138,14 @@ def recuperar_pendencias_registradas(repo, fila):
     print("PENDÊNCIAS DOS LOGS PRESERVADAS: retentar as fontes sem reiniciar a faculdade",flush=True)
 
 
+def selecionar_janela(fila, limite):
+    """Reserva uma vaga para a retomada mais antiga; demais vagas avançam a fila."""
+    retomadas = [i for i in fila if i.get('_janela_encerrada')]
+    selecionados = sorted(retomadas, key=lambda i: i.get('_ultimo_checkpoint') or '')[:1]
+    selecionados += [i for i in fila if i not in selecionados][:max(0, limite-len(selecionados))]
+    return selecionados[:limite]
+
+
 def executar():
     print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
@@ -1160,13 +1168,14 @@ def executar():
     recuperar_pendencias_registradas(repo,fila)
     print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
     prazo=time.monotonic()+360
-    for item in fila[:MAX_INSTITUICOES_POR_EXECUCAO]:
+    falhas_instituicoes = 0
+    for item in selecionar_janela(fila, MAX_INSTITUICOES_POR_EXECUCAO):
         if time.monotonic() >= prazo:
             print("LIMITE DO CICLO: faculdades restantes preservadas na fila",flush=True)
             break
         if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6, prazo=prazo):
-            resumo()
-            raise SystemExit(2)
+            falhas_instituicoes += 1
+            print("FACULDADE PENDENTE: ciclo continua nas demais; checkpoint preservado", flush=True)
     if len(fila) > MAX_INSTITUICOES_POR_EXECUCAO:
         print("⏸️ A próxima execução retoma por faculdade.", flush=True)
 
@@ -1176,7 +1185,7 @@ def executar():
     except Exception as exc:
         print(f"AVISO: não foi possível conferir a próxima janela: {type(exc).__name__}",flush=True)
     resumo()
-    if stats["instituicoes_erro"]: raise SystemExit(2)
+    if falhas_instituicoes or stats["instituicoes_erro"]: raise SystemExit(2)
     if stats["erros"]:
         print(f"⚠️ CICLO COM PENDÊNCIAS EXTERNAS: {stats['erros']} ocorrências; checkpoints preservados; cobertura incompleta.", flush=True)
     print(f"✅ CICLO {VERSAO.upper()} FINALIZADO", flush=True)
@@ -1195,3 +1204,4 @@ if __name__ == "__main__":
         preparar_lista()
     else:
         executar()
+

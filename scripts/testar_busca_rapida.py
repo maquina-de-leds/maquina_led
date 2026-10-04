@@ -5,7 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import scraper as s
 import fontes_academicas as f
 
-inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]
+inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]; falhas_busca=[]
 ies='Universidade Presbiteriana Mackenzie'
 sinais=['"TCC"','"formandos"','"grupo de alunos"','"iniciação científica"','"projetos aprovados"','"e-book" "alunas"']
 consultas=[f'"Mackenzie" Nutrição {sinal} {ano}' for sinal in sinais[:4] for ano in (2025,2026)]
@@ -25,7 +25,9 @@ for consulta in consultas:
     comeco=time.monotonic(); anteriores=set(nomes)
     try:
         resultados=executar(lambda:s.buscar_web(consulta,max_results=6),30)
-        if resultados is None: raise RuntimeError('Buscador indisponível após verificar e repetir')
+        if resultados is None:
+            falhas_busca.append(consulta)
+            raise RuntimeError('Buscador indisponível após verificar e repetir')
         print('BUSCA REAL',json.dumps({'consulta':consulta,'resultados':resultados},ensure_ascii=False),flush=True)
         for resultado in resultados:
             url=resultado.get('href') or resultado.get('url') or ''
@@ -51,6 +53,7 @@ for consulta in consultas:
             except Exception as exc:
                 pendentes.append({'fonte':url,'erro':str(exc)[:150]})
     except Exception as exc:
+        falhas_busca.append(consulta)
         pendentes.append({'consulta':consulta,'erro':str(exc)[:150]})
     finally:
         metrica={'consulta':consulta,'segundos':round(time.monotonic()-comeco,1),'nomes_adicionados':len(set(nomes)-anteriores)}
@@ -59,4 +62,6 @@ for consulta in consultas:
 nao_executadas=consultas[consultas_feitas:]
 print('DIAGNOSTICO RAPIDO',json.dumps({'segundos':round(time.monotonic()-inicio,1),'consultas_executadas':consultas_feitas,'consultas_nao_executadas':nao_executadas,'nomes_unicos':len(nomes),'registros':list(nomes.values()),'pendencias':pendentes,'gravacoes_no_banco':0,'varredura_completa':False},ensure_ascii=False),flush=True)
 print('EFICIENCIA',json.dumps({'buscas':metricas,'fontes_adiadas':adiadas},ensure_ascii=False),flush=True)
-if pendentes or nao_executadas: raise SystemExit(2)
+if pendentes: print('AVISOS EXTERNOS: leitura incompleta; fontes preservadas para revisão', flush=True)
+if falhas_busca or nao_executadas: raise SystemExit(2)
+

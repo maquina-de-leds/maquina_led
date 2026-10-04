@@ -2,6 +2,9 @@ name: Automacao Maquina de Leads
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['scraper.py', '.github/workflows/automacao.yml']
   schedule:
     - cron: '7,37 * * * *'
 permissions:
@@ -14,7 +17,7 @@ concurrency:
 jobs:
   executar:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - name: Baixar codigo
         uses: actions/checkout@v4
@@ -31,3 +34,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python -u scraper.py
+
+      - name: Enriquecer os leads do ciclo com a Máquina 2
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u enriquecimento.py

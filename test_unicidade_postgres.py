@@ -18,7 +18,7 @@ class UnicidadePostgresTests(unittest.TestCase):
         self.pg = psycopg
         self.conn = psycopg.connect(DSN, autocommit=True)
         self.conn.execute('DROP TABLE IF EXISTS public.leds')
-        self.conn.execute('CREATE TABLE public.leds(id bigserial PRIMARY KEY, nome text, instituicao text, fonte_url text)')
+        self.conn.execute('CREATE TABLE public.leds(id bigserial PRIMARY KEY, nome text, instituicao text, fonte_url text, origem text)')
         self.sql = (Path(__file__).parent / 'migrations/001_unicidade_leads.sql').read_text()
 
     def tearDown(self):
@@ -68,3 +68,18 @@ class UnicidadePostgresTests(unittest.TestCase):
             resultados = list(pool.map(inserir, ['Júlia Silva', 'Julia Silva']))
         self.assertCountEqual(resultados, ['salvo', 'duplicado'])
         self.assertEqual(self.conn.execute('SELECT count(*) FROM leds').fetchone()[0], 1)
+
+
+    def test_testes_legados_preservados_sem_liberar_duplicado_real(self):
+        self.conn.execute("INSERT INTO leds(nome,origem) VALUES ('teste','teste_automacao'),('teste','teste_automacao')")
+        self.conn.execute(self.sql)
+        self.conn.execute("INSERT INTO leds(nome,instituicao) VALUES ('Ana Silva','UT')")
+        with self.assertRaises(self.pg.errors.UniqueViolation):
+            self.conn.execute("INSERT INTO leds(nome,instituicao) VALUES ('Ana Silva','UT')")
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM leds').fetchone()[0], 3)
+
+    def test_mesma_fonte_legada_preservada_para_revisao(self):
+        self.conn.execute("INSERT INTO leds(nome,instituicao,fonte_url) VALUES ('Ana Silva','UT','https://example.org/tcc'),('Ana Silva','Outra','https://example.org/tcc')")
+        self.conn.execute(self.sql)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM leds').fetchone()[0], 2)
+        self.assertEqual(self.conn.execute('SELECT count(*) FROM leds WHERE duplicado_de IS NOT NULL AND nao_contatar AND NOT qualificado').fetchone()[0], 1)

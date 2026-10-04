@@ -24,3 +24,14 @@ PR e evidências de CI: https://github.com/maquina-de-leds/maquina_led/pull/2
 `migrations/001_unicidade_leads.sql` foi preparada e testada em banco descartável. Precisa ser aplicada no Supabase para garantir unicidade entre processos simultâneos; publicar Python não cria o índice. A migração aborta se encontrar duplicados legados, preservando todos os registros. Consulte `migrations/README.md`.
 
 Não houve gravação de leads, exclusão ou requalificação em massa durante as correções. Registros antigos qualificados exigem uma revisão separada de suas evidências se for desejada atualização retroativa. A fila segue baseada no INEP 2024; não afirma catálogo integral atualizado em 2026. O prazo de execução é cooperativo, e fontes externas podem continuar indisponíveis. Testes verdes não significam varredura nacional completa nem garantia de rendimento.
+
+
+## Operação nacional e Máquina 2 — atualização de 04/10/2026
+
+- Proteção de unicidade aplicada no Supabase, com 16 duplicidades antigas da mesma pessoa/fonte preservadas e bloqueadas para revisão. Cinco registros de teste foram separados; 17 títulos/perfis institucionais legados foram bloqueados de contato. Nenhuma linha apagada.
+- A fila INEP contém 620 instituições distintas, com ofertas nos 26 estados e no Distrito Federal. Isso é a base de pesquisa, não prova de varredura completa.
+- Uma vaga por ciclo retoma a faculdade pausada mais antiga; demais vagas avançam a fila. Falha de buscador mantém o checkpoint e não impede as demais faculdades do lote; o ciclo continua sinalizando a falha.
+- Captura agendada a cada 30 minutos, com uma execução de ativação ao publicar mudanças na captura. GitHub pode atrasar ou omitir horários; não há garantia de execução contínua.
+- Máquina 2 roda após captura bem-sucedida, no mesmo bloqueio de concorrência. Alterna por última tentativa, tem prazo de cinco minutos por lote e 45 segundos por lead, e exige identidade, curso e vínculo público para associar Instagram. Não envia mensagens.
+- O diagnóstico rápido distingue falha de busca de indisponibilidade de página; esta última continua registrada como cobertura incompleta, não é apagada.
+- Validação local: 201 testes passaram; oito testes PostgreSQL são executados no serviço descartável do GitHub. Inclui preservação de duplicidades, continuação de lote, retomada e identidade do Instagram.
