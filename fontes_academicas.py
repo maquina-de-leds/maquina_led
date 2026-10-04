@@ -8,6 +8,19 @@ from urllib.parse import urljoin, urlparse
 
 CACHE_DOCUMENTOS = {}  # bytes públicos, somente durante este processo; máximo 32 MB
 ANOS = {2025, 2026}
+
+
+class ExtracaoInconclusiva(ValueError):
+    """Download disponível, mas o formato não permite concluir a leitura."""
+
+
+def fase_final_comprovada(texto):
+    n = norm(texto)
+    if 'nutricao' not in n:
+        return False
+    if re.search(r'\b[1-6]\s*(?:º|o)?\s*(?:periodo|semestre)\b(?!\s+(?:letivo\s+)?(?:de\s+)?20\d{2}\b)|fase (?:do curso )?pendente|fase (?:academica )?a (?:validar|confirmar)|conclusao e identidade a validar|matricula.*nao confirmad', n):
+        return False
+    return bool(re.search(r'\btcc\b|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|recem[- ]formad|ultimo (?:ano|periodo|semestre)|estagio final|fase final comprovada|\b[78]\s*(?:º|o)?\s*(?:periodo|semestre)', n))
 OUTROS_CURSOS = r'educacao fisica|enfermagem|fisioterapia|psicologia|medicina|direito|engenharia|farmacia|pedagogia|letras|biomedicina'
 FASE = r'graduand[oa]s?|tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
 PAPEL = r'orientador|coorientador|professor|docente|coordenador|paraninf|patron|reitor|banca'
@@ -89,11 +102,12 @@ def periodo_academico(text):
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?([12])o?\s*semestre(?:\s+letivo)?\s*(?:de|/)?\s*(202[56])',
         r'(?:referente|turma|formandos|concluintes|nutricao)[^.\n]{0,70}?(202[56])[./-]([12])\b',
         r'\bsemestre\s+(202[56])[./-]([12])\b',
+        r'\bsemestre\s+([12])[./-](202[56])\b',
     ]
     for i, pattern in enumerate(patterns):
         m = re.search(pattern, n)
         if m:
-            semester, year = (m.group(1), m.group(2)) if i == 0 else (m.group(2), m.group(1))
+            semester, year = (m.group(1), m.group(2)) if i in {0, 3} else (m.group(2), m.group(1))
             return int(year), f'{year}/{semester}'
     years = set(re.findall(r'\b(20\d{2})\b', n))
     if len(years) == 1 and int(next(iter(years))) in ANOS:
@@ -190,6 +204,8 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     def add(name, evidence, y, per):
         if name and y in ANOS:
             phase = 'TCC' if re.search(r'tcc|trabalho de conclusao', norm(evidence+' '+context)) else 'vínculo acadêmico'
+            if phase != 'TCC' and fase_final_comprovada(evidence + ' ' + context):
+                phase = 'fase final comprovada'
             out.append(dict(nome=name, ano=y, periodo=per, instagram=instagram_associado(evidence,name),
                             evidencia=f'{instituicao} | Nutrição | {per} | {phase} | {evidence}',
                             contexto_academico=context))
@@ -496,6 +512,7 @@ def extrair_autores_alunos_pdf(linhas, instituicao, alias=None):
         if instituicao and not any(t and re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',n) for t in termos): continue
         periodo=f'{ano} (semestre não informado)'
         out.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,
+            candidato_indicio=not fase_final_comprovada(vinculo),
             evidencia=f'{instituicao or "Faculdade não informada"} | Nutrição | vínculo acadêmico em {ano} | {nome} | {vinculo} | Fase do curso pendente de confirmação',
             contexto_academico=vinculo))
     return out
@@ -598,7 +615,7 @@ def extrair_alunos_tabela_pdf(data, instituicao, alias=None):
         if not saida and not re.search(OUTROS_CURSOS,n):
             for nome in nomes_coluna_aluno(pdf):
                 saida.append(dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
-                    evidencia=f'Nutrição | {periodo} | nome completo recomposto na coluna Aluno do cronograma de bancas: {nome}.',contexto_academico=contexto[:1500]))
+                    evidencia=f'Nutrição | {periodo} | nome completo recomposto na coluna Aluno do cronograma de bancas finais de TCC: {nome}.',contexto_academico=contexto[:1500]))
     return saida
 
 
@@ -608,6 +625,10 @@ def ler_pdf(data, instituicao, alias=None):
     lines=[]
     for page in reader.pages[:40]:
         lines.extend((line.strip(),'pdf') for line in (page.extract_text() or '').splitlines())
+    if not any(text.strip() for text, _ in lines):
+        raise ExtracaoInconclusiva('PDF sem texto extraível; revisão/OCR pendente')
+    if len(reader.pages) > 40:
+        raise ExtracaoInconclusiva('PDF acima de 40 páginas; leitura integral pendente')
     # Primeiro cabeçalho em PDF fornece contexto e data da seção.
     records=extrair_documento(lines,instituicao,alias,' '.join(x[0] for x in lines))
     records += extrair_autores_alunos_pdf(lines,instituicao,alias)
@@ -676,7 +697,7 @@ def _interpretar_documento(data, content_type, encoding, url, instituicao, alias
     if data.startswith(b'%PDF') or 'application/pdf' in content_type:
         return ler_pdf(data,instituicao,alias)
     if 'text/html' not in content_type and not data.lstrip().startswith((b'<!',b'<html',b'<HTML')):
-        return [], []
+        raise ExtracaoInconclusiva('Formato não suportado; leitura não concluída')
     return ler_html(data.decode(encoding,errors='replace'),url,instituicao,alias)
 
 
@@ -701,8 +722,8 @@ def carregar_fonte(url, instituicao, alias=None):
             resposta=_carregar_url(alternativa,instituicao,alias)
             if resposta[0]: return resposta
         except Exception as exc: ultimo=exc
-    if resposta is not None: return resposta
     if ultimo: raise ultimo
+    if resposta is not None: return resposta
     return [],[]
 
 

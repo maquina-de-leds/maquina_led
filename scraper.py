@@ -7,7 +7,7 @@ import tempfile
 import time
 import unicodedata
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
 # ============================================================
@@ -266,7 +266,21 @@ class SupabaseRepo:
             .limit(1)
             .execute()
         )
-        return bool(r.data)
+        if r.data:
+            return True
+        # Consulta canônica paginada cobre acentos e variantes de caixa/espaço.
+        if not hasattr(self, '_identidades_existentes'):
+            identidades = set()
+            for offset in range(0, 100000, 1000):
+                rows = (self.client.table('leds').select('nome,instituicao')
+                        .order('id').range(offset, offset + 999).execute()).data or []
+                identidades.update((normalizar(x['nome']), normalizar(x.get('instituicao'))) for x in rows)
+                if len(rows) < 1000:
+                    self._identidades_existentes = identidades
+                    break
+            else:
+                raise RuntimeError('Paginação de identidades incompleta')
+        return (normalizar(nome), normalizar(instituicao)) in self._identidades_existentes
 
     def instagram_usado(self, instagram):
         if not instagram:
@@ -294,13 +308,14 @@ class SupabaseRepo:
 
     def completar_instagram(self, nome, instituicao, instagram):
         if self.instagram_usado(instagram): return False
-        consulta=self.client.table("leds").select("id,instagram")
+        consulta=self.client.table("leds").select("id,instagram,qualificado,nao_contatar")
         consulta=consulta.eq("instituicao",instituicao) if instituicao else consulta.is_("instituicao","null")
         rows=consulta.ilike("nome",nome).limit(1).execute().data
-        if rows and not rows[0].get("instagram"):
-            (self.client.table("leds").update({"instagram":instagram,"proxima_acao":"primeiro_contato_instagram"})
+        if rows and not rows[0].get("instagram") and not rows[0].get('nao_contatar'):
+            acao = 'primeiro_contato_instagram' if rows[0].get('qualificado') else 'validar_fase_academica'
+            resposta = (self.client.table("leds").update({"instagram":instagram,"proxima_acao":acao})
              .eq("id",rows[0]["id"]).is_("instagram","null").execute())
-            return True
+            return bool(resposta.data)
         return False
 
     def isolar_erros_de_nome_comprovados(self):
@@ -328,12 +343,32 @@ class SupabaseRepo:
     def registrar_pendencia_fonte(self, item, url, erro=None, concluida=False, somente_nova=False):
         import hashlib
         etapa = etapa_captacao_item(item) + "_fonte_" + hashlib.sha256(url.encode()).hexdigest()[:20]
-        if somente_nova and self.controle_get(etapa): return
+        atual = self.controle_get(etapa)
+        if somente_nova and atual: return
+        tentativas = 0 if concluida else int((atual or {}).get('tentativas') or 0) + 1
         self.controle_salvar(etapa, {
             "instituicao": item["instituicao"], "estado": item.get("estado"),
             "cidade": item.get("cidade"), "status": "concluido" if concluida else "erro",
             "consulta_atual": url, "ultimo_erro": None if concluida else str(erro)[:1000],
+            'tentativas': tentativas,
         })
+
+    def fonte_pode_retentar(self, item, url):
+        import hashlib
+        etapa = etapa_captacao_item(item) + '_fonte_' + hashlib.sha256(url.encode()).hexdigest()[:20]
+        cp = self.controle_get(etapa)
+        if not cp or cp.get('status') != 'erro':
+            return True
+        tentativas = int(cp.get('tentativas') or 0)
+        if tentativas >= 5:
+            print(f'FONTE REQUER REVISÃO: {url}; cinco tentativas preservadas', flush=True)
+            return False
+        try:
+            atualizacao = datetime.fromisoformat(cp['atualizado_em'].replace('Z', '+00:00'))
+            espera = timedelta(minutes=min(24 * 60, 30 * 2 ** max(0, tentativas - 1)))
+            return datetime.now(timezone.utc) >= atualizacao + espera
+        except (KeyError, ValueError, TypeError):
+            return True
 
     def fontes_pendentes(self, item):
         rows=[]
@@ -350,7 +385,22 @@ class SupabaseRepo:
         return self.client.table("leds").select("id", count="exact", head=True).execute().count
 
     def inserir_lead(self, dados):
-        self.client.table("leds").insert(dados).execute()
+        for tentativa in range(3):
+            try:
+                self.client.table('leds').insert(dados).execute()
+                if hasattr(self, '_identidades_existentes'):
+                    self._identidades_existentes.add((normalizar(dados['nome']), normalizar(dados.get('instituicao'))))
+                return True
+            except Exception as exc:
+                # Timeout pode ocorrer depois do commit; confirmar antes de repetir.
+                self.__dict__.pop('_identidades_existentes', None)
+                if self.lead_existe(dados['nome'], dados.get('instituicao')):
+                    return False
+                codigo = str(getattr(exc, 'code', ''))
+                transitorio = isinstance(exc, (TimeoutError, ConnectionError)) or codigo in {'503', '504', '502', '500', '429', '08006', '08003', '40001', '40P01'} or any(t in str(exc).lower() for t in ('timeout', 'timed out', 'connection reset', 'temporarily unavailable'))
+                if tentativa == 2 or not transitorio:
+                    raise
+                time.sleep(2 ** tentativa)
 
     def fontes_da_instituicao(self, instituicao):
         fontes=[]
@@ -598,6 +648,10 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
             print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
         if indice==0: time.sleep(4.0)
     if respondeu_vazio and not erros: return []
+    # Controle de saúde não transforma timeout da consulta original em vazio.
+    if any('no results' not in str(exc).lower() for _, exc in erros):
+        print('      ⚠️ Busca parcial: consulta original mantém pendência', flush=True)
+        return None
     if erros and not respondeu_vazio and not any('no results' in str(e).lower() for _,e in erros):
         print("      ⚠️ Busca externa indisponível em automático e Bing",flush=True)
         return None
@@ -687,7 +741,7 @@ def formatar_nome_pessoa(nome):
 
 
 def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False):
-    from fontes_academicas import pessoa
+    from fontes_academicas import pessoa, fase_final_comprovada
     if not pessoa(nome):
         stats["rejeitados"] += 1
         return False
@@ -722,6 +776,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     periodo_sem_ano = ano is None and periodo and re.search(r'[78]º período/semestre',periodo) and "nutricao" in normalizar(texto)
     if (ano not in {2025,2026} and not periodo_sem_ano) or not periodo:
         raise ValueError("Lead precisa de ano/período extraídos da fonte acadêmica")
+    candidato_indicio = candidato_indicio or not fase_final_comprovada(texto)
     dados = {
         "nome": nome,
         "instagram": instagram,
@@ -735,7 +790,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "qualificado": not candidato_indicio,
         "data_primeiro_contato": None,
         "data_ultimo_contato": None,
-        "proxima_acao": "primeiro_contato_instagram" if instagram else "buscar_instagram",
+        "proxima_acao": "validar_fase_academica" if candidato_indicio else ("primeiro_contato_instagram" if instagram else "buscar_instagram"),
         "tentativas_contato": 0,
         "cliente": False,
         "funil_destino": None,
@@ -750,9 +805,11 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
-        "fonte_validacao": "candidato_autoral_curso_a_validar" if candidato_indicio else "fonte_publica_validada_v58",
+        "fonte_validacao": "candidato_academico_fase_a_validar" if candidato_indicio else "fonte_publica_validada_v58",
     }
-    repo.inserir_lead(dados)
+    if repo.inserir_lead(dados) is False:
+        stats['duplicados'] += 1
+        return False
     if isinstance(cache,dict) and url:
         if len(cache)>=20000: cache.clear()
         cache[chave]=instituicao
@@ -831,6 +888,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     pendentes_conhecidas=set(repo.fontes_pendentes(item)) if hasattr(repo,"fontes_pendentes") else set()
     falhas_fontes = int(bool(inicio and cp and cp.get("ultimo_erro") == "Janela com fontes pendentes; repetir ao finalizar"))
     falhas_busca_seguidas = 0
+    primeira_busca_pendente = None
     fim=min(total,inicio+max(1,int(limite_consultas))) if limite_consultas is not None else total
     for idx in range(inicio, fim):
         if prazo is not None and time.monotonic() >= prazo:
@@ -844,18 +902,21 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         duplicados_consulta=stats["duplicados"]
         fontes_consulta=stats["fontes_visitadas"]
         print(f"   🔎 [{idx+1}/{total}] {consulta}", flush=True)
-        checkpoint_captacao(repo,item,"processando",idx,total,consulta=consulta,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
+        indice_cp = primeira_busca_pendente if primeira_busca_pendente is not None else idx
+        checkpoint_captacao(repo,item,"erro" if primeira_busca_pendente is not None else "processando",indice_cp,total,consulta=consultas[indice_cp],erro="Busca externa indisponível" if primeira_busca_pendente is not None else ("Fontes pendentes; repetir varredura" if falhas_fontes else None),
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
         resultados = ([{"href":url} for url in fontes_conhecidas] if consulta=="FONTES PÚBLICAS JÁ DESCOBERTAS"
                       else search_fn(consulta, MAX_RESULTADOS))
         if resultados is None:
             if continuar_falhas:
+                if primeira_busca_pendente is None:
+                    primeira_busca_pendente = idx
                 falhas_fontes += 1
                 stats["erros"] += 1
                 falhas_busca_seguidas += 1
                 print(f"      CONSULTA PENDENTE: {consulta}",flush=True)
                 if falhas_busca_seguidas >= 3:
-                    retomar=idx-falhas_busca_seguidas+1
+                    retomar=primeira_busca_pendente
                     repo.atualizar_instituicao(iid,status="erro")
                     stats["instituicoes_erro"] += 1
                     checkpoint_captacao(repo,item,"erro",retomar,total,consulta=consultas[retomar],erro="Busca externa indisponível",
@@ -906,6 +967,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 print(f"LIMITE DO CICLO: {len(adiadas)} URLs preservadas para leitura posterior",flush=True)
                 break
             if url in fontes_vistas or not url_permitida(url): continue
+            if url in pendentes_conhecidas and hasattr(repo, 'fonte_pode_retentar') and not repo.fonte_pode_retentar(item, url):
+                continue
             if acesso_reservado_maquina2(url):
                 print(f"      ACESSO AO INSTAGRAM RESERVADO À MÁQUINA 2: {url}; evidências da busca já processadas",flush=True)
                 continue
@@ -949,11 +1012,19 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                             uf if cidade_confirmada else None,registro["evidencia"],registro.get("fonte_url",url),
                             instagram=registro.get("instagram"),candidato_indicio=registro.get("candidato_indicio",False),
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
-        checkpoint_captacao(repo,item,"processando",idx+1,total,consulta=consultas[idx+1] if idx+1<total else None,erro="Fontes pendentes; repetir varredura" if falhas_fontes else None,
+        indice_cp = primeira_busca_pendente if primeira_busca_pendente is not None else idx + 1
+        checkpoint_captacao(repo,item,"erro" if primeira_busca_pendente is not None else "processando",indice_cp,total,consulta=consultas[indice_cp] if indice_cp<total else None,erro="Busca externa indisponível" if primeira_busca_pendente is not None else ("Fontes pendentes; repetir varredura" if falhas_fontes else None),
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
         print("RESULTADO DA CONSULTA:",json.dumps({"consulta":consulta,"segundos":round(time.monotonic()-inicio_consulta,1),"nomes_unicos_na_consulta":len(nomes_consulta),"novos_salvos":stats["leads_salvos"]-salvos_consulta,"ocorrencias_duplicadas":stats["duplicados"]-duplicados_consulta,"fontes_visitadas":stats["fontes_visitadas"]-fontes_consulta},ensure_ascii=False),flush=True)
         time.sleep(PAUSA_ENTRE_BUSCAS)
     novos = stats["leads_salvos"]-salvos_antes
+    if primeira_busca_pendente is not None:
+        repo.atualizar_instituicao(iid, status='erro')
+        stats['instituicoes_erro'] += 1
+        checkpoint_captacao(repo, item, 'erro', primeira_busca_pendente, total,
+                            consulta=consultas[primeira_busca_pendente], erro='Busca externa indisponível',
+                            encontrados=encontrados_local, salvos=salvos_checkpoint+novos)
+        return False
     if fim<total:
         if not falhas_fontes:
             checkpoint_captacao(repo,item,"processando",fim,total,consulta=consultas[fim],erro="Janela encerrada; próxima consulta preservada",encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
@@ -991,7 +1062,8 @@ def retentar_fontes_pendentes(repo, item, cp, source_fn, limite, prazo=None):
     salvos=int(cp.get("leads_salvos") or 0)
     antes=stats["leads_salvos"]
     print(f"REPROCESSAR SOMENTE FONTES PENDENTES: {item['instituicao']} | {len(urls)} fontes",flush=True)
-    for url in urls[:limite]:
+    disponiveis = [url for url in urls if not hasattr(repo, 'fonte_pode_retentar') or repo.fonte_pode_retentar(item, url)]
+    for url in disponiveis[:limite]:
         if prazo is not None and time.monotonic() >= prazo:
             print("LIMITE DO CICLO: fontes restantes mantidas para retomada",flush=True)
             break

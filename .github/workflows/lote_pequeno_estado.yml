@@ -1,11 +1,6 @@
 name: Lote pequeno real Santa Catarina
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/lote_pequeno_estado.py'
-      - '.github/workflows/lote_pequeno_estado.yml'
 permissions:
   contents: read
 concurrency:
@@ -20,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests supabase ddgs pypdf lxml
+      - run: pip install -r requirements.txt
       - name: Verificar captura, deduplicação e retomada
         run: python -m unittest discover -p 'test_*.py'
       - name: Capturar duas faculdades e preservar pesquisas restantes
