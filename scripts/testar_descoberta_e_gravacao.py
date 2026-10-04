@@ -56,6 +56,14 @@ for fonte_alvo,instituicao_alvo,alias_alvo in fontes_alvo:
         registros,_=executar(lambda:f.carregar_fonte(fonte_alvo,instituicao_alvo,alias_alvo),20)
         print('CABEÇALHO REAL',json.dumps({'fonte':fonte_alvo,'registros':registros},ensure_ascii=False),flush=True)
         registrar(registros,fonte_alvo)
+        if not registros:
+            documento=f.CACHE_DOCUMENTOS.get(fonte_alvo)
+            print('DIAGNÓSTICO DE FORMATO',json.dumps({'fonte':fonte_alvo,'bytes':len(documento[0]) if documento else None,'tipo':documento[1] if documento else None,'pdf':bool(documento and documento[0].startswith(b'%PDF'))},ensure_ascii=False),flush=True)
+            if documento and documento[0].startswith(b'%PDF'):
+                import io,pdfplumber
+                with pdfplumber.open(io.BytesIO(documento[0])) as pdf:
+                    for numero,pagina in enumerate(pdf.pages[:2]):
+                        print('DIAGNÓSTICO DE TABELA',json.dumps({'pagina':numero+1,'texto':(pagina.extract_text() or '')[:3000],'tabelas':pagina.extract_tables()},ensure_ascii=False),flush=True)
     except Exception as exc:
         pendentes.append({'fonte':fonte_alvo,'erro':str(exc)[:150]})
 for consulta in consultas:

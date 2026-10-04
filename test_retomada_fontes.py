@@ -18,11 +18,13 @@ class RetomadaTests(unittest.TestCase):
     @patch.object(s.time,'sleep')
     def test_503_retoma_url_sem_repetir_buscas(self,sleep):
         repo=RepoPendencias(); url='https://example.org/nutricao'
+        s.stats['instituicoes_erro']=0
         def falha(*a): raise RuntimeError('503')
         with patch.object(s,'consultas_leads',return_value=['a','b']):
             s.processar_instituicao(repo,repo.item,search_fn=lambda *a:[{'href':url,'title':'Nutrição alunos 2026'}],source_fn=falha)
             self.assertEqual(repo.cp['indice_pesquisa'],2)
             self.assertEqual(repo.cp['status'],'erro')
+            self.assertEqual(s.stats['instituicoes_erro'],0)
             def nao_buscar(*a): self.fail('Não deve repetir buscas concluídas')
             s.processar_instituicao(repo,repo.item,search_fn=nao_buscar,source_fn=lambda *a:([],[]))
         self.assertEqual(repo.cp['status'],'concluido')

@@ -968,7 +968,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     if falhas_fontes or repetir_zero:
         item["tentativa_descoberta"] = tentativas + 1
         repo.atualizar_instituicao(iid,status="erro",tentativa_descoberta=tentativas+1)
-        stats["instituicoes_erro"] += 1
+        # Pendência externa/segunda varredura preserva a fila, sem falha técnica do ciclo.
         motivo = (f"Fontes inacessíveis: {falhas_fontes}; repetir varredura"
                   if falhas_fontes else "Nenhum candidato encontrado; programada segunda varredura")
         checkpoint_captacao(repo,item,"erro",total if falhas_fontes and hasattr(repo,"fontes_pendentes") else 0,total,erro=motivo,encontrados=encontrados_local,salvos=salvos_checkpoint+novos)
