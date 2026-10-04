@@ -9,13 +9,14 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import scraper as s
 import fontes_academicas as f
 
-repo=s.SupabaseRepo.from_env(); gravados=[]; existentes=[]
+repo=s.SupabaseRepo.from_env(); gravados=[]; existentes=[]; falhas_operacionais=[]; repeticoes_confirmadas=[]
 inicio=time.monotonic(); nomes={}; pendentes=[]; fontes=set(); consultas_feitas=0; metricas=[]; adiadas=[]; acessos_indisponiveis=[]; recuperadas=[]
 ies='Universidade Presbiteriana Mackenzie'
+print('FILA REAL ANTES DO TESTE',json.dumps([{'instituicao':i['instituicao'],'status':i.get('_status_checkpoint'),'janela_encerrada':i.get('_janela_encerrada')} for i in repo.fila_nacional()[:8]],ensure_ascii=False),flush=True)
 consultas=['"Nutrição" "recém-formada" 2025 notícia',
-           '"Nutrição" "formada em fevereiro" 2025',
-           '"Mackenzie" "Nutrição" "aluna" "premiada" 2026',
-           '"Nutrição" "formandos" 2026 nomes']
+           '"Nutrição" "recém-formada" 2026 universidade',
+           'Mackenzie Nutrição 2025 TCC autores',
+           'Mackenzie Nutrição 2026 trabalho conclusão curso']
 def registrar(registros,url):
     for r in registros:
         chave=f.norm(r['nome'])
@@ -30,11 +31,16 @@ def registrar(registros,url):
             inst=r.get('instituicao',ies)
             inseriu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None)
             assert repo.lead_existe(s.formatar_nome_pessoa(r['nome']),inst), 'Gravação não confirmada'
-            if inseriu: gravados.append(r['nome'])
+            if inseriu:
+                gravados.append(r['nome'])
+                antes=s.stats['leads_salvos']
+                repetiu=s.salvar_lead(repo,r['nome'],inst,None,None,r['evidencia'],url,ano_forcado=r['ano'],periodo_forcado=r['periodo'],instituicao_alias='Mackenzie' if inst==ies else None)
+                assert not repetiu and s.stats['leads_salvos']==antes, 'Repetição inseriu novo registro'
+                repeticoes_confirmadas.append(r['nome'])
             else: existentes.append(r['nome'])
             print('REGISTRO CONFIRMADO:',r['nome'],'| novo:',inseriu,flush=True)
         except Exception as exc:
-            pendentes.append({'nome':r['nome'],'erro':str(exc)[:150]})
+            falhas_operacionais.append({'nome':r['nome'],'erro':str(exc)[:150]})
 def esgotado(*args): raise TimeoutError('Limite de tempo desta operação')
 signal.signal(signal.SIGALRM,esgotado)
 def executar(fn,limite):
@@ -88,12 +94,13 @@ for consulta in consultas:
                 except Exception as recuperacao:
                     pendentes.append({'fonte':url,'erro':str(exc)[:150],'recuperacao':str(recuperacao)[:150]})
     except Exception as exc:
-        pendentes.append({'consulta':consulta,'erro':str(exc)[:150]})
+        falhas_operacionais.append({'consulta':consulta,'erro':str(exc)[:150]})
     finally:
         metrica={'consulta':consulta,'segundos':round(time.monotonic()-comeco,1),'nomes_adicionados':len(set(nomes)-anteriores)}
         metricas.append(metrica)
         print('TEMPO E RESULTADO',json.dumps(metrica,ensure_ascii=False),flush=True)
 nao_executadas=consultas[consultas_feitas:]
-print('DIAGNOSTICO RAPIDO',json.dumps({'segundos':round(time.monotonic()-inicio,1),'consultas_executadas':consultas_feitas,'consultas_nao_executadas':nao_executadas,'nomes_unicos':len(nomes),'registros':list(nomes.values()),'pendencias':pendentes,'acessos_diretos_indisponiveis':acessos_indisponiveis,'fontes_recuperadas':recuperadas,'gravacoes_no_banco':len(gravados),'novos_confirmados':gravados,'duplicados_confirmados':existentes,'varredura_completa':False},ensure_ascii=False),flush=True)
+print('DIAGNOSTICO RAPIDO',json.dumps({'segundos':round(time.monotonic()-inicio,1),'consultas_executadas':consultas_feitas,'consultas_nao_executadas':nao_executadas,'nomes_unicos':len(nomes),'registros':list(nomes.values()),'pendencias':pendentes,'acessos_diretos_indisponiveis':acessos_indisponiveis,'fontes_recuperadas':recuperadas,'gravacoes_no_banco':len(gravados),'novos_confirmados':gravados,'duplicados_confirmados':existentes,'varredura_completa':False,'falhas_operacionais':falhas_operacionais,'repeticoes_sem_reinserir':repeticoes_confirmadas},ensure_ascii=False),flush=True)
 print('EFICIENCIA',json.dumps({'buscas':metricas,'fontes_adiadas':adiadas},ensure_ascii=False),flush=True)
-if pendentes or nao_executadas: raise SystemExit(2)
+if pendentes: print("AVISOS EXTERNOS: fontes permanecem pendentes; alunos não foram invalidados",flush=True)
+if falhas_operacionais or nao_executadas: raise SystemExit(2)
