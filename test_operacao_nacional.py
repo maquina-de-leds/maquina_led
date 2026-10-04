@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 import scraper as s
 import enriquecimento as e
 
@@ -31,3 +31,24 @@ class OperacaoNacionalTests(unittest.TestCase):
         with patch.object(e, 'validar_candidato') as validar:
             e.processar_lead(Mock(), {'nome': 'Ana Silva', 'qualificado': False, 'não_contatar': True})
             validar.assert_not_called()
+
+    def test_prazo_maquina2_preserva_lead_e_continua_lote(self):
+        import sys
+        from types import SimpleNamespace
+        client = Mock(); q = client.table.return_value
+        q.update.return_value=q; q.eq.return_value=q
+        leads=[{'id': 1}, {'id': 2}]
+        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=leads), patch.object(e, 'processar_lead', side_effect=[e.JanelaEncerrada(), None]) as processar, patch.dict(e.stats, {k:0 for k in e.stats}):
+            e.executar()
+            self.assertEqual(processar.call_count,2)
+            self.assertEqual(q.update.call_count,2)
+            self.assertEqual(q.update.call_args.args[0]['maquina2_tentativas'],1)
+
+    def test_falha_maquina2_sinalizada_apos_preservar_lote(self):
+        import sys
+        from types import SimpleNamespace
+        client=Mock(); q=client.table.return_value; q.update.return_value=q; q.eq.return_value=q
+        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=[{'id':1},{'id':2}]), patch.object(e, 'processar_lead', side_effect=[RuntimeError('banco'),None]) as processar, patch.dict(e.stats, {k:0 for k in e.stats}):
+            with self.assertRaises(RuntimeError): e.executar()
+            self.assertEqual(processar.call_count,2)
+            self.assertEqual(q.update.call_count,2)
