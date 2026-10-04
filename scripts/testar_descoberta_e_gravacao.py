@@ -1,3 +1,4 @@
+# Diagnóstico com limites reais das células de cabeçalho.
 """Teste curto de descoberta e gravação real, sem alterar a fila nacional.
 Repetição após corrigir nomes de recém-formadas citados no corpo do resultado.
 Confere também a data editorial quando ela aparece depois do menu.
