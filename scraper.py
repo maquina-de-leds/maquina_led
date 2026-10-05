@@ -319,6 +319,19 @@ class SupabaseRepo:
               .ilike("nome",nome).limit(1).execute()).data or []
         return rows[0] if rows else None
 
+    def fonte_ja_capitalizada(self, url):
+        """Evita reler uma URL que já produziu leads em ciclo anterior."""
+        if not url:
+            return False
+        r = (
+            self.client.table("leds")
+            .select("id")
+            .eq("fonte_url", url)
+            .limit(1)
+            .execute()
+        )
+        return bool(r.data)
+
     def instituicao_de_lead_por_alias(self, nome, alias):
         if not re.fullmatch(r"[A-Za-zÀ-ÿ0-9 .-]{2,30}",alias or ""): return None
         rows=(self.client.table("leds").select("instituicao").ilike("instituicao",alias)
@@ -1004,6 +1017,13 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 print(f"LIMITE DO CICLO: {len(adiadas)} URLs preservadas para leitura posterior",flush=True)
                 break
             if url in fontes_vistas or not url_permitida(url): continue
+            if hasattr(repo, "fonte_ja_capitalizada") and repo.fonte_ja_capitalizada(url):
+                fontes_vistas.add(url)
+                if hasattr(repo, "registrar_pendencia_fonte"):
+                    repo.registrar_pendencia_fonte(item, url, concluida=True)
+                    pendentes_conhecidas.discard(url)
+                print(f"      ♻️ FONTE JÁ CAPITALIZADA: {url}", flush=True)
+                continue
             if url in pendentes_conhecidas and hasattr(repo, 'fonte_pode_retentar') and not repo.fonte_pode_retentar(item, url):
                 continue
             if acesso_reservado_maquina2(url):
