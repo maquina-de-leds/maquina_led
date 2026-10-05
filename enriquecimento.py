@@ -255,7 +255,7 @@ def buscar_pendentes():
                 "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,maquina2_tentativas"
             )
             .eq('nao_contatar', False)
-            .or_('and(or(não_contatar.is.null,não_contatar.eq.false),or(and(qualificado.eq.true,instagram.is.null),and(qualificado.eq.false,proxima_acao.eq.validar_fase_academica),and(qualificado.eq.false,fonte_validacao.eq.candidato_autoral_curso_a_validar)))')
+            .eq('qualificado', True)\n            .is_('instagram', 'null')
             .order('maquina2_verificado_em', nullsfirst=True)
             .order('id')
             .limit(
@@ -788,13 +788,6 @@ def processar_lead(
 
     if lead.get('nao_contatar') or lead.get('não_contatar'):
         return
-    if lead.get('qualificado') is False:
-        if not validar_candidato(ddgs, lead):
-            print('   ⏳ Fase acadêmica ainda não comprovada; candidato preservado', flush=True)
-            return
-        if lead.get('instagram'):
-            return
-
     nome = lead.get(
         "nome",
         "Sem nome"
