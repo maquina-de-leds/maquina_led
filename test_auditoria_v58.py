@@ -84,7 +84,7 @@ class Maquina2Tests(unittest.TestCase):
         client = Mock(); query = client.table.return_value
         for method in ('select', 'eq', 'is_', 'order', 'limit'):
             getattr(query, method).return_value = query
-        lead = self.candidato(); lead['qualificado'] = True
+        lead = self.candidato(); lead['qualificado'] = True; lead['instituicao'] = 'Instituto Saúde'
         query.execute.return_value.data = [lead]
         with patch.object(e, 'supabase', client):
             self.assertEqual(len(e.buscar_pendentes()), 1)
