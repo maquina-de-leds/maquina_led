@@ -176,6 +176,13 @@ class RetomadaTests(unittest.TestCase):
 
 
 class FonteInstitucionalTests(unittest.TestCase):
+    def test_repositorio_puc_goias_e_bloqueado_em_outra_faculdade(self):
+        url = 'https://repositorio.pucgoias.edu.br/jspui/handle/123456789/79'
+        self.assertTrue(s.fonte_institucional_alheia(url, 'Centro Universitário Mario Pontes Jucá'))
+        self.assertFalse(s.fonte_institucional_alheia(
+            url, 'Pontifícia Universidade Católica de Goiás', 'PUC Goiás'
+        ))
+
     def test_colecao_de_outra_faculdade_e_bloqueada(self):
         registros = [
             {'nome': 'Ana Silva', 'instituicao': 'Pontifícia Universidade Católica de Goiás'},
