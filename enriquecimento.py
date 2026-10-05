@@ -255,7 +255,8 @@ def buscar_pendentes():
                 "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,maquina2_tentativas"
             )
             .eq('nao_contatar', False)
-            .eq('qualificado', True)\n            .is_('instagram', 'null')
+            .eq('qualificado', True)
+            .is_('instagram', 'null')
             .order('maquina2_verificado_em', nullsfirst=True)
             .order('id')
             .limit(
