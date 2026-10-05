@@ -206,6 +206,33 @@ def marcar_como_b2b(lead):
 
 
 # ============================================================
+# FILTRO DE ENRIQUECIMENTO
+# ============================================================
+
+def lead_apto_para_enriquecimento(lead):
+    """Impede que a Máquina 2 pesquise instituições, cursos ou outros nichos."""
+    nome = str(lead.get("nome") or "")
+    contexto = normalizar(" ".join(
+        str(lead.get(campo) or "")
+        for campo in ("nome", "nicho", "instituicao", "cidade", "estado",
+                      "periodo_alvo", "evidencia", "fonte_url")
+    ))
+    bloqueados = (
+        "engenheiro agronomo", "engenharia agronomica", "agronomo",
+        "fisioterapia", "fisioterapeuta", "psicologia", "psicologo",
+        "odontologia", "dentista", "farmacia", "veterinaria",
+        "teste automacao", "teste crm", "google docs", "vestibular",
+        "encontro cientifico", "vaga emprego", "pos ead",
+        "centro universitario", "universidade", "faculdade", "unilehu"
+    )
+    if not parece_pessoa(nome):
+        return False
+    if any(termo in contexto for termo in bloqueados):
+        return False
+    return True
+
+
+# ============================================================
 # PEGAR LEADS SEM INSTAGRAM
 # ============================================================
 
@@ -237,7 +264,7 @@ def buscar_pendentes():
             .execute()
         )
 
-        leads = resposta.data or []
+        leads = [lead for lead in (resposta.data or []) if lead_apto_para_enriquecimento(lead)]
 
         stats["pendentes"] = len(
             leads
