@@ -223,8 +223,11 @@ def lead_apto_para_enriquecimento(lead):
         "odontologia", "dentista", "farmacia", "veterinaria",
         "teste automacao", "teste crm", "google docs", "vestibular",
         "encontro cientifico", "vaga emprego", "pos ead",
-        "centro universitario", "universidade", "faculdade", "unilehu"
+        "centro universitario", "universidade", "faculdade", "unilehu",
+        "jupiterweb", "portalservicos", "portal", "usp.br", ".com", ".br"
     )
+    if re.search(r"[.@]|https?://|www\\.", nome, flags=re.I):
+        return False
     if not parece_pessoa(nome):
         return False
     if any(termo in contexto for termo in bloqueados):
