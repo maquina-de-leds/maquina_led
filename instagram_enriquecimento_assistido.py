@@ -13,7 +13,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 HANDLE_RE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 SEARCH_BASE = "https://www.instagram.com/explore/search/keyword/?q="
@@ -26,8 +26,10 @@ def normalizar_handle(valor: str | None) -> str | None:
     if not valor:
         return None
     handle = valor.strip()
-    if handle.startswith("https://www.instagram.com/") or handle.startswith("http://www.instagram.com/"):
-        handle = handle.split("instagram.com/", 1)[1].split("?", 1)[0].strip("/").split("/", 1)[0]
+    if "instagram.com/" in handle.lower():
+        parsed = urlparse(handle if "://" in handle else "https://" + handle)
+        if parsed.hostname and (parsed.hostname == "instagram.com" or parsed.hostname.endswith(".instagram.com")):
+            handle = parsed.path.strip("/").split("/", 1)[0]
     handle = handle.removeprefix("@").strip()
     if not HANDLE_RE.fullmatch(handle):
         raise ValueError(f"Arroba inválido: {valor!r}")
@@ -111,6 +113,19 @@ def agrupar_por_busca(linhas: list[dict]) -> dict[str, list[dict]]:
     for linha in linhas:
         grupos.setdefault(str(linha["busca_id"]), []).append(linha)
     return grupos
+
+
+def handle_ja_no_cadastro(supabase, handle: str) -> bool:
+    """Evita duplicar no destino um arroba já presente na tabela original."""
+    resposta = (supabase.table(LEADS_TABLE).select("instagram")
+               .ilike("instagram", handle).limit(20).execute())
+    for row in resposta.data or []:
+        try:
+            if normalizar_handle(row.get("instagram")) == handle:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def conectar_supabase():
@@ -209,6 +224,9 @@ def importar(supabase, origem: str) -> dict[str, int]:
         for resultado in resultados:
             handle = resultado.get("instagram")
             if not handle:
+                continue
+            if handle_ja_no_cadastro(supabase, handle):
+                duplicados += 1
                 continue
             row = {
                 "lead_origem_id": lead_id,
