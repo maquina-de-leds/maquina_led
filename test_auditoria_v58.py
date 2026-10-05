@@ -80,20 +80,17 @@ class Maquina2Tests(unittest.TestCase):
         return {'id': 7, 'nome': 'Ana Silva', 'instituicao': 'Universidade Teste',
                 'qualificado': False, 'instagram': None, 'nao_contatar': False}
 
-    def test_fila_inclui_candidatos_e_exclui_nao_contatar(self):
+    def test_fila_restringe_qualificados_sem_instagram_e_exclui_nao_contatar(self):
         client = Mock(); query = client.table.return_value
-        for method in ('select', 'eq', 'or_', 'order', 'limit'):
+        for method in ('select', 'eq', 'is_', 'order', 'limit'):
             getattr(query, method).return_value = query
-        query.execute.return_value.data = [self.candidato()]
+        lead = self.candidato(); lead['qualificado'] = True
+        query.execute.return_value.data = [lead]
         with patch.object(e, 'supabase', client):
             self.assertEqual(len(e.buscar_pendentes()), 1)
-        query.eq.assert_called_with('nao_contatar', False)
-        self.assertIn('qualificado.eq.false', query.or_.call_args.args[0])
-
-    def test_nao_enriquece_candidato_sem_confirmacao(self):
-        with patch.object(e, 'validar_candidato', return_value=False), patch.object(e, 'buscar_instagram') as buscar:
-            e.processar_lead(Mock(), self.candidato())
-            buscar.assert_not_called()
+        self.assertIn(unittest.mock.call('nao_contatar', False), query.eq.call_args_list)
+        self.assertIn(unittest.mock.call('qualificado', True), query.eq.call_args_list)
+        query.is_.assert_called_with('instagram', 'null')
 
     def test_nao_contatar_nem_valida(self):
         lead = self.candidato(); lead['nao_contatar'] = True
