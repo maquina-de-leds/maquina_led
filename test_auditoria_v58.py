@@ -187,6 +187,13 @@ class BancoTests(unittest.TestCase):
         q.execute.side_effect = [SimpleNamespace(data=[]), SimpleNamespace(data=[{'nome': 'Júlia  Silva', 'instituicao': 'Universidade  São Paulo'}])]
         self.assertTrue(repo.lead_existe('Julia Silva', 'universidade sao paulo'))
 
+    def test_fonte_ja_capitalizada_consulta_url_exata(self):
+        repo, q = self.repo()
+        q.execute.return_value = SimpleNamespace(data=[{'id': 7}])
+        self.assertTrue(repo.fonte_ja_capitalizada('https://repositorio.exemplo.edu/colecao'))
+        q.eq.assert_called_with('fonte_url', 'https://repositorio.exemplo.edu/colecao')
+        q.limit.assert_called_with(1)
+
     @patch.object(s.time, 'sleep')
     def test_timeout_apos_commit_nao_reinsere(self, sleep):
         repo, q = self.repo(); q.execute.side_effect = TimeoutError('timeout')
