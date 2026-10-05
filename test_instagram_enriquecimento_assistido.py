@@ -36,6 +36,10 @@ class FakeQuery:
         self.filters.append((key, "in", values))
         return self
 
+    def ilike(self, key, value):
+        self.filters.append((key, "ilike", value))
+        return self
+
     def update(self, payload):
         self.mode, self.payload = "update", payload
         return self
@@ -67,6 +71,8 @@ class FakeQuery:
                 rows = [r for r in rows if r.get(key) == value]
             elif op == "in":
                 rows = [r for r in rows if r.get(key) in value]
+            elif op == "ilike":
+                rows = [r for r in rows if str(r.get(key) or "").lower() == value.lower()]
         return FakeResponse([dict(r) for r in rows])
 
 
@@ -143,6 +149,20 @@ class EnriquecimentoAssistidoTests(unittest.TestCase):
             resumo = importar(db, str(path))
         self.assertEqual(resumo["salvos"], 1)
         self.assertEqual(resumo["duplicados"], 1)
+
+    def test_nao_duplica_handle_que_ja_esta_no_lead_original(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "resultados.csv"
+            with path.open("w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=["busca_id", "lead_id", "consulta", "instagram"])
+                writer.writeheader()
+                writer.writerow({"busca_id": 7, "lead_id": 42, "consulta": "Ana Nutri nutrição", "instagram": "@ananutri"})
+            db = FakeSupabase()
+            db.tables["leds"].append({"id": 99, "instagram": "@AnaNutri"})
+            resumo = importar(db, str(path))
+        self.assertEqual(resumo["salvos"], 0)
+        self.assertEqual(resumo["duplicados"], 1)
+        self.assertEqual(db.candidates, [])
 
 
 if __name__ == "__main__":
