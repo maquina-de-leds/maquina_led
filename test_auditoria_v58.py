@@ -175,6 +175,23 @@ class RetomadaTests(unittest.TestCase):
         source.assert_not_called(); self.assertEqual(repo.cp['status'], 'erro')
 
 
+class FonteInstitucionalTests(unittest.TestCase):
+    def test_colecao_de_outra_faculdade_e_bloqueada(self):
+        registros = [
+            {'nome': 'Ana Silva', 'instituicao': 'Pontifícia Universidade Católica de Goiás'},
+            {'nome': 'Bia Souza', 'instituicao': 'Pontifícia Universidade Católica de Goiás'},
+        ]
+        self.assertTrue(s.fonte_exclusivamente_de_outra_instituicao(
+            registros, 'Centro Universitário Goyazes', 'UniGoyazes'
+        ))
+
+    def test_variacao_do_nome_da_faculdade_atual_e_aceita(self):
+        registros = [{'nome': 'Ana Silva', 'instituicao': 'UniGoyazes'}]
+        self.assertFalse(s.fonte_exclusivamente_de_outra_instituicao(
+            registros, 'Centro Universitário Goyazes', 'UniGoyazes'
+        ))
+
+
 class BancoTests(unittest.TestCase):
     def repo(self):
         client = Mock(); q = client.table.return_value
