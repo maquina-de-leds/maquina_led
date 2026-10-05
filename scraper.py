@@ -708,6 +708,33 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
     return None
 
 
+def fonte_exclusivamente_de_outra_instituicao(registros, instituicao, alias=None):
+    """Detecta coleção institucional alheia antes de paginar e gerar duplicados."""
+    if not registros:
+        return False
+    genericos = {
+        "centro", "universitario", "universidade", "faculdade", "instituto",
+        "superior", "educacao", "ensino", "fundacao", "de", "da", "do", "das", "dos",
+    }
+    atuais = set()
+    for nome in (instituicao, alias):
+        atuais.update(
+            token for token in re.findall(r"[a-z0-9]+", normalizar(nome))
+            if len(token) >= 4 and token not in genericos
+        )
+    declaradas = [r.get("instituicao") for r in registros if r.get("instituicao")]
+    if len(declaradas) != len(registros):
+        return False
+    for declarada in declaradas:
+        tokens = {
+            token for token in re.findall(r"[a-z0-9]+", normalizar(declarada))
+            if len(token) >= 4 and token not in genericos
+        }
+        if atuais & tokens:
+            return False
+    return True
+
+
 def alias_instituicao(item):
     fonte = str(item.get("fonte_validacao") or "")
     m = re.search(r"(?:^|\|)\s*SIGLA=([^|]+)", fonte, flags=re.I)
@@ -1035,6 +1062,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 stats["fontes_visitadas"] += 1
                 registros, links = source_fn(url,instituicao,alias)
                 fonte_lida = True
+                if fonte_exclusivamente_de_outra_instituicao(registros, instituicao, alias):
+                    print(f"      FONTE DE OUTRA FACULDADE: coleção ignorada sem paginar | {url}", flush=True)
+                    registros, links = [], []
                 if not registros: stats["fontes_sem_nomes"] += 1
             except Exception as exc:
                 falhas_fontes += 1
