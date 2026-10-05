@@ -708,6 +708,19 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
     return None
 
 
+def fonte_institucional_alheia(url, instituicao, alias=None):
+    """Bloqueia repositórios cuja instituição proprietária não é a pesquisada."""
+    host = (urlparse(str(url or "")).hostname or "").lower()
+    contexto = normalizar(" ".join(x for x in (instituicao, alias) if x))
+    proprietarios = {
+        "pucgoias.edu.br": ("puc goias", "pontificia universidade catolica de goias"),
+    }
+    for dominio, nomes in proprietarios.items():
+        if host == dominio or host.endswith("." + dominio):
+            return not any(normalizar(nome) in contexto for nome in nomes)
+    return False
+
+
 def fonte_exclusivamente_de_outra_instituicao(registros, instituicao, alias=None):
     """Detecta coleção institucional alheia antes de paginar e gerar duplicados."""
     if not registros:
@@ -1044,6 +1057,13 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 print(f"LIMITE DO CICLO: {len(adiadas)} URLs preservadas para leitura posterior",flush=True)
                 break
             if url in fontes_vistas or not url_permitida(url): continue
+            if fonte_institucional_alheia(url, instituicao, alias):
+                fontes_vistas.add(url)
+                if hasattr(repo, "registrar_pendencia_fonte"):
+                    repo.registrar_pendencia_fonte(item, url, concluida=True)
+                    pendentes_conhecidas.discard(url)
+                print(f"      FONTE INSTITUCIONAL ALHEIA: ignorada sem paginar | {url}", flush=True)
+                continue
             if hasattr(repo, "fonte_ja_capitalizada") and repo.fonte_ja_capitalizada(url):
                 fontes_vistas.add(url)
                 if hasattr(repo, "registrar_pendencia_fonte"):
