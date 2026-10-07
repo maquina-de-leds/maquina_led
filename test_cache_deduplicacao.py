@@ -13,6 +13,17 @@ class CacheTests(unittest.TestCase):
         return repo
     def salvar(self,repo,inst='Universidade A',instagram=None):
         return s.salvar_lead(repo,'Ana Silva',inst,None,None,'Nutrição 2026','https://example.org/a',instagram=instagram,ano_forcado=2026,periodo_forcado='2026/2')
+    def test_nome_repetido_na_mesma_consulta_e_processado_uma_vez(self):
+        vistos=set()
+        self.assertTrue(s.registrar_nome_unico(vistos,'Ana Júlia Silva'))
+        self.assertFalse(s.registrar_nome_unico(vistos,'ana julia silva'))
+        self.assertEqual(vistos,{'ana julia silva'})
+
+    def test_repeticao_com_instagram_pode_completar_lead(self):
+        vistos=set()
+        self.assertTrue(s.registrar_nome_unico(vistos,'Ana Silva'))
+        self.assertTrue(s.registrar_nome_unico(vistos,'Ana Silva',tem_instagram=True))
+
     def test_repeticao_confirmada_nao_reconsulta_nem_reinsere(self):
         repo=self.repo()
         self.assertTrue(self.salvar(repo))
