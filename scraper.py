@@ -822,6 +822,19 @@ def formatar_nome_pessoa(nome):
     return " ".join(saida)
 
 
+def registrar_nome_unico(nomes_consulta, nome, tem_instagram=False):
+    """Evita processar a mesma pessoa várias vezes na mesma consulta.
+
+    Uma repetição com Instagram ainda é processada para permitir completar
+    esse dado em um lead que já esteja salvo.
+    """
+    chave = normalizar(nome)
+    if chave in nomes_consulta and not tem_instagram:
+        return False
+    nomes_consulta.add(chave)
+    return True
+
+
 def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False):
     from fontes_academicas import pessoa, fase_final_comprovada
     if not pessoa(nome):
@@ -1024,7 +1037,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             url_resultado=str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url_resultado): continue
             for registro in extrair_resultado_busca(resultado,instituicao,alias):
-                nomes_consulta.add(normalizar(registro["nome"]))
+                if not registrar_nome_unico(nomes_consulta, registro["nome"], bool(registro.get("instagram"))):
+                    print("      ♻️ EVIDÊNCIA REPETIDA NA CONSULTA:", registro["nome"], flush=True)
+                    continue
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 registro["evidencia"] += " | Consultado em "+agora()
@@ -1109,7 +1124,9 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 if url_permitida(link) and (depth==0 or pagina):
                     fila.append((link,depth if pagina else 1))
             for registro in registros:
-                nomes_consulta.add(normalizar(registro["nome"]))
+                if not registrar_nome_unico(nomes_consulta, registro["nome"], bool(registro.get("instagram"))):
+                    print("      ♻️ EVIDÊNCIA REPETIDA NA CONSULTA:", registro["nome"], flush=True)
+                    continue
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 contexto = normalizar(registro.get("contexto_academico", ""))
