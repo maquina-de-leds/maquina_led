@@ -313,6 +313,10 @@ class AtributosHtmlTests(unittest.TestCase):
             self.assertIsNone(f.pessoa(valor), valor)
         self.assertEqual(f.nomes_da_lista('Sandy Ianka Lima e Silva PAA-PPI'), [])
 
+    def test_titulo_de_cerimonia_nao_e_pessoa(self):
+        for valor in ['Colação de Grau', 'Cerimônia de Outorga', 'Emissão de Diploma']:
+            self.assertIsNone(f.pessoa(valor), valor)
+
 
 class ArtigoAlunoRecenteTests(unittest.TestCase):
     def linhas(self, data='2026', escola='Universidade Teste'):
