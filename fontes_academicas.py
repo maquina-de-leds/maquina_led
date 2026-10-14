@@ -399,7 +399,7 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     # Fora de um perfil acadêmico, o nome precisa reaparecer no trecho que
     # comprova o vínculo pessoal; palavras genéricas sobre alunos não bastam.
     nome_no_trecho = bool(nome and re.search(r'(?<!\w)'+re.escape(norm(nome))+r'(?!\w)', norm(trecho)))
-    if not nome or not nome_no_trecho or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
+    if not nome or not (nome_no_trecho or perfil_fase) or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
     return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
                  evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
