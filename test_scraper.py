@@ -299,6 +299,10 @@ class AtributosHtmlTests(unittest.TestCase):
         for nome in ['Centro Universitário Uniateneu','Assuntos Relacionados']:
             self.assertIsNone(f.pessoa(nome))
 
+    def test_sigla_academica_fragmentada_nao_e_pessoa(self):
+        self.assertIsNone(f.pessoa('C A N U T R I'))
+        self.assertEqual(f.pessoa('Maria A Silva'), 'Maria A Silva')
+
 
 class ArtigoAlunoRecenteTests(unittest.TestCase):
     def linhas(self, data='2026', escola='Universidade Teste'):
