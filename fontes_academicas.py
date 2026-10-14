@@ -124,7 +124,7 @@ def pessoa(text):
     words = text.split()
     if not 2 <= len(words) <= 9 or re.search(r'[\d@/:()]', text): return None
     n = norm(text)
-    if re.search(r'\b(?:acessos|rapidos|candidaturas|deferidas|classificacao|homologada|colacao|grau|outorga|cerimonia|diploma|geral|ampla|concorrencia|cotistas?|cotas?|paa-ppi|ppi|pcd|pardos|indigenas|aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
+    if re.search(r'\b(?:acessos|rapidos|candidaturas|deferidas|classificacao|homologada|colacao|grau|outorga|cerimonia|diploma|evento|event|connection|week|congresso|jornada|seminario|workshop|simposio|encontro|festival|geral|ampla|concorrencia|cotistas?|cotas?|paa-ppi|ppi|pcd|pardos|indigenas|aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliacao|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     # Nomes de instituições ou lugares não são nomes de alunos.
     if n in {"sao luis", "sao paulo", "rio de janeiro", "belo horizonte"}: return None
@@ -395,11 +395,7 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if not nome:
         m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
         nome=pessoa(m.group(1)) if m else None
-    # Títulos de eventos, marcas e páginas institucionais podem parecer nomes.
-    # Fora de um perfil acadêmico, o nome precisa reaparecer no trecho que
-    # comprova o vínculo pessoal; palavras genéricas sobre alunos não bastam.
-    nome_no_trecho = bool(nome and re.search(r'(?<!\w)'+re.escape(norm(nome))+r'(?!\w)', norm(trecho)))
-    if not nome or not (nome_no_trecho or perfil_fase) or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
+    if not nome or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
     return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
                  evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
