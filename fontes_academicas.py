@@ -132,6 +132,9 @@ def pessoa(text):
     if n in {"conformidade legal", "semana academica", "material e metodos", "consentimento livre e esclarecido", "del re"}: return None
     if re.search(r"\b(?:pdf|abnt)\b", n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
+    # Rejeita siglas fragmentadas como "C A N U T R I", que representam
+    # entidades acadêmicas e não nomes próprios. Mantém nomes com uma inicial.
+    if sum(len(w) == 1 for w in primary) >= 3: return None
     if len(primary) < 2 or any(not w[0].isupper() for w in primary): return None
     if not all(re.fullmatch(r"[A-Za-zÀ-ÿ'’-]+", w) for w in words): return None
     return text
