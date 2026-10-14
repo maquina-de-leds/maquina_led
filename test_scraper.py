@@ -303,6 +303,16 @@ class AtributosHtmlTests(unittest.TestCase):
         self.assertIsNone(f.pessoa('C A N U T R I'))
         self.assertEqual(f.pessoa('Maria A Silva'), 'Maria A Silva')
 
+    def test_coluna_de_classificacao_pdf_nao_e_pessoa(self):
+        for valor in [
+            'Beatriz Kamuele de Castro Geral',
+            'João Ernesto de Almeida Fachi Geral',
+            'Sandy Ianka Lima e Silva PAA-PPI',
+            'Silva PAA-PPI',
+        ]:
+            self.assertIsNone(f.pessoa(valor), valor)
+        self.assertEqual(f.nomes_da_lista('Sandy Ianka Lima e Silva PAA-PPI'), [])
+
 
 class ArtigoAlunoRecenteTests(unittest.TestCase):
     def linhas(self, data='2026', escola='Universidade Teste'):
