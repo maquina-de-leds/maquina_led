@@ -126,7 +126,14 @@ def pessoa(text):
     n = norm(text)
     if re.search(r'\b(?:acessos|rapidos|candidaturas|deferidas|classificacao|homologada|colacao|grau|outorga|cerimonia|diploma|evento|event|connection|week|unisalesiano|unifase|unibrasil|uniateneu|uniitalo|uniesp|congresso|jornada|seminario|workshop|simposio|encontro|festival|geral|ampla|concorrencia|cotistas?|cotas?|paa-ppi|ppi|pcd|pardos|indigenas|aula|aulas|hortalicas|noticias|matriz|curricular|programa|disciplinas|horarios|residencia|multiprofissional|industria|alimentos|mercado|clinica|esportiva|coletiva|avaliacoes|premiacoes|curriculo|lattes|centro|universitario|assuntos|relacionados|laboratorio|estilo|sou|medical|office|trabalhe|conosco|graduacao|sanguineo|ensino|pagina|privacidade|cookies?|processos|seletivos|pesquisa|extensao|regulamentos|normas|diretorio|empresa|grupo|liga|turma|membros|integrantes|participantes|procedimentos|matricula|calendario|acesso|contato|inicio|inscricao)\b',n): return None
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliacao|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
-    # Nomes de instituições ou lugares não são nomes de alunos.
+    # Nomes de instituições, endereços, unidades e rótulos não são alunos.
+    if re.search(
+        r'\b(?:rua|avenida|bairro|escola|escolas|creche|creches|municipal|'
+        r'municipais|rural|rurais|urbana|urbanas|almoxarifado|endereco|'
+        r'responsavel|praticas|manipulacao|aplicacao|check|cesu)\b',
+        n,
+    ):
+        return None
     if n in {"sao luis", "sao paulo", "rio de janeiro", "belo horizonte"}: return None
     if re.search(r"\b(?:tcc|versao|documento|arquivo|anexo|sumario|referencias|bibliografia)\b", n): return None
     if n in {"conformidade legal", "semana academica", "material e metodos", "consentimento livre e esclarecido", "del re"}: return None
@@ -175,6 +182,16 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     if alias:
         related = related or bool(re.search(r'(?<!\w)'+re.escape(norm(alias))+r'(?!\w)', branded))
     if not related and inst: return []
+    # Sem vínculo explícito com ensino superior, um PDF público genérico
+    # (por exemplo, plano municipal de alimentação escolar) não é fonte de
+    # alunos de graduação, mesmo que contenha "Nutrição", ano e "alunos".
+    if not inst and not re.search(
+        r'\b(?:universidade|faculdade|centro universitario|instituto federal|'
+        r'curso de nutricao|graduacao em nutricao|tcc|trabalho de conclusao|'
+        r'banca(?:s)? de tcc|formand[oa]s? de nutricao|colacao de grau)\b',
+        branded,
+    ):
+        return []
     instituicao = instituicao or 'Faculdade não informada'
     # Sem Nutrição + fase acadêmica não há extração de pessoas.
     if 'nutricao' not in norm(full) or not re.search(FASE, norm(full)): return []
