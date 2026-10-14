@@ -41,3 +41,23 @@ class TabelaTests(unittest.TestCase):
         p=Mock(); p.extract_words.return_value=[w('ALUNO',50,20),w('TÍTULO',150,20),w('BANCA',300,20),w('Ana',50,60),w('Carolina',50,72),w('da',50,84),w('Silva',65,84),w('Nutrição',140,65),w('Prof.',300,60),w('Maria',330,60),w('Bruno',50,140),w('Oliveira',50,152)]
         tabela=Mock(); tabela.extract.return_value=[['ALUNO','TÍTULO','BANCA']]; tabela.rows=[SimpleNamespace(cells=[(45,18,120,32),(120,18,280,32),(280,18,400,32)])]; p.find_tables.return_value=[tabela]
         self.assertEqual(f.nomes_coluna_aluno(SimpleNamespace(pages=[p])),['Ana Carolina da Silva','Bruno Oliveira'])
+
+    def test_plano_municipal_nao_e_fonte_academica(self):
+        linhas = [
+            ('Plano de Ação Nutricionistas 2026', 'pdf'),
+            ('Nutrição e alimentação escolar para alunos', 'pdf'),
+            ('Rua Cincinato Marques, 103 - Centro', 'pdf'),
+            ('Gabriela Pivoto Capistrano', 'pdf'),
+        ]
+        self.assertEqual(f.extrair_documento(linhas, None, None, ' '.join(x[0] for x in linhas)), [])
+
+    def test_rotulos_de_endereco_e_unidades_nao_sao_pessoas(self):
+        invalidos = [
+            'Rua Cincinato Marques',
+            'Bairro Inatel',
+            'Escolas Municipais Rurais',
+            'Almoxarifado Central',
+            'Nome Endereço Responsável',
+        ]
+        self.assertTrue(all(f.pessoa(nome) is None for nome in invalidos))
+
