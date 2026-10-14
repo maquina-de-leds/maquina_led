@@ -330,6 +330,20 @@ class AtributosHtmlTests(unittest.TestCase):
             [],
         )
 
+    def test_instituicao_unisalesiano_nao_e_pessoa(self):
+        self.assertIsNone(f.pessoa('UniSALESIANO Lins'))
+        resultado = {
+            'title': 'UniSALESIANO Lins',
+            'body': 'Curso de Nutrição e formandos de 2025.',
+            'href': 'https://www.instagram.com/p/exemplo/',
+        }
+        self.assertEqual(
+            f.extrair_resultado_busca(
+                resultado, 'Centro Universitário Católico Salesiano Auxilium', 'UNISALESIANO'
+            ),
+            [],
+        )
+
     def test_nome_no_trecho_continua_qualificado(self):
         resultado = {
             'title': 'Ana Silva - Nutrição',
