@@ -32,6 +32,16 @@ def norm(text):
     return re.sub(r'\s+', ' ', re.sub('[‐‑‒–—−]', '-', text)).strip()
 
 
+def documento_ensino_superior(texto):
+    """Distingue documentos acadêmicos de planos públicos genéricos."""
+    return bool(re.search(
+        r'\b(?:universidade|faculdade|centro universitario|instituto federal|'
+        r'curso de nutricao|graduacao em nutricao|tcc|trabalho de conclusao|'
+        r'banca(?:s)? de tcc|formand[oa]s? de nutricao|colacao de grau)\b',
+        norm(texto),
+    ))
+
+
 def acesso_reservado_maquina2(url):
     host=(urlparse(url).hostname or '').lower()
     return host=='instagram.com' or host.endswith('.instagram.com') or host=='instagr.am'
@@ -182,16 +192,6 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     if alias:
         related = related or bool(re.search(r'(?<!\w)'+re.escape(norm(alias))+r'(?!\w)', branded))
     if not related and inst: return []
-    # Sem vínculo explícito com ensino superior, um PDF público genérico
-    # (por exemplo, plano municipal de alimentação escolar) não é fonte de
-    # alunos de graduação, mesmo que contenha "Nutrição", ano e "alunos".
-    if not inst and not re.search(
-        r'\b(?:universidade|faculdade|centro universitario|instituto federal|'
-        r'curso de nutricao|graduacao em nutricao|tcc|trabalho de conclusao|'
-        r'banca(?:s)? de tcc|formand[oa]s? de nutricao|colacao de grau)\b',
-        branded,
-    ):
-        return []
     instituicao = instituicao or 'Faculdade não informada'
     # Sem Nutrição + fase acadêmica não há extração de pessoas.
     if 'nutricao' not in norm(full) or not re.search(FASE, norm(full)): return []
@@ -653,7 +653,7 @@ def ler_pdf(data, instituicao, alias=None):
     records=extrair_documento(lines,instituicao,alias,' '.join(x[0] for x in lines))
     records += extrair_autores_alunos_pdf(lines,instituicao,alias)
     records += extrair_alunos_tabela_pdf(data,instituicao,alias)
-    if not records:
+    if not records and documento_ensino_superior(' '.join(x[0] for x in lines)):
         records=extrair_documento(lines,None,None,' '.join(x[0] for x in lines))
         records+=extrair_autores_alunos_pdf(lines,None,None)
         for registro in records: registro['instituicao']=None
