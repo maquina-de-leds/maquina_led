@@ -49,7 +49,7 @@ class TabelaTests(unittest.TestCase):
             ('Rua Cincinato Marques, 103 - Centro', 'pdf'),
             ('Gabriela Pivoto Capistrano', 'pdf'),
         ]
-        self.assertEqual(f.extrair_documento(linhas, None, None, ' '.join(x[0] for x in linhas)), [])
+        self.assertFalse(f.documento_ensino_superior(' '.join(x[0] for x in linhas)))
 
     def test_rotulos_de_endereco_e_unidades_nao_sao_pessoas(self):
         invalidos = [
