@@ -317,6 +317,32 @@ class AtributosHtmlTests(unittest.TestCase):
         for valor in ['Colação de Grau', 'Cerimônia de Outorga', 'Emissão de Diploma']:
             self.assertIsNone(f.pessoa(valor), valor)
 
+    def test_evento_institucional_nao_e_pessoa_no_resultado(self):
+        resultado = {
+            'title': 'Unifase Connection - Nutrition Week 2026',
+            'body': 'Em 2026, o curso de Nutrição promove atividades para estudantes e formandos.',
+            'href': 'https://www.youtube.com/watch?v=evento',
+        }
+        self.assertEqual(
+            f.extrair_resultado_busca(
+                resultado, 'Centro Universitário Arthur Sá Earp Neto', 'UNIFASE'
+            ),
+            [],
+        )
+
+    def test_nome_no_trecho_continua_qualificado(self):
+        resultado = {
+            'title': 'Ana Silva - Nutrição',
+            'body': 'Ana Silva é estudante do 8º período de Nutrição em 2026.',
+            'href': 'https://universidade.edu.br/alunos/ana-silva',
+        }
+        self.assertEqual(
+            [r['nome'] for r in f.extrair_resultado_busca(
+                resultado, 'Universidade Teste'
+            )],
+            ['Ana Silva'],
+        )
+
 
 class ArtigoAlunoRecenteTests(unittest.TestCase):
     def linhas(self, data='2026', escola='Universidade Teste'):
