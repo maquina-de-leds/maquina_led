@@ -153,3 +153,42 @@ class OperacaoNacionalTests(unittest.TestCase):
     def test_consultas_incluem_nome_do_estado(self):
         consultas = s.consultas_leads("Universidade Exemplo", uf="SP")
         self.assertTrue(any("São Paulo" in consulta for consulta in consultas))
+
+    def test_cursor_persistente_avanca_e_nao_volta_a_sp(self):
+        class RepoCursor:
+            checkpoint = None
+
+            def controle_get(self, etapa):
+                return self.checkpoint
+
+            def controle_salvar(self, etapa, dados):
+                self.checkpoint = dict(dados, etapa=etapa)
+
+        repo = RepoCursor()
+        sp = {"id": 1, "estado": "SP", "instituicao": "Faculdade SP"}
+        rj = {"id": 2, "estado": "RJ", "instituicao": "Faculdade RJ"}
+        self.assertEqual(s.fila_estado_atual(repo, [sp, rj]), [sp])
+        self.assertEqual(repo.checkpoint["estado"], "SP")
+
+        self.assertEqual(s.fila_estado_atual(repo, [rj]), [rj])
+        self.assertEqual(repo.checkpoint["estado"], "RJ")
+
+        sp_nova = {"id": 3, "estado": "SP", "instituicao": "Nova Faculdade SP"}
+        self.assertEqual(s.fila_estado_atual(repo, [sp_nova, rj]), [rj])
+        self.assertEqual(repo.checkpoint["estado"], "RJ")
+
+    def test_cursor_marca_roteiro_concluido_quando_fila_esvazia(self):
+        class RepoCursor:
+            checkpoint = None
+
+            def controle_get(self, etapa):
+                return self.checkpoint
+
+            def controle_salvar(self, etapa, dados):
+                self.checkpoint = dict(dados, etapa=etapa)
+
+        repo = RepoCursor()
+        self.assertEqual(s.fila_estado_atual(repo, []), [])
+        self.assertEqual(repo.checkpoint["status"], "concluido")
+        sp = {"id": 1, "estado": "SP", "instituicao": "Nova Faculdade SP"}
+        self.assertEqual(s.fila_estado_atual(repo, [sp]), [])
