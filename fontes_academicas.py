@@ -20,7 +20,7 @@ def fase_final_comprovada(texto):
         return False
     if re.search(r'\b[1-6]\s*(?:º|o)?\s*(?:periodo|semestre)\b(?!\s+(?:letivo\s+)?(?:de\s+)?20\d{2}\b)|fase (?:do curso )?pendente|fase (?:academica )?a (?:validar|confirmar)|conclusao e identidade a validar|matricula.*nao confirmad', n):
         return False
-    return bool(re.search(r'\btcc\b|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|recem[- ]formad|ultimo (?:ano|periodo|semestre)|estagio final|fase final comprovada|\b[78]\s*(?:º|o)?\s*(?:periodo|semestre)', n))
+    return bool(re.search(r'\btcc\b|trabalho de conclusao|formand|concluint|colacao|outorga|formatura|recem[- ]formad|ultimo (?:ano|periodo|semestre)|estagio final|\b[78]\s*(?:º|o)?\s*(?:periodo|semestre)', n))
 OUTROS_CURSOS = r'educacao fisica|enfermagem|fisioterapia|psicologia|medicina|direito|engenharia|farmacia|pedagogia|letras|biomedicina'
 FASE = r'graduand[oa]s?|tcc|trabalho de conclusao|formand[oa]s?|concluintes?|colacao|outorga|formatura|recem[- ]formad[oa]s?|ultimo (?:periodo|semestre)|estagio final|conclusao|alun[oa]s?|discentes?|estudantes?|academic[oa]s?|apresentacao de trabalho|jornada academica|grupo de (?:alunos|estudantes|estudos)|liga academica|centro academico'
 PAPEL = r'orientador|coorientador|professor|docente|coordenador|paraninf|patron|reitor|banca'
@@ -151,7 +151,7 @@ def pessoa(text):
         "consentimento livre e esclarecido", "del re",
         "informacoes pessoais", "nome completo", "fundamentacao teorica",
         "dos requisitos para as orientacoes", "portal unitri",
-        "cargo requisitos local carga",
+        "cargo requisitos local carga", "realize o pix",
     }: return None
     if re.search(r"\b(?:pdf|abnt)\b", n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
