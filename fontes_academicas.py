@@ -138,7 +138,7 @@ def pessoa(text):
     if re.search(r'\b(?:'+PAPEL+r'|curso|nutricao|universidade|faculdade|instituto|secretaria|trabalho|tema|titulo|mostra|sessao|avaliacao|saude|alimentacao|nutricional|estudantes|formandos)\w*\b', n): return None
     # Nomes de instituições, endereços, unidades e rótulos não são alunos.
     if re.search(
-        r'\b(?:rua|avenida|bairro|escola|escolas|creche|creches|municipal|'
+        r'\b(?:disposicoes|preliminares|rua|avenida|bairro|escola|escolas|creche|creches|municipal|'
         r'municipais|rural|rurais|urbana|urbanas|almoxarifado|endereco|'
         r'responsavel|praticas|manipulacao|aplicacao|check|cesu)\b',
         n,
