@@ -214,12 +214,13 @@ class FilaFaculdadesTests(unittest.TestCase):
                  dict(id=1,instituicao="Universidade Teste",estado="AC",cidade="B",status="concluido"),
                  dict(id=2,instituicao="Outra Faculdade",estado="DF",cidade="C",status="erro")]
         fila = s.agrupar_faculdades(dados)
-        self.assertEqual(len(fila), 2)
-        item = next(x for x in fila if x["instituicao"] == "Universidade Teste")
-        self.assertEqual(item["id"], 1)
-        self.assertIsNone(item["cidade"])
-        self.assertIsNone(item["estado"])
-        self.assertIn("faculdade_1", s.etapa_captacao_item(item))
+        self.assertEqual(len(fila), 3)
+        item_ac = next(x for x in fila if x["instituicao"] == "Universidade Teste" and x["estado"] == "AC")
+        item_sp = next(x for x in fila if x["instituicao"] == "Universidade Teste" and x["estado"] == "SP")
+        self.assertEqual(item_ac["id"], 1)
+        self.assertEqual(item_sp["id"], 3)
+        self.assertIsNone(item_ac["cidade"])
+        self.assertIn("faculdade_1", s.etapa_captacao_item(item_ac))
         self.assertEqual(s.agrupar_faculdades(list(reversed(dados))), fila)
 
     def test_pesquisa_nacional_salva_nome_sem_instagram(self):
