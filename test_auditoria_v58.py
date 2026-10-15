@@ -60,6 +60,29 @@ class QualificacaoTests(unittest.TestCase):
         for texto in ('Curso de Nutrição semestre 2/2025', 'semestre 2025/2', 'semestre 2.2025', 'Nutrição referente ao 2º semestre de 2025'):
             self.assertEqual(f.periodo_academico(texto), (2025, '2025/2'))
 
+    def test_rotulos_da_regressao_unirios_unitri_nao_sao_pessoas(self):
+        rotulos = (
+            'Informações Pessoais', 'Nome Completo', 'Fundamentação Teórica',
+            'Dos Requisitos Para As Orientações', 'Portal Unitri',
+        )
+        for rotulo in rotulos:
+            with self.subTest(rotulo=rotulo):
+                self.assertIsNone(f.pessoa(rotulo))
+
+    def test_processo_seletivo_nao_salva_candidato_sem_fase_final(self):
+        repo = Repo()
+        salvo = s.salvar_lead(
+            repo, 'Gustavo Pires Tenório',
+            'Centro Universitário do Rio São Francisco Unirios',
+            None, None,
+            'Nutrição 2025 vínculo acadêmico',
+            'https://example.edu/edital_processo_seletivo_2025.pdf',
+            ano_forcado=2025,
+            periodo_forcado='2025 (semestre não informado)',
+        )
+        self.assertFalse(salvo)
+        self.assertEqual(repo.saved, [])
+
 
 class Maquina2Tests(unittest.TestCase):
     def test_falha_de_banco_nao_vira_fila_vazia_ou_instagram_livre(self):
