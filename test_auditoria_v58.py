@@ -64,6 +64,7 @@ class QualificacaoTests(unittest.TestCase):
         rotulos = (
             'Informações Pessoais', 'Nome Completo', 'Fundamentação Teórica',
             'Dos Requisitos Para As Orientações', 'Portal Unitri',
+            'Cargo Requisitos Local Carga',
         )
         for rotulo in rotulos:
             with self.subTest(rotulo=rotulo):
@@ -76,7 +77,7 @@ class QualificacaoTests(unittest.TestCase):
             'Centro Universitário do Rio São Francisco Unirios',
             None, None,
             'Nutrição 2025 vínculo acadêmico',
-            'https://example.edu/edital_processo_seletivo_2025.pdf',
+            'https://example.edu/edital_documentoprocessoseletivo_2025.pdf',
             ano_forcado=2025,
             periodo_forcado='2025 (semestre não informado)',
         )
