@@ -151,6 +151,7 @@ def pessoa(text):
         "consentimento livre e esclarecido", "del re",
         "informacoes pessoais", "nome completo", "fundamentacao teorica",
         "dos requisitos para as orientacoes", "portal unitri",
+        "cargo requisitos local carga",
     }: return None
     if re.search(r"\b(?:pdf|abnt)\b", n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
