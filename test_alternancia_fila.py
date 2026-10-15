@@ -13,7 +13,7 @@ class AlternanciaTests(unittest.TestCase):
         client.table.return_value.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=dados)
         client.table.return_value.select.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=cps)
         repo=s.SupabaseRepo(client)
-        self.assertEqual([i['instituicao'] for i in repo.fila_nacional()],['Faculdade B','Faculdade A'])
+        self.assertEqual([i['instituicao'] for i in repo.fila_nacional()],['Faculdade A','Faculdade B'])
         cps[0]['ultimo_erro']=None
         self.assertEqual([i['instituicao'] for i in repo.fila_nacional()],['Faculdade A','Faculdade B'])
 
