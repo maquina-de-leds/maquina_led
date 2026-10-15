@@ -146,7 +146,12 @@ def pessoa(text):
         return None
     if n in {"sao luis", "sao paulo", "rio de janeiro", "belo horizonte"}: return None
     if re.search(r"\b(?:tcc|versao|documento|arquivo|anexo|sumario|referencias|bibliografia)\b", n): return None
-    if n in {"conformidade legal", "semana academica", "material e metodos", "consentimento livre e esclarecido", "del re"}: return None
+    if n in {
+        "conformidade legal", "semana academica", "material e metodos",
+        "consentimento livre e esclarecido", "del re",
+        "informacoes pessoais", "nome completo", "fundamentacao teorica",
+        "dos requisitos para as orientacoes", "portal unitri",
+    }: return None
     if re.search(r"\b(?:pdf|abnt)\b", n): return None
     primary = [w for w in words if norm(w) not in {'de','da','do','dos','das','e'}]
     # Rejeita siglas fragmentadas como "C A N U T R I", que representam
