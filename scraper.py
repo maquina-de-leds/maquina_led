@@ -252,7 +252,7 @@ class SupabaseRepo:
             fila.append(item)
         # Uma execução interrompida deve retomar antes de abrir outra faculdade.
         ordem={"processando":0,"pendente":1,"erro":2}
-        return sorted(fila,key=lambda x:(1 if x.get("_janela_encerrada") else ordem.get(x["_status_checkpoint"],1),x["_ultimo_checkpoint"],normalizar(x["instituicao"])))
+        return sorted(fila,key=lambda x:(ordem_estado(x.get("estado")), 1 if x.get("_janela_encerrada") else ordem.get(x["_status_checkpoint"],1), x["_ultimo_checkpoint"], normalizar(x["instituicao"])))
 
     def resultado_de_outra_faculdade(self, resultado, instituicao, alias=None):
         """Domínio de outra IES conhecida não prova vínculo com a IES pesquisada."""
@@ -803,6 +803,12 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
                    for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
     consultas = prioritarias + consultas_documentos_alunos(instituicao, alias) + [f'"{termo}" Nutrição {sinal} {ano}'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
+    nome_estado = dict(ESTADOS).get((uf or "").upper())
+    if nome_estado:
+        consultas += [f'{curto} Nutrição "{nome_estado}" {ano} {sinal}'
+                      for ano in (2025, 2026)
+                      for sinal in ("TCC repositório", "trabalho de conclusão autores",
+                                    "formandos colação")]
     if cidade and normalizar(cidade) != "nao identificado":
         consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano}'
                       for ano in (2025,2026)]
@@ -933,17 +939,27 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
 # CAPTACAO / CHECKPOINT
 # ============================================================
 
+def ordem_estado(uf):
+    """São Paulo primeiro; depois, segue a ordem definida na lista de estados."""
+    ordem = ["SP"] + [sigla for sigla, _ in ESTADOS if sigla != "SP"]
+    try:
+        return ordem.index((uf or "").upper())
+    except ValueError:
+        return len(ordem)
+
+
 def agrupar_faculdades(dados):
-    """Uma pesquisa nacional por instituição; polos não são novas faculdades."""
+    """Agrupa polos por faculdade e UF, preservando a fila estadual."""
     grupos = {}
     for registro in sorted(dados, key=lambda x: x["id"]):
-        chave = normalizar(registro["instituicao"])
+        uf = (registro.get("estado") or "").upper() or None
+        chave = (normalizar(registro["instituicao"]), uf)
         if chave not in grupos:
             item = dict(registro)
-            item.update(cidade=None, estado=None, escopo_faculdade=True,
+            item.update(cidade=None, estado=uf, escopo_faculdade=True,
                         tentativa_descoberta=registro.get("tentativa_descoberta", 0))
             grupos[chave] = item
-    return sorted(grupos.values(), key=lambda x: normalizar(x["instituicao"]))
+    return sorted(grupos.values(), key=lambda x: (ordem_estado(x.get("estado")), normalizar(x["instituicao"])))
 
 
 def etapa_captacao_item(item):
@@ -1281,7 +1297,11 @@ def recuperar_pendencias_registradas(repo, fila):
 
 
 def selecionar_janela(fila, limite):
-    """Primeira passagem por todas as faculdades; depois retoma a menos recente."""
+    """Conclui o estado prioritário antes de avançar; novas IES vêm primeiro nele."""
+    estados = [i.get("estado") for i in fila if i.get("estado")]
+    if estados:
+        estado_atual = min(estados, key=ordem_estado)
+        fila = [i for i in fila if i.get("estado") == estado_atual]
     novas = [i for i in fila if not i.get('_ultimo_checkpoint')]
     retomadas = sorted([i for i in fila if i not in novas],
                        key=lambda i: (i.get('_ultimo_checkpoint') or '', normalizar(i.get('instituicao'))))
