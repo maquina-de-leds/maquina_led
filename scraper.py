@@ -845,7 +845,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     # conclusão ou fase final no curso.
     contexto_origem = normalizar(f"{texto} {url or ''}")
     if (not fase_final_comprovada(texto)
-            and re.search(r"(?:processo[ _-]+seletivo|vestibular|candidat(?:o|a|os|as|ura|uras))", contexto_origem)):
+            and re.search(r"(?:processo[ _-]*seletivo|vestibular|candidat(?:o|a|os|as|ura|uras))", contexto_origem)):
         stats["rejeitados"] += 1
         return False
     cache=getattr(repo,"_leads_confirmados",None)
