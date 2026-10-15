@@ -844,7 +844,13 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     # Processo seletivo/vestibular comprova candidatura, não matrícula,
     # conclusão ou fase final no curso.
     contexto_origem = normalizar(f"{texto} {url or ''}")
-    if (not fase_final_comprovada(texto)
+    fase_confirmada = fase_final_comprovada(texto)
+    # Fontes externas sem IES identificada só podem originar lead quando
+    # a própria evidência comprova TCC, conclusão ou último ano/período.
+    if not instituicao and not fase_confirmada:
+        stats["rejeitados"] += 1
+        return False
+    if (not fase_confirmada
             and re.search(r"(?:processo[ _-]*seletivo|vestibular|candidat(?:o|a|os|as|ura|uras))", contexto_origem)):
         stats["rejeitados"] += 1
         return False
@@ -878,7 +884,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     periodo_sem_ano = ano is None and periodo and re.search(r'[78]º período/semestre',periodo) and "nutricao" in normalizar(texto)
     if (ano not in {2025,2026} and not periodo_sem_ano) or not periodo:
         raise ValueError("Lead precisa de ano/período extraídos da fonte acadêmica")
-    candidato_indicio = candidato_indicio or not fase_final_comprovada(texto)
+    candidato_indicio = candidato_indicio or not fase_confirmada
     dados = {
         "nome": nome,
         "instagram": instagram,
