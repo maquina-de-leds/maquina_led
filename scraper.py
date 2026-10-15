@@ -14,9 +14,9 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.8.1"
+VERSAO = "v5.9.0"
 ETAPA_CARGA_IES = "carga_inep_nutricao_municipal_v58"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v58"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v59"
 ETAPA_ROTEIRO_ESTADUAL = "captacao_nutricao_progresso_estadual_v1"
 ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v58"
 ORIGEM_IES = "inep_censo_superior_municipal_v58"
@@ -1301,7 +1301,7 @@ def fila_estado_atual(repo, fila):
     """Cursor persistente: ao esgotar um estado, avança sem voltar aos anteriores."""
     estados_presentes = {str(item.get("estado") or "").upper() for item in fila}
     estados_presentes.discard("")
-    if not estados_presentes:
+    if fila and not estados_presentes:
         # Compatibilidade com filas legadas/testes sem UF.
         return fila
 
