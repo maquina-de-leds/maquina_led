@@ -841,6 +841,13 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         stats["rejeitados"] += 1
         return False
     nome = formatar_nome_pessoa(nome)
+    # Processo seletivo/vestibular comprova candidatura, não matrícula,
+    # conclusão ou fase final no curso.
+    contexto_origem = normalizar(f"{texto} {url or ''}")
+    if (not fase_final_comprovada(texto)
+            and re.search(r"\b(?:processo seletivo|vestibular|candidat(?:o|a|os|as|ura|uras))\b", contexto_origem)):
+        stats["rejeitados"] += 1
+        return False
     cache=getattr(repo,"_leads_confirmados",None)
     chave=(normalizar(nome),url,instituicao,instituicao_alias)
     reutilizado=isinstance(cache,dict) and bool(url) and chave in cache
