@@ -56,6 +56,22 @@ class QualificacaoTests(unittest.TestCase):
             s.processar_instituicao(repo, repo.item, lambda *a: [resultado], lambda *a: ([], []))
         self.assertFalse(repo.saved[0]['qualificado'])
 
+    def test_fonte_sem_ies_nao_confunde_marcador_interno_com_fase_final(self):
+        evidencia = (
+            'Faculdade não informada | Nutrição | 2026 (semestre não informado) | '
+            'fase final comprovada | autores de trabalhos aprovados'
+        )
+        self.assertFalse(f.fase_final_comprovada(evidencia))
+        repo = Repo()
+        salvo = s.salvar_lead(
+            repo, 'Ana Silva', None, None, None, evidencia,
+            'https://conselho.example.org/mostra-academica',
+            ano_forcado=2026,
+            periodo_forcado='2026 (semestre não informado)',
+        )
+        self.assertFalse(salvo)
+        self.assertEqual(repo.saved, [])
+
     def test_semestre_invertido_e_ano_primeiro(self):
         for texto in ('Curso de Nutrição semestre 2/2025', 'semestre 2025/2', 'semestre 2.2025', 'Nutrição referente ao 2º semestre de 2025'):
             self.assertEqual(f.periodo_academico(texto), (2025, '2025/2'))
@@ -64,7 +80,7 @@ class QualificacaoTests(unittest.TestCase):
         rotulos = (
             'Informações Pessoais', 'Nome Completo', 'Fundamentação Teórica',
             'Dos Requisitos Para As Orientações', 'Portal Unitri',
-            'Cargo Requisitos Local Carga',
+            'Cargo Requisitos Local Carga', 'Realize O Pix',
         )
         for rotulo in rotulos:
             with self.subTest(rotulo=rotulo):
