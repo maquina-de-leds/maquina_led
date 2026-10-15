@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 VERSAO = "v5.8.1"
 ETAPA_CARGA_IES = "carga_inep_nutricao_municipal_v58"
 ETAPA_CAPTACAO = "captacao_nacional_nutricao_v58"
+ETAPA_ROTEIRO_ESTADUAL = "captacao_nutricao_progresso_estadual_v1"
 ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v58"
 ORIGEM_IES = "inep_censo_superior_municipal_v58"
 MAX_RESULTADOS = 12
@@ -1296,6 +1297,51 @@ def recuperar_pendencias_registradas(repo, fila):
     print("PENDÊNCIAS DOS LOGS PRESERVADAS: retentar as fontes sem reiniciar a faculdade",flush=True)
 
 
+def fila_estado_atual(repo, fila):
+    """Cursor persistente: ao esgotar um estado, avança sem voltar aos anteriores."""
+    estados_presentes = {str(item.get("estado") or "").upper() for item in fila}
+    estados_presentes.discard("")
+    if not estados_presentes:
+        # Compatibilidade com filas legadas/testes sem UF.
+        return fila
+
+    roteiro = ["SP"] + [sigla for sigla, _ in ESTADOS if sigla != "SP"]
+    checkpoint = repo.controle_get(ETAPA_ROTEIRO_ESTADUAL)
+    if checkpoint and checkpoint.get("status") == "concluido":
+        return []
+
+    estado = (checkpoint or {}).get("estado")
+    if estado not in roteiro:
+        estado = "SP"
+    indice = roteiro.index(estado)
+
+    while indice < len(roteiro):
+        estado = roteiro[indice]
+        pendentes = [item for item in fila
+                     if str(item.get("estado") or "").upper() == estado]
+        repo.controle_salvar(ETAPA_ROTEIRO_ESTADUAL, {
+            "estado": estado,
+            "cidade": "Nacional",
+            "instituicao": "Progresso estadual de Nutrição",
+            "status": "processando",
+            "consulta_atual": estado,
+            "ultimo_erro": None,
+        })
+        if pendentes:
+            return pendentes
+        indice += 1
+
+    repo.controle_salvar(ETAPA_ROTEIRO_ESTADUAL, {
+        "estado": roteiro[-1],
+        "cidade": "Nacional",
+        "instituicao": "Progresso estadual de Nutrição",
+        "status": "concluido",
+        "consulta_atual": roteiro[-1],
+        "ultimo_erro": None,
+    })
+    return []
+
+
 def selecionar_janela(fila, limite):
     """Conclui o estado prioritário antes de avançar; novas IES vêm primeiro nele."""
     estados = [i.get("estado") for i in fila if i.get("estado")]
@@ -1364,7 +1410,8 @@ def executar():
     except Exception as exc:
         stats['erros'] += 1
         print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
-    print(f"📚 Fila nacional: {len(fila)} faculdades pendentes (inclui EaD).", flush=True)
+    fila = fila_estado_atual(repo, fila)
+    print(f"📚 Fila do estado atual: {len(fila)} faculdades pendentes.", flush=True)
     prazo=time.monotonic()+360
     falhas_instituicoes = 0
     for item in selecionar_janela(fila, MAX_INSTITUICOES_POR_EXECUCAO):
