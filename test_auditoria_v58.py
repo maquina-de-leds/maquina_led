@@ -80,7 +80,7 @@ class QualificacaoTests(unittest.TestCase):
         rotulos = (
             'Informações Pessoais', 'Nome Completo', 'Fundamentação Teórica',
             'Dos Requisitos Para As Orientações', 'Portal Unitri',
-            'Cargo Requisitos Local Carga', 'Realize O Pix',
+            'Cargo Requisitos Local Carga', 'Realize O Pix', 'Unifametro Online',
         )
         for rotulo in rotulos:
             with self.subTest(rotulo=rotulo):
