@@ -81,6 +81,7 @@ class QualificacaoTests(unittest.TestCase):
             'Informações Pessoais', 'Nome Completo', 'Fundamentação Teórica',
             'Dos Requisitos Para As Orientações', 'Portal Unitri',
             'Cargo Requisitos Local Carga', 'Realize O Pix', 'Unifametro Online',
+            'Das Disposições Preliminares', 'Disposições Gerais',
         )
         for rotulo in rotulos:
             with self.subTest(rotulo=rotulo):
