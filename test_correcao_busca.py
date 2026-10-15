@@ -72,7 +72,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
         with patch.object(repo,'controle_get') as individual:
             fila=repo.fila_nacional()
         individual.assert_not_called()
-        self.assertEqual([x['instituicao'] for x in fila],['Faculdade C','Faculdade B'])
+        self.assertEqual([x['instituicao'] for x in fila],['Faculdade B','Faculdade C'])
         self.assertEqual(client.table.call_count,2)
         cps[1]['status']='processando'
         self.assertEqual([x['instituicao'] for x in repo.fila_nacional()],['Faculdade B','Faculdade C'])
