@@ -845,9 +845,12 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     # conclusão ou fase final no curso.
     contexto_origem = normalizar(f"{texto} {url or ''}")
     fase_confirmada = fase_final_comprovada(texto)
-    # Fontes externas sem IES identificada só podem originar lead quando
-    # a própria evidência comprova TCC, conclusão ou último ano/período.
-    if not instituicao and not fase_confirmada:
+    # O extrator pode rotular a evidência como "fase final comprovada" a partir
+    # do contexto amplo da página. Sem IES identificada, o texto local precisa
+    # conter a prova real, independentemente desse marcador interno.
+    texto_sem_marcador = re.sub(r"fase final comprovada", "", texto, flags=re.I)
+    fase_independente = fase_final_comprovada(texto_sem_marcador)
+    if not instituicao and not fase_independente:
         stats["rejeitados"] += 1
         return False
     if (not fase_confirmada
