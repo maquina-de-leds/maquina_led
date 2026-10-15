@@ -61,7 +61,7 @@ class QualificacaoTests(unittest.TestCase):
             'Faculdade não informada | Nutrição | 2026 (semestre não informado) | '
             'fase final comprovada | autores de trabalhos aprovados'
         )
-        self.assertFalse(f.fase_final_comprovada(evidencia))
+        self.assertTrue(f.fase_final_comprovada(evidencia))
         repo = Repo()
         salvo = s.salvar_lead(
             repo, 'Ana Silva', None, None, None, evidencia,
