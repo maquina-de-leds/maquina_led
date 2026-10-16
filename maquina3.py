@@ -12,7 +12,7 @@ from fontes_academicas import (
 )
 from scraper import (
     ESTADOS, ORIGEM_IES, SupabaseRepo, alias_instituicao, agrupar_faculdades,
-    buscar_web, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
+    buscar_web, ddgs_texto, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
 )
 
 ETAPA = "captacao_maquina3_formandos_v2"
@@ -102,6 +102,18 @@ def candidatos_instagram_publico(resultado, item):
     } for nome in nomes]
 
 
+def buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA):
+    """Usa o Google como fonte primária; falhas ficam pendentes para nova tentativa."""
+    for tentativa in range(2):
+        try:
+            resultados = list(ddgs_texto(consulta, backend="google", max_results=max_results) or [])
+            print(f"      GOOGLE: resultados: {len(resultados)}", flush=True)
+            return resultados
+        except Exception as exc:
+            print(f"      GOOGLE: erro {type(exc).__name__} na tentativa {tentativa + 1}/2", flush=True)
+    return None
+
+
 def etapa_item(item):
     return f"{ETAPA}_faculdade_{item['id']}"
 
@@ -188,7 +200,7 @@ def processar_faculdade(repo, item):
         salvar_checkpoint(repo, item, "processando", idx, consulta,
                           encontrados=encontrados,
                           salvos=int(cp.get("leads_salvos") or 0) + stats["leads_salvos"] - salvos_antes)
-        resultados = buscar_web(consulta, max_results=MAX_RESULTADOS_BUSCA)
+        resultados = buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA)
         if resultados is None:
             salvar_checkpoint(repo, item, "erro", idx, consulta,
                               "Buscador indisponível; consulta preservada",
