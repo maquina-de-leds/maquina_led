@@ -82,6 +82,7 @@ class QualificacaoTests(unittest.TestCase):
             'Dos Requisitos Para As Orientações', 'Portal Unitri',
             'Cargo Requisitos Local Carga', 'Realize O Pix', 'Unifametro Online',
             'Das Disposições Preliminares', 'Disposições Gerais',
+            'Reabilitação e Direitos do Idoso', 'Educação Física', 'Uniara Reporter',
         )
         for rotulo in rotulos:
             with self.subTest(rotulo=rotulo):
