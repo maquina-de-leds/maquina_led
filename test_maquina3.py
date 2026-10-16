@@ -29,6 +29,15 @@ class Machine3Tests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         search.assert_called_once_with("Nutrição formandos 2025", backend="google", max_results=m.MAX_RESULTADOS_BUSCA)
 
+    def test_falls_back_if_google_is_unavailable(self):
+        fallback = [{"href": "https://example.edu/"}]
+        with patch.object(m, "ddgs_texto", side_effect=RuntimeError("Google unavailable")) as google, \
+             patch.object(m, "buscar_web", return_value=fallback) as alternate:
+            results = m.buscar_google("Nutrição formandos 2025")
+        self.assertEqual(results, fallback)
+        self.assertEqual(google.call_count, 2)
+        alternate.assert_called_once_with("Nutrição formandos 2025", max_results=m.MAX_RESULTADOS_BUSCA)
+
     def test_selects_maximum_five_and_one_state(self):
         items = [
             {"id": i, "estado": "SP", "instituicao": f"Faculdade {i}"}
