@@ -16,10 +16,12 @@ class Machine3Tests(unittest.TestCase):
     def test_queries_cover_target_years_and_course(self):
         item = {"id": 3, "instituicao": "Universidade Teste", "estado": "SP"}
         queries = m.consultas_lote(item)
-        self.assertEqual(len(queries), 4)
+        self.assertEqual(len(queries), 6)
         self.assertTrue(all("Nutrição" in q for q in queries))
         self.assertTrue(any("2025" in q for q in queries))
         self.assertTrue(any("2026" in q for q in queries))
+        self.assertTrue(any("site:instagram.com" in q for q in queries))
+        self.assertTrue(any("último semestre" in q for q in queries))
 
     def test_selects_maximum_five_and_one_state(self):
         items = [
@@ -29,6 +31,38 @@ class Machine3Tests(unittest.TestCase):
         lote = m.selecionar_lote(items)
         self.assertEqual(len(lote), 5)
         self.assertEqual({x["estado"] for x in lote}, {"SP"})
+
+    def test_extracts_named_people_from_public_institution_instagram_snippet(self):
+        item = {"id": 3, "instituicao": "Centro Universitário Teste", "estado": "SP"}
+        result = {
+            "href": "https://www.instagram.com/p/abc123/",
+            "title": "Centro Universitário Teste | Formandos de Nutrição 2025: Ana Souza, Beatriz Lima",
+            "body": "Parabéns pela colação de grau da turma de Nutrição 2025.",
+        }
+        candidates = m.candidatos_instagram_publico(result, item)
+        self.assertEqual([x["nome"] for x in candidates], ["Ana Souza", "Beatriz Lima"])
+        self.assertEqual({x["ano"] for x in candidates}, {2025})
+        self.assertTrue(all("Instagram público institucional" in x["evidencia"] for x in candidates))
+
+    def test_requires_institution_course_and_academic_phase_in_public_instagram_snippet(self):
+        item = {"id": 4, "instituicao": "Centro Universitário Teste", "estado": "SP"}
+        result = {
+            "href": "https://www.instagram.com/p/abc123/",
+            "title": "Formandos de Nutrição 2026: Ana Souza",
+            "body": "8º período.",
+        }
+        self.assertEqual(m.candidatos_instagram_publico(result, item), [])
+
+    def test_extracts_2026_final_semester_candidates_from_public_post(self):
+        item = {"id": 5, "instituicao": "Centro Universitário Teste", "estado": "SP"}
+        result = {
+            "href": "https://www.instagram.com/p/abc123/",
+            "title": "Centro Universitário Teste: Nutrição, último semestre de 2026",
+            "body": "Aluna Ana Souza concluindo o último semestre.",
+        }
+        candidates = m.candidatos_instagram_publico(result, item)
+        self.assertEqual([x["nome"] for x in candidates], ["Ana Souza"])
+        self.assertEqual(candidates[0]["ano"], 2026)
 
     def test_skips_instagram_and_caps_source_pages(self):
         repo = FakeRepo()
@@ -44,8 +78,8 @@ class Machine3Tests(unittest.TestCase):
              patch.object(m, "carregar_fonte", return_value=([], [])) as fetch, \
              patch.object(m, "salvar_lead") as save:
             self.assertTrue(m.processar_faculdade(repo, item))
-        self.assertEqual(search.call_count, 4)
-        self.assertEqual(fetch.call_count, 8)
+        self.assertEqual(search.call_count, 6)
+        self.assertEqual(fetch.call_count, 12)
         save.assert_not_called()
         self.assertEqual(repo.saved_checkpoints[-1][1]["status"], "concluido")
 
