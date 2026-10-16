@@ -23,6 +23,12 @@ class Machine3Tests(unittest.TestCase):
         self.assertTrue(any("site:instagram.com" in q for q in queries))
         self.assertTrue(any("último semestre" in q for q in queries))
 
+    def test_uses_google_search_backend(self):
+        with patch.object(m, "ddgs_texto", return_value=[{"href": "https://example.edu/"}]) as search:
+            results = m.buscar_google("Nutrição formandos 2025")
+        self.assertEqual(len(results), 1)
+        search.assert_called_once_with("Nutrição formandos 2025", backend="google", max_results=m.MAX_RESULTADOS_BUSCA)
+
     def test_selects_maximum_five_and_one_state(self):
         items = [
             {"id": i, "estado": "SP", "instituicao": f"Faculdade {i}"}
@@ -74,7 +80,7 @@ class Machine3Tests(unittest.TestCase):
             {"href": "https://univ.edu.br/formandos"},
             {"href": "https://univ.edu.br/tcc"},
         ]
-        with patch.object(m, "buscar_web", return_value=resultados) as search, \
+        with patch.object(m, "buscar_google", return_value=resultados) as search, \
              patch.object(m, "carregar_fonte", return_value=([], [])) as fetch, \
              patch.object(m, "salvar_lead") as save:
             self.assertTrue(m.processar_faculdade(repo, item))
