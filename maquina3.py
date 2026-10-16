@@ -46,7 +46,8 @@ def candidatos_instagram_publico(resultado, item):
     if host not in {"instagram.com", "www.instagram.com"} or not re.match(r"^(?:p|reel|reels|tv)/", path):
         return []
 
-    texto = limpar_espacos(" ".join(str(resultado.get(k) or "") for k in ("title", "body", "snippet")))
+    campos = [limpar_espacos(resultado.get(k) or "") for k in ("title", "body", "snippet")]
+    texto = limpar_espacos(" ".join(campos))
     n = normalizar(texto)
     if "nutricao" not in n or not re.search(r"2025|2026", n):
         return []
@@ -61,22 +62,26 @@ def candidatos_instagram_publico(resultado, item):
     if not any(x and x in texto_origem for x in (nome_inst, alias)) and not any(t in texto_origem for t in tokens):
         return []
 
-    rotulo = re.search(
-        r"\b(?:formand[oa]s?|concluintes?|egress[oa]s?|alun[oa]s?|estudantes?)\b"
-        r"[^:;.!?]{0,70}[:\-–]\s*([^.!?]+)",
-        texto, re.I,
-    )
-    if rotulo:
-        lista = re.sub(r"^\s*(?:(?:do|da|de)\s+)?(?:curso\s+de\s+)?nutri[cç][aã]o\s*", "", rotulo.group(1), flags=re.I)
-        lista = re.sub(r"^\s*(?:2025|2026)(?:[./-][12])?\s*[:\-–]?\s*", "", lista)
-        nomes = nomes_da_lista(lista)
-    else:
-        singular = re.search(
-            r"\b(?:a\s+aluna|o\s+aluno|aluna|aluno|formanda|formando|estudante|egressa|egresso)\s+"
-            r"([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:\s+(?:de|da|do|dos|das|e)?\s*[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+){1,6})\b",
-            texto,
+    nomes = []
+    for campo in campos:
+        rotulo = re.search(
+            r"\b(?:formand[oa]s?|concluintes?|egress[oa]s?|alun[oa]s?|estudantes?)\b"
+            r"[^:;.!?]{0,70}[:\-–]\s*([^.!?]+)",
+            campo, re.I,
         )
-        nomes = nomes_da_lista(singular.group(1)) if singular else []
+        if rotulo:
+            lista = re.sub(r"^\s*(?:(?:do|da|de)\s+)?(?:curso\s+de\s+)?nutri[cç][aã]o\s*", "", rotulo.group(1), flags=re.I)
+            lista = re.sub(r"^\s*(?:2025|2026)(?:[./-][12])?\s*[:\-–]?\s*", "", lista)
+            nomes.extend(nomes_da_lista(lista))
+        else:
+            singular = re.search(
+                r"\b(?:a\s+aluna|o\s+aluno|aluna|aluno|formanda|formando|estudante|egressa|egresso)\s+"
+                r"([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:\s+(?:de|da|do|dos|das|e)?\s*[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+){1,6})\b",
+                campo,
+            )
+            if singular:
+                nomes.extend(nomes_da_lista(singular.group(1)))
+    nomes = list({normalizar(nome): nome for nome in nomes}.values())
     if not nomes:
         return []
 
