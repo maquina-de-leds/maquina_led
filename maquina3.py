@@ -2,7 +2,7 @@
 Usa checkpoint independente e a rotina central de deduplicação/salvamento da Máquina 1.
 """
 import json
-import time
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fontes_academicas import acesso_reservado_maquina2, carregar_fonte, url_permitida
@@ -154,8 +154,6 @@ def processar_faculdade(repo, item):
                     instituicao_alias=alias,
                     candidato_indicio=registro.get("candidato_indicio", False),
                 )
-                if salvou:
-                    stats["leads_salvos"] += 1
             # Até dois links da própria página de lista podem apontar para PDFs/artigos.
             host = urlparse(url).hostname
             for link in links[:2]:
@@ -182,8 +180,6 @@ def processar_faculdade(repo, item):
                         instituicao_alias=alias,
                         candidato_indicio=registro.get("candidato_indicio", False),
                     )
-                    if salvou:
-                        stats["leads_salvos"] += 1
 
         cp = {
             "leads_encontrados": encontrados,
@@ -204,7 +200,7 @@ def processar_faculdade(repo, item):
         "ultimo_erro": None,
         "leads_encontrados": encontrados,
         "leads_salvos": int(cp.get("leads_salvos") or 0),
-        "finalizado_em": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "finalizado_em": datetime.now(timezone.utc).isoformat(),
     })
     print(f"M3 CONCLUÍDA | {item['estado']} | {item['instituicao']} | "
           f"encontrados={encontrados} | novos_salvos={stats['leads_salvos']-salvos_antes}", flush=True)
