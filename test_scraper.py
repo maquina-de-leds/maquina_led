@@ -315,7 +315,7 @@ class AtributosHtmlTests(unittest.TestCase):
         self.assertEqual(f.nomes_da_lista('Sandy Ianka Lima e Silva PAA-PPI'), [])
 
     def test_titulo_de_cerimonia_nao_e_pessoa(self):
-        for valor in ['Colação de Grau', 'Cerimônia de Outorga', 'Emissão de Diploma']:
+        for valor in ['Colação de Grau', 'Cerimônia de Outorga', 'Emissão de Diploma', 'Solenidade de Formatura Unopar Polo Santa Cruz']:
             self.assertIsNone(f.pessoa(valor), valor)
 
     def test_evento_institucional_nao_e_pessoa_no_resultado(self):
