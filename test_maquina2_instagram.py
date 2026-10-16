@@ -17,6 +17,35 @@ class Maquina2InstagramTests(unittest.TestCase):
         for chave in m2.stats:
             m2.stats[chave] = 0
 
+
+    def test_aceita_pessoa_com_instituicao_universitaria(self):
+        lead = {
+            "nome": "Geovanna Silva Alves",
+            "nicho": "Nutrição",
+            "instituicao": "Universidade Presbiteriana Mackenzie",
+            "cidade": "São Paulo",
+            "estado": "SP",
+            "evidencia": "Aluna de Nutrição da universidade em 2025",
+            "fonte_url": "https://www.mackenzie.br/noticia",
+        }
+        self.assertTrue(m2.lead_apto_para_enriquecimento(lead))
+
+    def test_rejeita_instituicao_salva_como_nome(self):
+        lead = {
+            "nome": "Universidade Presbiteriana Mackenzie",
+            "nicho": "Nutrição",
+            "instituicao": "Universidade Presbiteriana Mackenzie",
+        }
+        self.assertFalse(m2.lead_apto_para_enriquecimento(lead))
+
+    def test_rejeita_outro_nicho(self):
+        lead = {
+            "nome": "Geovanna Silva Alves",
+            "nicho": "Fisioterapia",
+            "instituicao": "Universidade Exemplo",
+        }
+        self.assertFalse(m2.lead_apto_para_enriquecimento(lead))
+
     def test_aceita_outro_perfil_com_evidencia_de_nutricao(self):
         resultado = {
             "title": "Raquel Alves | Nutrição Funcional e Saúde Intestinal",
