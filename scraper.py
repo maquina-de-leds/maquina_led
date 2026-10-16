@@ -71,6 +71,14 @@ def normalizar(texto):
     texto = re.sub(r"[‐‑‒–—−]", "-", texto)
     return texto
 
+def chave_nome_pessoa(nome):
+    """Canonical person key: ignores accents, punctuation, particles, and a trailing initial."""
+    tokens = re.findall(r"[a-z0-9]+", normalizar(nome))
+    tokens = [token for token in tokens if token not in {"de", "da", "do", "dos", "das", "e"}]
+    while len(tokens) >= 4 and len(tokens[-1]) == 1:
+        tokens.pop()
+    return " ".join(tokens)
+
 
 def valor(row, *nomes):
     mapa = {str(k or "").strip().upper(): v for k, v in row.items()}
@@ -294,13 +302,13 @@ class SupabaseRepo:
             for offset in range(0, 100000, 1000):
                 rows = (self.client.table('leds').select('nome,instituicao')
                         .order('id').range(offset, offset + 999).execute()).data or []
-                identidades.update((normalizar(x['nome']), normalizar(x.get('instituicao'))) for x in rows)
+                identidades.update((chave_nome_pessoa(x['nome']), normalizar(x.get('instituicao'))) for x in rows)
                 if len(rows) < 1000:
                     self._identidades_existentes = identidades
                     break
             else:
                 raise RuntimeError('Paginação de identidades incompleta')
-        return (normalizar(nome), normalizar(instituicao)) in self._identidades_existentes
+        return (chave_nome_pessoa(nome), normalizar(instituicao)) in self._identidades_existentes
 
     def instagram_usado(self, instagram):
         if not instagram:
@@ -432,7 +440,7 @@ class SupabaseRepo:
             try:
                 self.client.table('leds').insert(dados).execute()
                 if hasattr(self, '_identidades_existentes'):
-                    self._identidades_existentes.add((normalizar(dados['nome']), normalizar(dados.get('instituicao'))))
+                    self._identidades_existentes.add((chave_nome_pessoa(dados['nome']), normalizar(dados.get('instituicao'))))
                 return True
             except Exception as exc:
                 # Timeout pode ocorrer depois do commit; confirmar antes de repetir.
