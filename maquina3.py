@@ -65,11 +65,17 @@ def candidatos_instagram_publico(resultado, item):
         r"[^:;.!?]{0,70}[:\-–]\s*([^.!?]+)",
         texto, re.I,
     )
-    if not rotulo:
-        return []
-    lista = re.sub(r"^\s*(?:(?:do|da|de)\s+)?(?:curso\s+de\s+)?nutri[cç][aã]o\s*", "", rotulo.group(1), flags=re.I)
-    lista = re.sub(r"^\s*(?:2025|2026)(?:[./-][12])?\s*[:\-–]?\s*", "", lista)
-    nomes = nomes_da_lista(lista)
+    if rotulo:
+        lista = re.sub(r"^\s*(?:(?:do|da|de)\s+)?(?:curso\s+de\s+)?nutri[cç][aã]o\s*", "", rotulo.group(1), flags=re.I)
+        lista = re.sub(r"^\s*(?:2025|2026)(?:[./-][12])?\s*[:\-–]?\s*", "", lista)
+        nomes = nomes_da_lista(lista)
+    else:
+        singular = re.search(
+            r"\b(?:a\s+aluna|o\s+aluno|aluna|aluno|formanda|formando|estudante|egressa|egresso)\s+"
+            r"([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:\s+(?:de|da|do|dos|das|e)?\s*[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+){1,6})\b",
+            texto,
+        )
+        nomes = nomes_da_lista(singular.group(1)) if singular else []
     if not nomes:
         return []
 
