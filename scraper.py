@@ -21,7 +21,7 @@ ETAPA_ROTEIRO_ESTADUAL = "captacao_nutricao_progresso_estadual_v1"
 ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v58"
 ORIGEM_IES = "inep_censo_superior_municipal_v58"
 MAX_RESULTADOS = 12
-MAX_INSTITUICOES_POR_EXECUCAO = 4
+MAX_INSTITUICOES_POR_EXECUCAO = 8
 PAUSA_ENTRE_BUSCAS = 3.0
 
 INEP_FONTES = [
@@ -777,7 +777,7 @@ def consultas_documentos_alunos(instituicao, alias=None):
               'projeto integrador alunas autores', 'liga acadêmica nova gestão integrantes',
               'centro acadêmico diretoria', 'juramentista oradora formanda',
               'boletim de serviços concluintes', 'aptos a colar grau')
-    simples=[f'{termo} Nutrição {sinal}' for sinal in ('e-book','graduandas artigo','mostra TCC','liga integrantes')]
+    simples=[f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in ('egressos','lista de formandos')]
     perfis=[f'{termo} Nutrição "{fase}º semestre"' for fase in (7,8)]
     perfis += [f'{termo} Nutrição site:linkedin.com/in "{fase}º semestre"' for fase in (7,8)]
     return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais] + perfis
@@ -1420,14 +1420,14 @@ def executar():
         print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
     fila = fila_estado_atual(repo, fila)
     print(f"📚 Fila do estado atual: {len(fila)} faculdades pendentes.", flush=True)
-    prazo=time.monotonic()+360
+    prazo=time.monotonic()+480
     falhas_instituicoes = 0
     for item in selecionar_janela(fila, MAX_INSTITUICOES_POR_EXECUCAO):
         if time.monotonic() >= prazo:
             print("LIMITE DO CICLO: faculdades restantes preservadas na fila",flush=True)
             break
         try:
-            if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=6, prazo=prazo):
+            if not processar_instituicao(repo, item, continuar_falhas=False, limite_consultas=8, prazo=prazo):
                 falhas_instituicoes += 1
                 print("FACULDADE PENDENTE: ciclo continua nas demais; checkpoint preservado", flush=True)
         except Exception as exc:
