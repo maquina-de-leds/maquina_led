@@ -30,7 +30,7 @@ def conectar_banco():
 # CONFIGURAÇÃO
 # ============================================================
 
-LIMITE_POR_EXECUCAO = 25
+LIMITE_POR_EXECUCAO = 50
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
@@ -959,7 +959,7 @@ def executar():
 
     with DDGS() as ddgs:
 
-        prazo = time.monotonic() + 300
+        prazo = time.monotonic() + 3000
         anterior = signal.getsignal(signal.SIGALRM)
         def esgotado(*args):
             raise JanelaEncerrada('Janela da Máquina 2 encerrada; lead preservado')
