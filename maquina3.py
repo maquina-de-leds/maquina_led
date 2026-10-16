@@ -223,7 +223,7 @@ def executar():
             processar_faculdade(repo, item)
         except Exception as exc:
             stats["erros"] += 1
-            cp = item.get("_m3_cp") or {}
+            cp = repo.controle_get(etapa_item(item)) or item.get("_m3_cp") or {}
             salvar_checkpoint(repo, item, "erro", int(cp.get("indice_pesquisa") or 0),
                               cp.get("consulta_atual"),
                               f"{type(exc).__name__}: {str(exc)[:700]}",
