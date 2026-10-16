@@ -2,6 +2,7 @@
 Usa checkpoint independente e a rotina central de deduplicação/salvamento da Máquina 1.
 """
 import json
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
