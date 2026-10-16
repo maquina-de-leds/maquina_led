@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths: ['*.py', 'requirements.txt', '.github/workflows/automacao.yml']
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
 permissions:
   contents: read
 
