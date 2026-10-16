@@ -810,7 +810,15 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     prioritarias = [f'{curto} Nutrição {ano} {sinal}'
                    for ano in (2025, 2026)
                    for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
-    consultas = prioritarias + consultas_documentos_alunos(instituicao, alias) + [f'"{termo}" Nutrição {sinal} {ano}'
+    # Busca posts públicos de turma e alunos nos períodos finais antes das consultas amplas.
+    consultas_instagram = [
+        f'site:instagram.com "{curto}" Nutrição "turma" {ano}'
+        for ano in (2025, 2026)
+    ] + [
+        f'site:instagram.com "{curto}" Nutrição "{periodo}"'
+        for periodo in ("7º período", "8º período")
+    ]
+    consultas = prioritarias + consultas_instagram + consultas_documentos_alunos(instituicao, alias) + [f'"{termo}" Nutrição {sinal} {ano}'
                  for ano in (2025, 2026) for sinal in sinais for termo in termos]
     nome_estado = dict(ESTADOS).get((uf or "").upper())
     if nome_estado:
