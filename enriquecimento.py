@@ -213,10 +213,11 @@ def marcar_como_b2b(lead):
 def lead_apto_para_enriquecimento(lead):
     """Impede que a Máquina 2 pesquise instituições, cursos ou outros nichos."""
     nome = str(lead.get("nome") or "")
+    # Instituição, cidade, estado e fonte descrevem o vínculo do lead;
+    # não devem fazê-lo parecer uma instituição em vez de uma pessoa.
     contexto = normalizar(" ".join(
         str(lead.get(campo) or "")
-        for campo in ("nome", "nicho", "instituicao", "cidade", "estado",
-                      "periodo_alvo", "evidencia", "fonte_url")
+        for campo in ("nome", "nicho")
     ))
     bloqueados = (
         "engenheiro agronomo", "engenharia agronomica", "agronomo",
