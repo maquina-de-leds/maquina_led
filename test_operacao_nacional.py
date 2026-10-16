@@ -32,11 +32,18 @@ class OperacaoNacionalTests(unittest.TestCase):
         self.assertIsNone(e.extrair_instagram_url('https://instagram.com.example.org/ana'))
         self.assertEqual(e.extrair_instagram_url('https://www.instagram.com/ana.nutri/'), '@ana.nutri')
 
-    def test_instagram_exige_identidade_curso_e_vinculo(self):
+    def test_instagram_aceita_outros_perfis_ligados_a_nutricao(self):
         lead = {'nome': 'Ana Silva', 'instituicao': 'Universidade Teste'}
-        for texto in ['Maria Silva Nutrição Universidade Teste', 'Ana Silva Psicologia Universidade Teste', 'Ana Silva Nutrição Faculdade Outra', 'Mariana Silva Nutrição Universidade Teste']:
-            self.assertFalse(e.resultado_compativel({'title': texto}, lead))
-        self.assertTrue(e.resultado_compativel({'title': 'Ana Silva', 'body': 'Nutricionista Universidade Teste'}, lead))
+        self.assertTrue(e.resultado_compativel(
+            {'title': 'Maria Silva | Nutrição', 'body': 'Nutricionista'}, lead))
+        self.assertTrue(e.resultado_compativel(
+            {'title': 'Ana Silva | Nutrição Faculdade Outra'}, lead))
+        self.assertTrue(e.resultado_compativel(
+            {'title': 'Mariana Silva | Nutrição'}, lead))
+        self.assertFalse(e.resultado_compativel(
+            {'title': 'Ana Silva | Psicologia Universidade Teste'}, lead))
+        self.assertFalse(e.resultado_compativel(
+            {'title': 'Maria Silva | Odontologia Universidade Teste'}, lead))
 
     def test_nao_contatar_legado_bloqueia_maquina2(self):
         with patch.object(e, 'validar_candidato') as validar:
