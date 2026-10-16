@@ -4,6 +4,17 @@ import scraper as s
 import enriquecimento as e
 
 class OperacaoNacionalTests(unittest.TestCase):
+    def test_chave_pessoa_ignora_acento_pontuacao_particulas_e_inicial_final(self):
+        self.assertEqual(s.chave_nome_pessoa("Victoria Barbosa d Avila C"),
+                         s.chave_nome_pessoa("Victoria Barbosa d'Ávila"))
+
+    def test_extrator_rejeita_titulo_instituicao_e_secao_como_nome(self):
+        from fontes_academicas import pessoa
+        for texto in ("Universidade Presbiteriana Mackenzie", "Currículo Lattes",
+                      "Avaliações e Premiações", "Indústria de Alimentos",
+                      "Mostra de TCC Nutrição"):
+            self.assertIsNone(pessoa(texto), texto)
+
     def test_faculdade_nova_tem_prioridade_sobre_retomada(self):
         nova = {'id': 1}
         antiga = {'id': 2, '_janela_encerrada': True, '_ultimo_checkpoint': '2026-10-01'}
