@@ -3,7 +3,7 @@ name: Maquina 3 - listas publicas de formandos
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
