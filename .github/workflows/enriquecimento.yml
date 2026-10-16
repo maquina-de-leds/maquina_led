@@ -2,17 +2,20 @@ name: Enriquecimento de Leads
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: maquina-1-fila
+  group: maquina-2-instagram
   cancel-in-progress: false
 
 jobs:
   enriquecer:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
 
     steps:
       - name: Baixar codigo
