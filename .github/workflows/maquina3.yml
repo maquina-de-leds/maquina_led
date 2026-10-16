@@ -1,6 +1,15 @@
 name: Maquina 3 - listas publicas de formandos
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "maquina3.py"
+      - "test_maquina3.py"
+      - "fontes_academicas.py"
+      - "scraper.py"
+      - ".github/workflows/maquina3.yml"
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
