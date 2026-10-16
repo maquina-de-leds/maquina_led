@@ -118,6 +118,9 @@ class FluxoTests(unittest.TestCase):
     def test_consultas_institucionais(self):
         qs=s.consultas_leads('Universidade Teste','UT')
         self.assertTrue(any('site:linkedin.com/in' in q for q in qs))
+        self.assertTrue(any('site:instagram.com' in q and '"turma" 2025' in q for q in qs))
+        self.assertTrue(any('site:instagram.com' in q and '7º período' in q for q in qs))
+        self.assertTrue(any('site:instagram.com' in q and '8º período' in q for q in qs))
         for year in (2025,2026):
             for signal in ('"formandos"','"TCC"','"turma"'):
                 self.assertTrue(any(signal in q and str(year) in q for q in qs))
