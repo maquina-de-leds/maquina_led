@@ -30,7 +30,8 @@ def conectar_banco():
 # CONFIGURAÇÃO
 # ============================================================
 
-LIMITE_POR_EXECUCAO = 50
+LIMITE_CANDIDATOS_POR_EXECUCAO = 50
+LIMITE_LEADS_POR_EXECUCAO = 200
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
@@ -263,7 +264,7 @@ def buscar_pendentes():
             .order('maquina2_verificado_em', nullsfirst=True)
             .order('id')
             .limit(
-                LIMITE_POR_EXECUCAO
+                LIMITE_LEADS_POR_EXECUCAO
             )
             .execute()
         )
@@ -447,25 +448,26 @@ def instagram_ja_usado(
 # ============================================================
 # SALVAR PERFIL COMO CANDIDATO, SEM ALTERAR O LEAD ORIGINAL
 # ============================================================
-def salvar_candidato(lead, handle):
-    handle = normalizar_instagram(handle)
-    if not handle:
+def salvar_candidato(lead, candidato):
+    handle = normalizar_instagram(candidato.get("instagram"))
+    if not handle or instagram_ja_usado(handle, lead["id"]):
         return False
-    existente = (supabase.table("instagram_candidatos")
-                 .select("id")
-                 .ilike("instagram", handle)
-                 .limit(1)
-                 .execute()).data or []
-    if existente:
-        return False
+    perfil = str(candidato.get("nome_perfil") or handle).strip()[:200]
+    consulta = str(candidato.get("consulta") or "")[:500]
+    fonte_url = str(candidato.get("fonte_url") or "")[:1000]
     resposta = supabase.table("instagram_candidatos").insert({
         "lead_origem_id": lead["id"],
         "nome_pesquisado": lead.get("nome"),
-        "nome_perfil": lead.get("nome"),
+        "nome_perfil": perfil,
         "instagram": handle,
         "instagram_url": f"https://www.instagram.com/{handle.lstrip('@')}/",
+        "consulta": consulta,
+        "fonte_url": fonte_url,
         "status": "novo",
-        "observacao": "Encontrado pela Máquina 2; revisar antes de associar ao lead."
+        "observacao": (
+            f"Perfil ligado à Nutrição encontrado ao pesquisar "
+            f"'{lead.get('nome')}'. Não confirmado como a mesma pessoa."
+        )
     }).execute()
     return bool(resposta.data)
 
@@ -527,191 +529,88 @@ def montar_consultas_instagram(lead):
 # BUSCAR INSTAGRAM
 # ============================================================
 
-def resultado_compativel(resultado, lead):
-    """O handle só é aceito com evidência pública da identidade e do curso."""
-    texto = normalizar(str(resultado.get('title') or '') + ' ' + str(resultado.get('body') or ''))
-    nome = normalizar(lead.get('nome'))
-    if not nome or not re.search(r'(?<!\w)' + re.escape(nome) + r'(?!\w)', texto):
-        return False
-    if not re.search(r'nutri(?:cao|cionista)', texto):
-        return False
-    vinculos = [normalizar(lead.get(k)) for k in ('instituicao', 'cidade') if lead.get(k)]
-    return not vinculos or any(v in texto for v in vinculos)
-
-
-def buscar_instagram(
-    ddgs,
-    lead
-):
-
-    nome = lead["nome"]
-
-    consultas = montar_consultas_instagram(
-        lead
+def resultado_compativel(resultado, lead=None):
+    """Aceita outros perfis quando o resultado traz evidência de Nutrição."""
+    texto = normalizar(
+        str(resultado.get("title") or "") + " " +
+        str(resultado.get("body") or "")
     )
+    return bool(re.search(
+        r"\b(?:nutricao|nutricionista|nutricional|nutritivo|nutritiva|crn)\b",
+        texto
+    ))
 
-    for consulta in consultas:
 
-        print(
-            f"      🔎 {consulta}",
-            flush=True
-        )
+def _perfil_do_resultado(resultado):
+    url = str(resultado.get("href") or resultado.get("url") or "")
+    handle = extrair_instagram_url(url)
+    if not handle:
+        texto = str(resultado.get("title") or "") + " " + str(resultado.get("body") or "")
+        for usuario in re.findall(
+            r"(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9._]+)",
+            texto,
+            flags=re.I
+        ):
+            handle = extrair_instagram_url(f"https://www.instagram.com/{usuario}/")
+            if handle:
+                break
+    if not handle:
+        return None
+    titulo = " ".join(str(resultado.get("title") or "").split()).strip()
+    return {
+        "instagram": normalizar_instagram(handle),
+        "nome_perfil": titulo or handle,
+        "fonte_url": url,
+    }
 
+
+def buscar_instagram(ddgs, lead, limite=None):
+    """Busca vários perfis de Nutrição; não exige que sejam o lead consultado."""
+    if limite is None:
+        limite = LIMITE_CANDIDATOS_POR_EXECUCAO
+    if limite <= 0:
+        return []
+
+    candidatos = []
+    vistos = set()
+    for consulta in montar_consultas_instagram(lead):
+        print(f"      🔎 {consulta}", flush=True)
         try:
-
-            resultados = list(
-                ddgs.text(
-                    consulta + " -site:linkedin.com",
-                    max_results=
-                        MAX_RESULTADOS
-                )
-            )
-
+            resultados = list(ddgs.text(
+                consulta + " -site:linkedin.com",
+                max_results=MAX_RESULTADOS
+            ))
         except Exception as erro:
-
-            print(
-                f"      ⚠️ Busca indisponível: {erro}",
-                flush=True
-            )
-
+            print(f"      ⚠️ Busca indisponível: {erro}", flush=True)
             pausa()
-
             continue
 
         for resultado in resultados:
-            if not resultado_compativel(resultado, lead):
+            if not resultado_compativel(resultado):
                 continue
-            if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
+            url = str(resultado.get("href") or resultado.get("url") or "")
+            if not url_permitida(url):
                 continue
-
-            url = (
-                resultado.get("href")
-                or resultado.get("url")
-                or ""
-            )
-
-            handle = extrair_instagram_url(
-                url
-            )
-
-            if not handle:
+            candidato = _perfil_do_resultado(resultado)
+            if not candidato:
                 continue
-
-            if instagram_ja_usado(
-                handle,
-                lead["id"]
-            ):
-
-                stats[
-                    "instagram_repetido"
-                ] += 1
-
+            handle = candidato["instagram"]
+            if handle in vistos:
                 continue
-
-            print(
-                f"      📸 Instagram candidato para "
-                f"{nome}: {handle}",
-                flush=True
-            )
-
-            return handle
-
+            vistos.add(handle)
+            if instagram_ja_usado(handle, lead["id"]):
+                stats["instagram_repetido"] += 1
+                continue
+            candidato["consulta"] = consulta
+            candidatos.append(candidato)
+            print(f"      📸 Perfil de Nutrição encontrado: {handle}", flush=True)
+            if len(candidatos) >= limite:
+                return candidatos
         pausa()
-
-    return None
+    return candidatos
 
 
 # ============================================================
-# BUSCAR INSTAGRAM EM TEXTO
-# ============================================================
-
-def buscar_handle_em_texto(
-    ddgs,
-    lead
-):
-
-    nome = lead["nome"]
-
-    consultas = [
-        f'"{nome}" Instagram Nutrição',
-        f'"{nome}" "instagram.com/" Nutrição',
-    ]
-
-    padroes = [
-        r"instagram\.com/([A-Za-z0-9._]+)",
-        r"@([A-Za-z0-9._]{3,30})",
-    ]
-
-    for consulta in consultas:
-
-        try:
-
-            resultados = list(
-                ddgs.text(
-                    consulta + " -site:linkedin.com",
-                    max_results=8
-                )
-            )
-
-        except Exception:
-
-            continue
-
-        for resultado in resultados:
-            if not resultado_compativel(resultado, lead):
-                continue
-            if not url_permitida(str(resultado.get("href") or resultado.get("url") or "")):
-                continue
-
-            texto = (
-                str(
-                    resultado.get(
-                        "title",
-                        ""
-                    )
-                )
-                + " "
-                + str(
-                    resultado.get(
-                        "body",
-                        ""
-                    )
-                )
-            )
-
-            for padrao in padroes:
-
-                encontrados = re.findall(
-                    padrao,
-                    texto,
-                    flags=re.I
-                )
-
-                for usuario in encontrados:
-
-                    handle = (
-                        f"@{usuario}"
-                        .replace("@@", "@")
-                    )
-
-                    if instagram_ja_usado(
-                        handle,
-                        lead["id"]
-                    ):
-
-                        stats[
-                            "instagram_repetido"
-                        ] += 1
-
-                        continue
-
-                    return handle
-
-        pausa()
-
-    return None
-
-
 # ============================================================
 # ATUALIZAR CONTATO DO LEAD
 # ============================================================
@@ -821,133 +720,50 @@ def validar_candidato(ddgs, lead):
         pausa()
     return False
 
-def processar_lead(
-    ddgs,
-    lead
-):
-
-    if lead.get('nao_contatar') or lead.get('não_contatar'):
+def processar_lead(ddgs, lead):
+    if lead.get("nao_contatar") or lead.get("não_contatar"):
         return
-    nome = lead.get(
-        "nome",
-        "Sem nome"
-    )
-
+    nome = lead.get("nome", "Sem nome")
     print("")
-    print(
-        "=" * 65,
-        flush=True
-    )
+    print("=" * 65, flush=True)
+    print(f"👤 {nome}", flush=True)
 
-    print(
-        f"👤 {nome}",
-        flush=True
-    )
-
-    # ========================================================
-    # VERIFICA SE É PESSOA
-    # ========================================================
-
-    if not parece_pessoa(
-        nome
-    ):
-
-        stats[
-            "ignorados_nao_pessoa"
-        ] += 1
-
-        print(
-            "   🏢 Não parece pessoa física",
-            flush=True
-        )
-
-        marcar_como_b2b(
-            lead
-        )
-
+    if not parece_pessoa(nome):
+        stats["ignorados_nao_pessoa"] += 1
+        print("   🏢 Não parece pessoa física", flush=True)
+        marcar_como_b2b(lead)
         return
 
-    print(
-        f"   Faculdade: "
-        f"{lead.get('instituicao') or 'não informada'}",
-        flush=True
-    )
+    print(f"   Faculdade: {lead.get('instituicao') or 'não informada'}", flush=True)
+    print(f"   Ano: {lead.get('ano_alvo') or 'não informado'}", flush=True)
+    print(f"   Situação: {lead.get('periodo_alvo') or 'não informada'}", flush=True)
+    stats["processados"] += 1
 
-    print(
-        f"   Ano: "
-        f"{lead.get('ano_alvo') or 'não informado'}",
-        flush=True
-    )
-
-    print(
-        f"   Situação: "
-        f"{lead.get('periodo_alvo') or 'não informada'}",
-        flush=True
-    )
-
-    stats[
-        "processados"
-    ] += 1
-
-    # ========================================================
-    # INSTAGRAM DIRETO
-    # ========================================================
-
-    instagram = buscar_instagram(
-        ddgs,
-        lead
-    )
-
-    if instagram:
-
-        stats[
-            "instagram_encontrado"
-        ] += 1
-
-        salvo = salvar_candidato(lead, instagram)
-        if not salvo:
+    restante = LIMITE_CANDIDATOS_POR_EXECUCAO - stats["instagram_encontrado"]
+    candidatos = buscar_instagram(ddgs, lead, limite=restante)
+    salvos = 0
+    for candidato in candidatos:
+        if stats["instagram_encontrado"] >= LIMITE_CANDIDATOS_POR_EXECUCAO:
+            break
+        if salvar_candidato(lead, candidato):
+            stats["instagram_encontrado"] += 1
+            salvos += 1
+            print(
+                f"   ✅ CANDIDATO SALVO: {candidato['instagram']} "
+                f"({candidato['nome_perfil']}); lead pesquisado preservado",
+                flush=True
+            )
+        else:
             stats["instagram_repetido"] += 1
-            print('   Arroba já está na fila de candidatos; lead original preservado', flush=True)
-            return
+            print(f"   Arroba já cadastrado: {candidato['instagram']}", flush=True)
 
-        print(
-            f"   ✅ CANDIDATO SALVO: {instagram}; lead original preservado",
-            flush=True
-        )
-
-        return
-
-    # ========================================================
-    # INSTAGRAM EM OUTRAS PÁGINAS
-    # ========================================================
-
-    instagram = buscar_handle_em_texto(
-        ddgs,
-        lead
-    )
-
-    if instagram:
-
-        stats[
-            "instagram_encontrado"
-        ] += 1
-
-        salvo = salvar_candidato(lead, instagram)
-        if not salvo:
-            stats["instagram_repetido"] += 1
-            print('   Arroba já está na fila de candidatos; lead original preservado', flush=True)
-            return
-
-        print(
-            f"   ✅ CANDIDATO SALVO: {instagram}; lead original preservado",
-            flush=True
-        )
-
+    if salvos:
         return
 
     atualizar_lead(lead["id"])
     stats["sem_contato"] += 1
-    print("   ⏳ Continua pendente de Instagram", flush=True)
+    print("   ⏳ Lead continua pendente de Instagram", flush=True)
+
 
 
 def executar():
@@ -998,6 +814,9 @@ def executar():
         signal.signal(signal.SIGALRM, esgotado)
         try:
             for lead in leads:
+                if stats['instagram_encontrado'] >= LIMITE_CANDIDATOS_POR_EXECUCAO:
+                    print('LIMITE DE 50 ARROBAS ÚNICAS ATINGIDO', flush=True)
+                    break
                 restante = prazo - time.monotonic()
                 if restante <= 0:
                     break
