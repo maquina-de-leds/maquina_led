@@ -9,5 +9,7 @@ class BuscasDocumentaisTests(unittest.TestCase):
  def test_troca_faculdade_e_ambos_anos(self):
   consultas=s.consultas_documentos_alunos('Universidade Federal de Santa Catarina','UFSC')
   self.assertTrue(all(c.startswith('UFSC Nutrição ') for c in consultas))
-  self.assertEqual(len([c for c in consultas if '2025' in c]),10)
-  self.assertEqual(len([c for c in consultas if '2026' in c]),10)
+  self.assertEqual(len([c for c in consultas if '2025' in c]),12)
+  self.assertEqual(len([c for c in consultas if '2026' in c]),12)
+  self.assertTrue(any('egressos' in c and '2025' in c for c in consultas))
+  self.assertTrue(any('lista de formandos' in c and '2026' in c for c in consultas))
