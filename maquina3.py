@@ -73,7 +73,7 @@ def selecionar_lote(pendentes, limite=MAX_FACULDADES):
     """Mantém um estado por vez e retoma instituições interrompidas primeiro."""
     if not pendentes:
         return []
-    uf = min((x.get("estado") or "") for x in pendentes, key=ordem_estado)
+    uf = min(((x.get("estado") or "") for x in pendentes), key=ordem_estado)
     do_estado = [x for x in pendentes if (x.get("estado") or "") == uf]
     return sorted(
         do_estado,
