@@ -407,6 +407,16 @@ def instagram_ja_usado(
 
         registros = resposta.data or []
 
+        candidatos = (
+            supabase.table("instagram_candidatos")
+            .select("instagram")
+            .ilike("instagram", handle)
+            .limit(1)
+            .execute()
+        ).data or []
+        if candidatos:
+            return True
+
         for registro in registros:
 
             if registro["id"] == lead_id:
@@ -432,6 +442,32 @@ def instagram_ja_usado(
         stats["erros"] += 1
 
         raise RuntimeError('Não foi possível verificar Instagram duplicado') from erro
+
+
+# ============================================================
+# SALVAR PERFIL COMO CANDIDATO, SEM ALTERAR O LEAD ORIGINAL
+# ============================================================
+def salvar_candidato(lead, handle):
+    handle = normalizar_instagram(handle)
+    if not handle:
+        return False
+    existente = (supabase.table("instagram_candidatos")
+                 .select("id")
+                 .ilike("instagram", handle)
+                 .limit(1)
+                 .execute()).data or []
+    if existente:
+        return False
+    resposta = supabase.table("instagram_candidatos").insert({
+        "lead_origem_id": lead["id"],
+        "nome_pesquisado": lead.get("nome"),
+        "nome_perfil": lead.get("nome"),
+        "instagram": handle,
+        "instagram_url": f"https://www.instagram.com/{handle.lstrip('@')}/",
+        "status": "novo",
+        "observacao": "Encontrado pela Máquina 2; revisar antes de associar ao lead."
+    }).execute()
+    return bool(resposta.data)
 
 
 # ============================================================
@@ -868,16 +904,14 @@ def processar_lead(
             "instagram_encontrado"
         ] += 1
 
-        confirmado = atualizar_lead(
-            lead["id"],
-            instagram=instagram
-        )
-        if not confirmado:
-            print('   Atualização não aplicada; estado atual do lead preservado', flush=True)
+        salvo = salvar_candidato(lead, instagram)
+        if not salvo:
+            stats["instagram_repetido"] += 1
+            print('   Arroba já está na fila de candidatos; lead original preservado', flush=True)
             return
 
         print(
-            f"   ✅ SALVO NO SUPABASE: {instagram}",
+            f"   ✅ CANDIDATO SALVO: {instagram}; lead original preservado",
             flush=True
         )
 
@@ -898,16 +932,14 @@ def processar_lead(
             "instagram_encontrado"
         ] += 1
 
-        confirmado = atualizar_lead(
-            lead["id"],
-            instagram=instagram
-        )
-        if not confirmado:
-            print('   Atualização não aplicada; estado atual do lead preservado', flush=True)
+        salvo = salvar_candidato(lead, instagram)
+        if not salvo:
+            stats["instagram_repetido"] += 1
+            print('   Arroba já está na fila de candidatos; lead original preservado', flush=True)
             return
 
         print(
-            f"   ✅ SALVO NO SUPABASE: {instagram}",
+            f"   ✅ CANDIDATO SALVO: {instagram}; lead original preservado",
             flush=True
         )
 
