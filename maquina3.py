@@ -5,17 +5,20 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from fontes_academicas import acesso_reservado_maquina2, carregar_fonte, url_permitida
+from fontes_academicas import (
+    acesso_reservado_maquina2, carregar_fonte, fase_final_comprovada,
+    nomes_da_lista, periodo_academico, url_permitida,
+)
 from scraper import (
     ESTADOS, ORIGEM_IES, SupabaseRepo, alias_instituicao, agrupar_faculdades,
     buscar_web, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
 )
 
-ETAPA = "captacao_maquina3_formandos_v1"
+ETAPA = "captacao_maquina3_formandos_v2"
 MAX_FACULDADES = 5
 MAX_RESULTADOS_BUSCA = 6
 MAX_FONTES_POR_CONSULTA = 2
-TOTAL_CONSULTAS = 4
+TOTAL_CONSULTAS = 6
 
 
 def consultas_lote(item):
@@ -25,11 +28,66 @@ def consultas_lote(item):
     termo = ' OR '.join('"'+t.replace('"', '')+'"' for t in termos)
     uf = limpar_espacos(item.get("estado") or "")
     return [
-        f'{termo} Nutrição formandos 2025 lista nomes',
-        f'{termo} Nutrição "colação de grau" 2025 formandos',
-        f'{termo} Nutrição concluintes 2026 formatura nomes',
-        f'{termo} Nutrição "2026/1" formandos OR concluintes {uf}',
+        f'{termo} Nutrição formandos OR concluintes 2025 lista nomes formatura',
+        f'{termo} Nutrição "colação de grau" OR formatura 2025 2026 concluintes nomes',
+        f'{termo} Nutrição alunos "último semestre" OR "último período" 2026 {uf}',
+        f'{termo} Nutrição "8º semestre" OR "8º período" "2026/1" formandos concluintes {uf}',
+        f'site:instagram.com ("{nome}" OR "{alias}") Nutrição formandos OR formatura 2025 2026',
+        f'site:instagram.com ("{nome}" OR "{alias}") Nutrição alunos concluintes "último semestre" OR "2026/1"',
     ]
+
+
+def candidatos_instagram_publico(resultado, item):
+    """Usa somente título/trecho público indexado pelo Google; não abre o Instagram."""
+    url = str(resultado.get("href") or resultado.get("url") or "")
+    host = (urlparse(url).hostname or "").lower()
+    path = urlparse(url).path.lower().strip("/")
+    if host not in {"instagram.com", "www.instagram.com"} or not re.match(r"^(?:p|reel|reels|tv)/", path):
+        return []
+
+    texto = limpar_espacos(" ".join(str(resultado.get(k) or "") for k in ("title", "body", "snippet")))
+    n = normalizar(texto)
+    if "nutricao" not in n or not re.search(r"2025|2026", n):
+        return []
+    if not re.search(r"formand|concluint|formatura|colacao|egress|ultimo semestre|ultimo periodo|8. semestre|8. periodo", n):
+        return []
+
+    nome_inst = normalizar(item.get("instituicao"))
+    alias = normalizar(alias_instituicao(item) or "")
+    texto_origem = normalizar(texto + " " + url)
+    tokens = [t for t in re.findall(r"[a-z0-9]+", nome_inst)
+              if len(t) >= 5 and t not in {"universidade", "faculdade", "instituto", "centro", "superior"}]
+    if not any(x and x in texto_origem for x in (nome_inst, alias)) and not any(t in texto_origem for t in tokens):
+        return []
+
+    rotulo = re.search(
+        r"\b(?:formand[oa]s?|concluintes?|egress[oa]s?|alun[oa]s?|estudantes?)\b"
+        r"[^:;.!?]{0,70}[:\-–]\s*([^.!?]+)",
+        texto, re.I,
+    )
+    if not rotulo:
+        return []
+    lista = re.sub(r"^\s*(?:(?:do|da|de)\s+)?(?:curso\s+de\s+)?nutri[cç][aã]o\s*", "", rotulo.group(1), flags=re.I)
+    lista = re.sub(r"^\s*(?:2025|2026)(?:[./-][12])?\s*[:\-–]?\s*", "", lista)
+    nomes = nomes_da_lista(lista)
+    if not nomes:
+        return []
+
+    anos = set(re.findall(r"\b202[56]\b", n))
+    ano = 2026 if "2026" in anos else 2025
+    _, periodo = periodo_academico(texto)
+    if ano == 2026 and not re.search(r"ultimo semestre|ultimo periodo|8. semestre|8. periodo|formand|concluint|formatura|colacao", n):
+        return []
+    periodo = periodo or f"{ano} (semestre não informado)"
+    candidato_indicio = not fase_final_comprovada(texto)
+    return [{
+        "nome": nome,
+        "ano": ano,
+        "periodo": periodo,
+        "evidencia": f"Instagram público institucional | resultado indexado pelo Google | Nutrição | {periodo} | {texto}",
+        "fonte_url": url,
+        "candidato_indicio": candidato_indicio,
+    } for nome in nomes]
 
 
 def etapa_item(item):
@@ -128,7 +186,19 @@ def processar_faculdade(repo, item):
         urls = []
         for resultado in resultados:
             url = str(resultado.get("href") or resultado.get("url") or "")
-            if not url_permitida(url) or acesso_reservado_maquina2(url):
+            if acesso_reservado_maquina2(url):
+                for registro in candidatos_instagram_publico(resultado, item):
+                    encontrados += 1
+                    stats["leads_encontrados"] += 1
+                    salvar_lead(
+                        repo, registro["nome"], item["instituicao"], cidade,
+                        item.get("estado"), registro["evidencia"], registro["fonte_url"],
+                        ano_forcado=registro["ano"], periodo_forcado=registro["periodo"],
+                        instituicao_alias=alias,
+                        candidato_indicio=registro["candidato_indicio"],
+                    )
+                continue
+            if not url_permitida(url):
                 continue
             if url not in urls:
                 urls.append(url)
