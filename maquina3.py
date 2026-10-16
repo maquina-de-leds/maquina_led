@@ -75,9 +75,9 @@ def candidatos_instagram_publico(resultado, item):
             nomes.extend(nomes_da_lista(lista))
         else:
             singular = re.search(
-                r"\b(?:a\s+aluna|o\s+aluno|aluna|aluno|formanda|formando|estudante|egressa|egresso)\s+"
-                r"([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:\s+(?:de|da|do|dos|das|e)?\s*[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+){1,6})\b",
-                campo, re.I,
+                r"(?i:\b(?:a\s+aluna|o\s+aluno|aluna|aluno|formanda|formando|estudante|egressa|egresso)\s+)"
+                r"([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:\s+(?:(?:de|da|do|dos|das|e)\s+)?[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+){1,6})\b",
+                campo,
             )
             if singular:
                 nomes.extend(nomes_da_lista(singular.group(1)))
