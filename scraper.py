@@ -14,9 +14,9 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v5.9.0"
+VERSAO = "v6.0.0"
 ETAPA_CARGA_IES = "carga_inep_nutricao_municipal_v58"
-ETAPA_CAPTACAO = "captacao_nacional_nutricao_v59"
+ETAPA_CAPTACAO = "captacao_nacional_nutricao_v60"
 ETAPA_ROTEIRO_ESTADUAL = "captacao_nutricao_progresso_estadual_v1"
 ETAPA_MIGRACAO_BUSCA = "migracao_busca_nutricao_v58"
 ORIGEM_IES = "inep_censo_superior_municipal_v58"
@@ -684,9 +684,10 @@ def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Automático com repetição e Bing alternativo, comprovados no runner."""
+    """Busca primeiro no Google duas vezes e usa Bing como reserva."""
     erros=[]; respondeu_vazio=False
-    for indice,backend in enumerate(('auto','auto','bing')):
+    tentativas = ('google', 'google', 'bing')
+    for indice,backend in enumerate(tentativas):
         try:
             try: resultados=fetch_fn(consulta,backend,max_results)
             except TypeError: resultados=fetch_fn(consulta,max_results)
@@ -697,7 +698,7 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
         except Exception as exc:
             erros.append((backend,exc))
             print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
-        if indice==0: time.sleep(4.0)
+        if indice < len(tentativas)-1: time.sleep(2.0)
     if respondeu_vazio and not erros: return []
     # Controle de saúde não transforma timeout da consulta original em vazio.
     if any('no results' not in str(exc).lower() for _, exc in erros):
@@ -784,44 +785,30 @@ def consultas_documentos_alunos(instituicao, alias=None):
 
 
 def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
-    # Mesma estratégia para toda IES/município; o nome e a sigla são alternativos.
+    # Descoberta acadêmica ampla da M1 em blocos curtos, sem buscas individuais
+    # de Instagram (esse enriquecimento pertence a outro fluxo).
     termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
-    sinais = ('"formandos"', '"colação de grau"', '"TCC"', '"concluintes"',
-              '"turma"', '"recém-formados"', '"recém-formadas"',
-              '"último semestre"', '"último período"', '"estágio final"',
-              '"alunos" "conclusão"', '"mostra" "autores"',
-              '"defesa" "TCC"', '"apresentação" "trabalho de conclusão"',
-              '"repositório"', '"lista de formandos"',
-              '"cerimônia de formatura"', '"concluíram"',
-              '"jornada acadêmica" "trabalhos"', '"entrega" "TCC"', '"aluno"', '"aluna"',
-              '"grupo de alunos"', '"estudante" "apresentação"', '"acadêmico do curso"',
-              '"acadêmica do curso"', '"discente" "artigo"',
-              '"grupo de estudantes"', '"grupo de estudos"', '"turma de nutrição"',
-              '"liga acadêmica" "integrantes"', '"centro acadêmico" "membros"',
-              '"alunos de nutrição"', '"estudantes de nutrição"',
-              '"grupo" "alunos"', '"projeto integrador"', '"iniciação científica"',
-              '"iniciação tecnológica"', '"projetos aprovados"', '"resultado" "monitoria"',
-              '"extensão" "alunos"', '"workshop" "alunos"', '"caderno de resumos"',
-              '"anais" "autores"', '"ebook" "alunos"', '"e-book" "alunas"',
-              '"semana acadêmica"', '"jornada" "graduanda"')
-    # Consultas menos restritas antecipam documentos com autores, sem exigir
-    # que a página use a razão social ou a palavra exata "formandos".
-    curto = limpar_espacos(alias or instituicao)
-    prioritarias = [f'{curto} Nutrição {ano} {sinal}'
-                   for ano in (2025, 2026)
-                   for sinal in ('TCC repositório', 'trabalho de conclusão de curso autores')]
-    consultas = prioritarias + consultas_documentos_alunos(instituicao, alias) + [f'"{termo}" Nutrição {sinal} {ano}'
-                 for ano in (2025, 2026) for sinal in sinais for termo in termos]
+    temas = (
+        '"formandos" OR "concluintes" OR "lista de formandos"',
+        '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR repositório autores entrega',
+        '"colação de grau" OR outorga OR formatura',
+        '"recém-formados" OR "último período" OR "estágio final"',
+        '"mostra" "autores" OR anais OR "caderno de resumos"',
+        '"liga acadêmica" OR "grupo de estudos" OR monitoria OR extensão alunos',
+        '"turma" "Nutrição"',
+    )
+    consultas = [f'"{termo}" Nutrição {ano} {tema}'
+                 for ano in (2025, 2026) for termo in termos for tema in temas]
     nome_estado = dict(ESTADOS).get((uf or "").upper())
     if nome_estado:
-        consultas += [f'{curto} Nutrição "{nome_estado}" {ano} {sinal}'
-                      for ano in (2025, 2026)
-                      for sinal in ("TCC repositório", "trabalho de conclusão autores",
-                                    "formandos colação")]
+        consultas += [f'"{termos[0]}" Nutrição "{nome_estado}" {ano} "formandos" OR "colação de grau"'
+                      for ano in (2025, 2026)]
     if cidade and normalizar(cidade) != "nao identificado":
-        consultas += [f'"{instituicao}" "{cidade}" {uf or ""} Nutrição "turma" {ano}'
+        consultas += [f'"{termo}" "{cidade}" {uf or ""} Nutrição {ano} "turma" OR formandos'
+                      for termo in termos
                       for ano in (2025,2026)]
-    consultas += [f'site:linkedin.com/in "{instituicao}" Nutrição {ano}' for ano in (2025,2026)]
+    consultas += [f'site:linkedin.com/in "{termos[0]}" Nutrição {ano} formandos OR estudante'
+                  for ano in (2025,2026)]
     return list(dict.fromkeys(consultas))
 
 
@@ -1461,4 +1448,5 @@ if __name__ == "__main__":
         preparar_lista()
     else:
         executar()
+
 
