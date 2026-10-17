@@ -15,7 +15,7 @@ from scraper import (
     buscar_web, ddgs_texto, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
 )
 
-ETAPA = "captacao_maquina3_formandos_v2"
+ETAPA = "captacao_maquina3_formandos_v3"
 MAX_FACULDADES = 5
 MAX_RESULTADOS_BUSCA = 6
 MAX_FONTES_POR_CONSULTA = 2
