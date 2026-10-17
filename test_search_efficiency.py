@@ -99,7 +99,7 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
             calls.append((query, backend))
             if query == "Brasil":
                 return [{"title": "health check", "href": "https://example.org"}]
-            raise RuntimeError("No results found")
+            raise RuntimeError("Temporary network error")
 
         self.assertIsNone(scraper.buscar_web("Nutrição 2026", fetch_fn=fetch))
         self.assertEqual(calls, [

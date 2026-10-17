@@ -156,7 +156,7 @@ class FluxoTests(unittest.TestCase):
         self.assertEqual(repo.cp['indice_pesquisa'],0)
     @patch.object(s.time,'sleep')
     def test_busca_indisponivel(self,sleep):
-        def fail(*args): raise RuntimeError('No results found')
+        def fail(*args): raise RuntimeError('Temporary network error')
         self.assertIsNone(s.buscar_web('test',fetch_fn=fail))
     @patch.object(s.time,'sleep')
     def test_cidade_da_fila_nao_e_atribuida_sem_evidencia(self,sleep):
