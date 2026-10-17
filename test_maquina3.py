@@ -20,7 +20,8 @@ class Machine3Tests(unittest.TestCase):
         self.assertTrue(all("Nutrição" in q for q in queries))
         self.assertTrue(any("2025" in q for q in queries))
         self.assertTrue(any("2026" in q for q in queries))
-        self.assertTrue(any("site:instagram.com" in q for q in queries))
+        self.assertFalse(any("site:instagram.com" in q for q in queries))
+        self.assertTrue(any("TCC" in q for q in queries))
         self.assertTrue(any("último semestre" in q for q in queries))
 
     def test_uses_google_search_backend(self):
@@ -78,6 +79,26 @@ class Machine3Tests(unittest.TestCase):
         candidates = m.candidatos_instagram_publico(result, item)
         self.assertEqual([x["nome"] for x in candidates], ["Ana Souza"])
         self.assertEqual(candidates[0]["ano"], 2026)
+
+    def test_extracts_candidates_from_general_public_google_snippets(self):
+        repo = FakeRepo()
+        item = {"id": 9, "estado": "SP", "instituicao": "Universidade Teste"}
+        result = {"href": "https://universidade-teste.edu.br/formandos", "title": "Nutrição 2026"}
+        candidate = {
+            "nome": "Ana Souza",
+            "ano": 2026,
+            "periodo": "2026",
+            "instituicao": "Universidade Teste",
+            "evidencia": "Universidade Teste | Nutrição | estudante 2026",
+            "fonte_url": result["href"],
+        }
+        with patch.object(m, "buscar_google", return_value=[result]), \
+             patch.object(m, "extrair_resultado_busca", side_effect=[[candidate], [], [], [], [], []]), \
+             patch.object(m, "carregar_fonte", return_value=([], [])), \
+             patch.object(m, "salvar_lead") as save:
+            self.assertTrue(m.processar_faculdade(repo, item))
+        save.assert_called_once()
+        self.assertEqual(save.call_args.args[1], "Ana Souza")
 
     def test_skips_instagram_and_caps_source_pages(self):
         repo = FakeRepo()
