@@ -115,30 +115,39 @@ def extrair_perfil_instagram_publico(resultados, registro):
         return None
     minimo = max(2, (len(nome_tokens) * 2 + 2) // 3)
     for resultado in resultados or []:
-        url = str(resultado.get("href") or resultado.get("url") or "")
-        parsed = urlparse(url)
-        host = (parsed.hostname or "").lower()
-        partes = [p for p in parsed.path.split("/") if p]
-        if host not in {"instagram.com", "www.instagram.com"} or len(partes) != 1:
-            continue
-        handle = partes[0].lstrip("@")
-        if handle.lower() in proibidos or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", handle):
-            continue
         texto = limpar_espacos(" ".join(
             str(resultado.get(k) or "") for k in ("title", "body", "snippet")
         ))
-        texto_norm = normalizar(texto + " " + handle.replace("_", " ").replace(".", " "))
-        encontrados = [token for token in nome_tokens if token in texto_norm]
-        if (nome_tokens[0] not in encontrados or nome_tokens[-1] not in encontrados
-                or len(set(encontrados)) < minimo):
-            continue
-        if not re.search(r"nutri|nutrition|crn", texto_norm):
-            continue
-        return {
-            "instagram": "@" + handle,
-            "instagram_url": f"https://www.instagram.com/{handle}/",
-            "evidencia": texto[:700],
-        }
+        url = str(resultado.get("href") or resultado.get("url") or "")
+        candidatos_url = [url]
+        # Diretórios profissionais às vezes exibem o @ como link no trecho público.
+        candidatos_url.extend(re.findall(
+            r"(?:https?://)?(?:www\.)?instagram\.com/[A-Za-z0-9._]{1,30}/?",
+            texto, flags=re.I,
+        ))
+        for candidato_url in candidatos_url:
+            if candidato_url and not re.match(r"(?i)^https?://", candidato_url):
+                candidato_url = "https://" + candidato_url
+            parsed = urlparse(candidato_url)
+            host = (parsed.hostname or "").lower()
+            partes = [p for p in parsed.path.split("/") if p]
+            if host not in {"instagram.com", "www.instagram.com"} or len(partes) != 1:
+                continue
+            handle = partes[0].lstrip("@")
+            if handle.lower() in proibidos or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", handle):
+                continue
+            texto_norm = normalizar(texto + " " + handle.replace("_", " ").replace(".", " "))
+            encontrados = [token for token in nome_tokens if token in texto_norm]
+            if (nome_tokens[0] not in encontrados or nome_tokens[-1] not in encontrados
+                    or len(set(encontrados)) < minimo):
+                continue
+            if not re.search(r"nutri|nutrition|crn", texto_norm):
+                continue
+            return {
+                "instagram": "@" + handle,
+                "instagram_url": f"https://www.instagram.com/{handle}/",
+                "evidencia": texto[:700],
+            }
     return None
 
 
@@ -271,6 +280,17 @@ def buscar_instagram_da_pessoa(registro, item):
         instagram_stats["erros"] += 1
         return None
     perfil = extrair_perfil_instagram_publico(resultados, registro)
+    if not perfil:
+        # A busca reserva é nacional: um profissional relacionado pode estar fora
+        # da faculdade ou da cidade pesquisada, desde que o perfil confirme Nutrição.
+        consulta_reserva = f'"{nome}" nutricionista Instagram (CRN OR Nutrição)'
+        instagram_stats["consultas"] += 1
+        resultados_reserva = buscar_google(consulta_reserva, max_results=MAX_RESULTADOS_BUSCA)
+        if resultados_reserva is None:
+            instagram_stats["erros"] += 1
+            resultados_reserva = []
+        perfil = extrair_perfil_instagram_publico(resultados_reserva, registro)
+        resultados = list(resultados or []) + list(resultados_reserva or [])
     if perfil:
         instagram_stats["perfis_verificados"] += 1
         print(f"      PERFIL PÚBLICO VINCULADO: {nome} | {perfil['instagram']}", flush=True)
