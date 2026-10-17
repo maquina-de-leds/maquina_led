@@ -12,6 +12,22 @@ class FakeRepo:
         self.saved_checkpoints.append((etapa, dict(dados)))
 
 
+class FakeLeadRepo(FakeRepo):
+    def __init__(self):
+        super().__init__()
+        self.leads = []
+
+    def instagram_usado(self, instagram):
+        return any(x.get("instagram") == instagram for x in self.leads)
+
+    def lead_existe(self, nome, instituicao):
+        return any(x.get("nome") == nome and x.get("instituicao") == instituicao for x in self.leads)
+
+    def inserir_lead(self, dados):
+        self.leads.append(dict(dados))
+        return True
+
+
 class Machine3Tests(unittest.TestCase):
     def test_queries_cover_target_years_and_course(self):
         item = {"id": 3, "instituicao": "Universidade Teste", "estado": "SP"}
@@ -142,6 +158,36 @@ class Machine3Tests(unittest.TestCase):
         self.assertEqual(first[0]["instagram"], "@anasouza.nutri")
         self.assertEqual(second[0]["instagram"], "@anasouza.nutri")
         self.assertEqual(used, 1)
+
+    def test_uses_other_public_nutritionist_profile_only_as_fallback(self):
+        results = [{
+            "href": "https://www.instagram.com/carlanutri/",
+            "title": "Carla Mendes (@carlanutri) • Instagram",
+            "body": "Nutricionista clínica, CRN 12345",
+        }]
+        perfil = m.extrair_perfil_relacionado(results, "Ana Souza")
+        self.assertEqual(perfil["nome"], "Carla Mendes")
+        self.assertEqual(perfil["instagram"], "@carlanutri")
+        self.assertIsNone(m.extrair_perfil_relacionado(results, "Carla Mendes"))
+
+    def test_saves_related_profile_without_falsifying_graduation_year(self):
+        repo = FakeLeadRepo()
+        item = {"cidade": "Chapecó", "estado": "SC"}
+        perfil = {
+            "nome": "Carla Mendes",
+            "instagram": "@carlanutri",
+            "instagram_url": "https://www.instagram.com/carlanutri/",
+            "evidencia": "Nutricionista clínica, CRN 12345",
+        }
+        before = m.stats["leads_salvos"]
+        self.assertTrue(m.salvar_profissional_relacionado(repo, perfil, item, "Ana Souza"))
+        saved = repo.leads[0]
+        self.assertEqual(saved["nome"], "Carla Mendes")
+        self.assertEqual(saved["instagram"], "@carlanutri")
+        self.assertIsNone(saved["ano_alvo"])
+        self.assertIsNone(saved["periodo_alvo"])
+        self.assertFalse(saved["qualificado"])
+        m.stats["leads_salvos"] = before
 
     def test_rejects_post_and_unrelated_profile(self):
         registro = {"nome": "Amanda Gasparin"}
