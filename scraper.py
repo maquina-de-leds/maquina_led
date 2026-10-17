@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 # CONFIGURACAO
 # ============================================================
 
-VERSAO = "v6.0.0"
+VERSAO = "v6.1.0"
 ETAPA_CARGA_IES = "carga_inep_nutricao_municipal_v58"
 ETAPA_CAPTACAO = "captacao_nacional_nutricao_v60"
 ETAPA_ROTEIRO_ESTADUAL = "captacao_nutricao_progresso_estadual_v1"
