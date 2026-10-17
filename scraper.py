@@ -794,7 +794,8 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
         '"colação de grau" OR outorga OR formatura',
         '"recém-formados" OR "último período" OR "estágio final"',
         '"mostra" "autores" OR anais OR "caderno de resumos"',
-        '"liga acadêmica" OR "grupo de estudos" OR monitoria OR extensão alunos',
+        '"liga acadêmica" OR "grupo de estudos" OR "grupo de alunos" OR '
+        '"grupo de estudantes" OR "centro acadêmico" OR monitoria OR extensão alunos',
         '"turma" "Nutrição"',
     )
     consultas = [f'"{termo}" Nutrição {ano} {tema}'
