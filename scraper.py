@@ -790,8 +790,9 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
     temas = (
         '"lista de alunos" OR aprovados OR matriculados OR "formandos" OR '
-        '"concluintes" OR "lista de formandos"',
-        '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR repositório autores entrega',
+        '"concluintes" OR "lista de formandos" OR "turma de Nutrição" OR "alunos do curso"',
+        '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR '
+        '"trabalho escolar" OR "trabalho acadêmico" OR repositório autores entrega',
         '"colação de grau" OR outorga OR formatura',
         '"recém-formados" OR "último período" OR "estágio final"',
         '"mostra" "autores" OR anais OR "caderno de resumos"',
