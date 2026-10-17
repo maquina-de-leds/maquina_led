@@ -91,6 +91,23 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         self.assertTrue(scraper.buscar_web("Nutrição 2026", fetch_fn=fetch))
         self.assertEqual(calls, ["google"])
 
+    @patch.object(scraper.time, "sleep")
+    def test_health_check_does_not_turn_failed_query_into_empty_result(self, _sleep):
+        calls = []
+
+        def fetch(query, backend, max_results):
+            calls.append((query, backend))
+            if query == "Brasil":
+                return [{"title": "health check", "href": "https://example.org"}]
+            raise RuntimeError("No results found")
+
+        self.assertIsNone(scraper.buscar_web("Nutrição 2026", fetch_fn=fetch))
+        self.assertEqual(calls, [
+            ("Nutrição 2026", "google"),
+            ("Nutrição 2026", "google"),
+            ("Nutrição 2026", "bing"),
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()
