@@ -110,24 +110,28 @@ class Maquina2Tests(unittest.TestCase):
             with self.assertRaises(RuntimeError): e.buscar_pendentes()
             with self.assertRaises(RuntimeError): e.instagram_ja_usado('@ana.nutri', 7)
 
-    def test_atualizacao_de_contato_condicionada_ao_estado_atual(self):
-        client = Mock(); q = client.table.return_value
-        q.update.return_value = q; q.eq.return_value = q; q.or_.return_value = q; q.execute.return_value.data = []
+    def test_m2_nao_edita_registros_leads(self):
+        client = Mock()
         with patch.object(e, 'supabase', client):
             self.assertFalse(e.atualizar_lead(7, instagram='@ana.nutri'))
-        self.assertIn(unittest.mock.call('qualificado', True), q.eq.call_args_list)
-        self.assertIn(unittest.mock.call('nao_contatar', False), q.eq.call_args_list)
+            e.marcar_como_b2b({'id': 7, 'nome': 'registro'})
+        client.table.assert_not_called()
 
     def candidato(self):
         return {'id': 7, 'nome': 'Ana Silva', 'instituicao': 'Universidade Teste',
                 'qualificado': False, 'instagram': None, 'nao_contatar': False}
 
     def test_fila_restringe_qualificados_sem_instagram_e_exclui_nao_contatar(self):
-        client = Mock(); query = client.table.return_value
-        for method in ('select', 'eq', 'is_', 'order', 'limit'):
+        client = Mock()
+        cursor = Mock(); query = Mock()
+        for method in ('select', 'eq', 'limit'):
+            getattr(cursor, method).return_value = cursor
+        for method in ('select', 'eq', 'is_', 'order', 'limit', 'gt'):
             getattr(query, method).return_value = query
+        cursor.execute.return_value.data = []
         lead = self.candidato(); lead['qualificado'] = True; lead['instituicao'] = 'Instituto Saúde'
         query.execute.return_value.data = [lead]
+        client.table.side_effect = [cursor, query]
         with patch.object(e, 'supabase', client):
             self.assertEqual(len(e.buscar_pendentes()), 1)
         self.assertIn(unittest.mock.call('nao_contatar', False), query.eq.call_args_list)
@@ -140,29 +144,30 @@ class Maquina2Tests(unittest.TestCase):
             e.processar_lead(Mock(), lead)
             validar.assert_not_called()
 
-    def validar(self, resultado, atualizou=True):
-        lead = self.candidato(); client = Mock(); q = client.table.return_value
-        q.update.return_value = q; q.eq.return_value = q
-        q.or_.return_value = q
-        q.execute.return_value.data = [lead] if atualizou else []
+    def validar(self, resultado):
+        lead = self.candidato(); client = Mock()
         with patch.object(e, 'supabase', client), patch('scraper.buscar_web', return_value=[resultado]), patch.object(e, 'pausa'):
             validou = e.validar_candidato(Mock(), lead)
-        return validou, lead, q
+        return validou, lead, client
 
-    def test_promove_nome_curso_faculdade_e_fase_confirmados(self):
-        validou, lead, query = self.validar({'title': 'Ana Silva', 'body': 'Formanda em Nutrição Universidade Teste 2026.', 'href': 'https://example.org/ana'})
-        self.assertTrue(validou); self.assertTrue(lead['qualificado'])
-        self.assertEqual(lead['proxima_acao'], 'buscar_instagram')
-        self.assertIn(unittest.mock.call('nao_contatar', False), query.eq.call_args_list)
+    def test_confirmacao_de_fase_preserva_lead_para_revisao(self):
+        validou, lead, client = self.validar({'title': 'Ana Silva', 'body': 'Formanda em Nutrição Universidade Teste 2026.', 'href': 'https://example.org/ana'})
+        self.assertTrue(validou)
+        self.assertFalse(lead['qualificado'])
+        client.table.assert_not_called()
 
     def test_homonimo_outro_curso_e_aluna_inicial_nao_promovidos(self):
         for titulo, body in [('Bruna Silva', 'Formanda Nutrição Universidade Teste 2026'), ('Ana Silva', 'Formanda Psicologia Universidade Teste 2026'), ('Ana Silva', 'Aluna Nutrição Universidade Teste 2026 2º semestre')]:
-            validou, lead, query = self.validar({'title': titulo, 'body': body, 'href': 'https://example.org/pessoa'})
-            self.assertFalse(validou); self.assertFalse(lead['qualificado']); query.update.assert_not_called()
+            validou, lead, client = self.validar({'title': titulo, 'body': body, 'href': 'https://example.org/pessoa'})
+            self.assertFalse(validou)
+            self.assertFalse(lead['qualificado'])
+            client.table.assert_not_called()
 
-    def test_atualizacao_bloqueada_nao_promove_em_memoria(self):
-        validou, lead, _ = self.validar({'title': 'Ana Silva', 'body': 'Formanda Nutrição Universidade Teste 2026', 'href': 'https://example.org/pessoa'}, False)
-        self.assertFalse(validou); self.assertFalse(lead['qualificado'])
+    def test_fase_confirmada_nao_edita_lead_em_memoria(self):
+        validou, lead, client = self.validar({'title': 'Ana Silva', 'body': 'Formanda Nutrição Universidade Teste 2026', 'href': 'https://example.org/pessoa'})
+        self.assertTrue(validou)
+        self.assertFalse(lead['qualificado'])
+        client.table.assert_not_called()
 
 
 class RetomadaTests(unittest.TestCase):
