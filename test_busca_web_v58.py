@@ -80,7 +80,7 @@ class BuscarWebV58Tests(unittest.TestCase):
             ("consulta sem ocorrências", "google", 3),
             ("consulta sem ocorrências", "google", 3),
             ("consulta sem ocorrências", "bing", 3),
-            ("Brasil", "google", 1),
+            ("Brasil", "auto", 1),
         ])
         self.assertEqual(sleep.call_args_list, [call(2.0), call(2.0)])
 
