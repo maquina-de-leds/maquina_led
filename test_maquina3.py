@@ -95,10 +95,30 @@ class Machine3Tests(unittest.TestCase):
         with patch.object(m, "buscar_google", return_value=[result]), \
              patch.object(m, "extrair_resultado_busca", side_effect=[[candidate], [], [], [], [], []]), \
              patch.object(m, "carregar_fonte", return_value=([], [])), \
+             patch.object(m, "buscar_instagram_da_pessoa", return_value={"instagram": "@anasouza.nutri", "instagram_url": "https://www.instagram.com/anasouza.nutri/", "evidencia": "Ana Souza nutricionista"}) as profile, \
              patch.object(m, "salvar_lead") as save:
             self.assertTrue(m.processar_faculdade(repo, item))
         save.assert_called_once()
         self.assertEqual(save.call_args.args[1], "Ana Souza")
+        self.assertEqual(save.call_args.kwargs["instagram"], "@anasouza.nutri")
+        profile.assert_called_once()
+
+    def test_extracts_handle_only_from_matching_public_profile(self):
+        result = {
+            "href": "https://www.instagram.com/nutriamandagasparin/",
+            "title": "Amanda Gasparin (@nutriamandagasparin) • Instagram",
+            "body": "Nutricionista em Chapecó, CRN 10-13039",
+        }
+        perfil = m.extrair_perfil_instagram_publico([result], {"nome": "Amanda Gasparin"})
+        self.assertEqual(perfil["instagram"], "@nutriamandagasparin")
+        self.assertEqual(perfil["instagram_url"], "https://www.instagram.com/nutriamandagasparin/")
+
+    def test_rejects_post_and_unrelated_profile(self):
+        registro = {"nome": "Amanda Gasparin"}
+        post = {"href": "https://www.instagram.com/p/abc123/", "title": "Amanda Gasparin Nutricionista"}
+        wrong = {"href": "https://www.instagram.com/nutri.outroperfil/", "title": "Nutricionista em Chapecó"}
+        self.assertIsNone(m.extrair_perfil_instagram_publico([post], registro))
+        self.assertIsNone(m.extrair_perfil_instagram_publico([wrong], registro))
 
     def test_skips_instagram_and_caps_source_pages(self):
         repo = FakeRepo()
