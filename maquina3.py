@@ -228,6 +228,7 @@ def processar_faculdade(repo, item):
                 registros_busca = [
                     r for r in registros_busca
                     if r.get("instituicao") and r.get("nome") and r.get("ano") in {2025, 2026}
+                    and fase_final_comprovada(r.get("evidencia") or "")
                 ]
             for registro in registros_busca:
                 encontrados += 1
