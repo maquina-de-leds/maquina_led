@@ -14,8 +14,10 @@ class AlternativoTests(unittest.TestCase):
   def falha(*a):raise RuntimeError('No results found.')
   self.assertIsNone(s.buscar_web('TCC',fetch_fn=falha))
  @patch.object(s.time,'sleep')
- def test_consulta_vazia_com_controle_disponivel(self,_):
+ def test_busca_indisponivel_preserva_consulta_para_retry(self,_):
+  chamadas=[]
   def busca(q,b,n):
-   if q=='Brasil':return [{'href':'https://example.org/brasil'}]
+   chamadas.append((q,b))
    raise RuntimeError('No results found.')
-  self.assertEqual(s.buscar_web('TCC',fetch_fn=busca),[])
+  self.assertIsNone(s.buscar_web('TCC',fetch_fn=busca))
+  self.assertEqual(chamadas,[('TCC','google'),('TCC','google'),('TCC','bing')])
