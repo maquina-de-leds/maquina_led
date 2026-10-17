@@ -8,18 +8,32 @@ from urllib.parse import urlparse
 
 from fontes_academicas import (
     acesso_reservado_maquina2, carregar_fonte, extrair_resultado_busca,
-    fase_final_comprovada, nomes_da_lista, periodo_academico, url_permitida,
+    fase_final_comprovada, nomes_da_lista, periodo_academico, pessoa, url_permitida,
 )
 from scraper import (
     ESTADOS, ORIGEM_IES, SupabaseRepo, alias_instituicao, agrupar_faculdades,
-    buscar_web, ddgs_texto, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
+    buscar_web, ddgs_texto, formatar_nome_pessoa, limpar_espacos, normalizar,
+    ordem_estado, salvar_lead, stats,
 )
 
-ETAPA = "captacao_maquina3_formandos_v2"
+ETAPA = "captacao_maquina3_formandos_v3"
+
+ORDEM_ESTADOS_M3 = ["SC", "SP", "PR"] + [
+    sigla for sigla, _ in ESTADOS if sigla not in {"SC", "SP", "PR"}
+]
+
+
+def ordem_estado_maquina3(uf):
+    try:
+        return ORDEM_ESTADOS_M3.index((uf or "").upper())
+    except ValueError:
+        return len(ORDEM_ESTADOS_M3)
 MAX_FACULDADES = 5
 MAX_RESULTADOS_BUSCA = 6
 MAX_FONTES_POR_CONSULTA = 2
+MAX_BUSCAS_INSTAGRAM_POR_FACULDADE = 8
 TOTAL_CONSULTAS = 6
+instagram_stats = {"consultas": 0, "perfis_verificados": 0, "perfis_rejeitados": 0, "erros": 0}
 
 
 def consultas_lote(item):
@@ -101,6 +115,249 @@ def candidatos_instagram_publico(resultado, item):
     } for nome in nomes]
 
 
+def extrair_perfil_instagram_publico(resultados, registro):
+    """Aceita perfil público direto com nome e sinal profissional compatíveis."""
+    proibidos = {"p", "reel", "reels", "tv", "stories", "explore", "accounts", "about",
+                 "directory", "web", "direct", "legal", "privacy", "developer", "challenge"}
+    particulas = {"de", "da", "do", "dos", "das", "e"}
+    nome_tokens = [t for t in re.findall(r"[a-z0-9]+", normalizar(registro.get("nome")))
+                   if t not in particulas]
+    if len(nome_tokens) < 2:
+        return None
+    minimo = max(2, (len(nome_tokens) * 2 + 2) // 3)
+    for resultado in resultados or []:
+        texto = limpar_espacos(" ".join(
+            str(resultado.get(k) or "") for k in ("title", "body", "snippet")
+        ))
+        url = str(resultado.get("href") or resultado.get("url") or "")
+        candidatos_url = [url]
+        # Diretórios profissionais às vezes exibem o @ como link no trecho público.
+        candidatos_url.extend(re.findall(
+            r"(?:https?://)?(?:www\.)?instagram\.com/[A-Za-z0-9._]{1,30}/?",
+            texto, flags=re.I,
+        ))
+        for candidato_url in candidatos_url:
+            if candidato_url and not re.match(r"(?i)^https?://", candidato_url):
+                candidato_url = "https://" + candidato_url
+            parsed = urlparse(candidato_url)
+            host = (parsed.hostname or "").lower()
+            partes = [p for p in parsed.path.split("/") if p]
+            if host not in {"instagram.com", "www.instagram.com"} or len(partes) != 1:
+                continue
+            handle = partes[0].lstrip("@")
+            if handle.lower() in proibidos or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", handle):
+                continue
+            texto_norm = normalizar(texto + " " + handle.replace("_", " ").replace(".", " "))
+            encontrados = [token for token in nome_tokens if token in texto_norm]
+            if (nome_tokens[0] not in encontrados or nome_tokens[-1] not in encontrados
+                    or len(set(encontrados)) < minimo):
+                continue
+            if not re.search(r"nutri|nutrition|crn", texto_norm):
+                continue
+            return {
+                "instagram": "@" + handle,
+                "instagram_url": f"https://www.instagram.com/{handle}/",
+                "evidencia": texto[:700],
+            }
+    return None
+
+
+def lead_qualificado_maquina3(registro):
+    """Exige nome de pessoa e evidência de Nutrição em fase final/recente."""
+    nome = limpar_espacos(registro.get("nome") or "")
+    nome_norm = normalizar(nome)
+    tokens = re.findall(r"[a-z]+", nome_norm)
+    termos_nao_pessoa = {
+        "universidade", "faculdade", "instituto", "centro", "curso", "nutricao",
+        "tcc", "trabalho", "conclusao", "formandos", "concluintes", "turma",
+    }
+    if len(tokens) < 2 or len(tokens) > 8 or any(t in termos_nao_pessoa for t in tokens):
+        return False
+
+    ano = registro.get("ano")
+    if str(ano) not in {"2025", "2026"}:
+        return False
+    evidencia = limpar_espacos(registro.get("evidencia") or "")
+    evidencia_norm = normalizar(evidencia)
+    tem_nutricao = "nutricao" in evidencia_norm
+    tem_fase = bool(re.search(
+        r"formand|concluint|colacao|formatura|egress|recem formad|graduand|"
+        r"ultimo semestre|ultimo periodo|8[oa]? semestre|8[oa]? periodo",
+        evidencia_norm,
+    ))
+    return tem_nutricao and tem_fase
+
+
+def filtrar_leads_qualificados(registros):
+    """Mantém apenas nomes de pessoas com evidência acadêmica recente verificável."""
+    return [registro for registro in registros if lead_qualificado_maquina3(registro)]
+
+
+def extrair_perfil_relacionado(resultados, nome_alvo):
+    """Fallback: aceita outra pessoa só com perfil direto e sinal público de Nutrição."""
+    proibidos = {"p", "reel", "reels", "tv", "stories", "explore", "accounts", "about",
+                 "directory", "web", "direct", "legal", "privacy", "developer", "challenge"}
+    alvo = [t for t in re.findall(r"[a-z0-9]+", normalizar(nome_alvo))
+            if t not in {"de", "da", "do", "dos", "das", "e"}]
+    for resultado in resultados or []:
+        url = str(resultado.get("href") or resultado.get("url") or "")
+        parsed = urlparse(url)
+        partes = [p for p in parsed.path.split("/") if p]
+        if (parsed.hostname or "").lower() not in {"instagram.com", "www.instagram.com"} or len(partes) != 1:
+            continue
+        handle = partes[0].lstrip("@")
+        if handle.lower() in proibidos or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", handle):
+            continue
+        campos = [str(resultado.get(k) or "") for k in ("title", "body", "snippet")]
+        texto = limpar_espacos(" ".join(campos))
+        texto_norm = normalizar(texto + " " + handle.replace("_", " ").replace(".", " "))
+        if not re.search(r"nutri|nutrition|crn", texto_norm):
+            continue
+        titulo = limpar_espacos(campos[0])
+        titulo = re.split(r"\s*(?:\(@?[^)]{1,40}\)|[|•·])\s*", titulo, maxsplit=1)[0]
+        titulo = re.sub(r"(?i)\s*instagram.*$", "", titulo).strip(" -–—:")
+        nome = titulo
+        if not pessoa(nome):
+            continue
+        nome = formatar_nome_pessoa(nome)
+        tokens = [t for t in re.findall(r"[a-z0-9]+", normalizar(nome))
+                  if t not in {"de", "da", "do", "dos", "das", "e"}]
+        if len(tokens) < 2 or len(tokens) > 8 or any(t in {"nutricionista", "nutricao", "instagram"} for t in tokens):
+            continue
+        iguais = len(set(tokens) & set(alvo))
+        if iguais >= max(2, (len(tokens) * 2 + 2) // 3):
+            continue
+        return {
+            "nome": nome,
+            "instagram": "@" + handle,
+            "instagram_url": f"https://www.instagram.com/{handle}/",
+            "evidencia": texto[:700],
+            "fallback_relacionado": True,
+        }
+    return None
+
+
+def salvar_profissional_relacionado(repo, registro, item, nome_alvo=None):
+    """Salva um perfil relacionado como não qualificado para validar vínculo/recência."""
+    nome = limpar_espacos(registro.get("nome") or "")
+    instagram = limpar_espacos(registro.get("instagram") or "")
+    if not pessoa(nome) or not instagram or not repo:
+        return False
+    nome = formatar_nome_pessoa(nome)
+    if repo.instagram_usado(instagram):
+        return False
+    if repo.lead_existe(nome, None):
+        if hasattr(repo, "completar_instagram"):
+            repo.completar_instagram(nome, None, instagram)
+        return False
+    evidencia = limpar_espacos(
+        "Perfil público de profissional relacionado encontrado ao pesquisar "
+        + limpar_espacos(nome_alvo or "um formando de Nutrição")
+        + " | Sinal de Nutrição: " + (registro.get("evidencia") or "")
+    )[:1500]
+    dados = {
+        "nome": nome, "instagram": instagram, "linkedin": None, "whatsapp": None,
+        "nicho": "nutricionista", "origem": "captacao_relacionada_nutricao",
+        "status": "novo", "app_baixado": False, "nao_contatar": False,
+        "qualificado": False, "data_primeiro_contato": None, "data_ultimo_contato": None,
+        "proxima_acao": "validar_fase_academica", "tentativas_contato": 0,
+        "cliente": False, "funil_destino": None, "cidade": item.get("cidade") or "Não identificado",
+        "estado": item.get("estado"), "instituicao": None, "pontuacao": 10,
+        "evidencia": evidencia, "fonte_url": registro.get("instagram_url"),
+        "ano_alvo": None, "periodo_alvo": None, "origem_lead": "perfil_publico_nutricao_relacionado",
+        "rede_processada": False, "nivel_rede": 0,
+        "fonte_validacao": "perfil_publico_nutricao_relacionado",
+    }
+    if repo.inserir_lead(dados) is False:
+        return False
+    stats["leads_salvos"] += 1
+    return True
+
+
+def buscar_instagram_da_pessoa(registro, item):
+    """Procura o perfil individual após identificar a pessoa em fonte pública."""
+    nome = limpar_espacos(registro.get("nome"))
+    instituicao = limpar_espacos(item.get("instituicao"))
+    alias = limpar_espacos(alias_instituicao(item) or "")
+    cidade = limpar_espacos(item.get("cidade") or "")
+    contexto = [x for x in (instituicao, alias, cidade) if x and x.lower() != "nacional"]
+    local = " OR ".join('"' + x.replace('"', '') + '"' for x in contexto)
+    consulta = f'site:instagram.com "{nome}" (nutricionista OR nutri OR CRN)'
+    if local:
+        consulta += f" ({local})"
+    instagram_stats["consultas"] += 1
+    resultados = buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA)
+    if resultados is None:
+        instagram_stats["erros"] += 1
+        return None
+    perfil = extrair_perfil_instagram_publico(resultados, registro)
+    if not perfil:
+        # A busca reserva é nacional: um profissional relacionado pode estar fora
+        # da faculdade ou da cidade pesquisada, desde que o perfil confirme Nutrição.
+        consulta_reserva = f'"{nome}" nutricionista Instagram (CRN OR Nutrição)'
+        instagram_stats["consultas"] += 1
+        resultados_reserva = buscar_google(consulta_reserva, max_results=MAX_RESULTADOS_BUSCA)
+        if resultados_reserva is None:
+            instagram_stats["erros"] += 1
+            resultados_reserva = []
+        perfil = extrair_perfil_instagram_publico(resultados_reserva, registro)
+        resultados = list(resultados or []) + list(resultados_reserva or [])
+    if perfil:
+        instagram_stats["perfis_verificados"] += 1
+        print(f"      PERFIL PÚBLICO VINCULADO: {nome} | {perfil['instagram']}", flush=True)
+    else:
+        instagram_stats["perfis_rejeitados"] += 1
+        relacionado = extrair_perfil_relacionado(resultados, nome)
+        if relacionado:
+            print(f"      PERFIL RELACIONADO: {relacionado['nome']} | {relacionado['instagram']}", flush=True)
+            return {"fallback_lead": relacionado}
+        print(f"      INSTAGRAM NÃO CONFIRMADO: {nome}", flush=True)
+    return perfil
+
+
+def enriquecer_com_instagram(registros, item, buscas_feitas=0, cache=None):
+    """Enriquece pessoas únicas com @ público, reaproveitando buscas da faculdade."""
+    cache = cache if cache is not None else {}
+    saida = []
+    for registro in registros:
+        chave = normalizar(registro.get("nome") or "")
+        if registro.get("instagram"):
+            saida.append(registro)
+            continue
+        if chave in cache:
+            perfil = cache[chave]
+            if perfil and perfil.get("instagram"):
+                registro = dict(registro)
+                registro["instagram"] = perfil["instagram"]
+                registro["evidencia"] = limpar_espacos(
+                    (registro.get("evidencia") or "") + " | Perfil profissional público confirmado: "
+                    + perfil["instagram_url"] + " | " + perfil["evidencia"]
+                )[:1500]
+            elif perfil and perfil.get("fallback_lead"):
+                registro = dict(registro)
+                registro["fallback_leads"] = [perfil["fallback_lead"]]
+            saida.append(registro)
+            continue
+        if buscas_feitas >= MAX_BUSCAS_INSTAGRAM_POR_FACULDADE:
+            saida.append(registro)
+            continue
+        buscas_feitas += 1
+        perfil = buscar_instagram_da_pessoa(registro, item)
+        cache[chave] = perfil
+        if perfil and perfil.get("instagram"):
+            registro = dict(registro)
+            registro["instagram"] = perfil["instagram"]
+            registro["evidencia"] = limpar_espacos(
+                (registro.get("evidencia") or "") + " | Perfil profissional público confirmado: "
+                + perfil["instagram_url"] + " | " + perfil["evidencia"]
+            )[:1500]
+        elif perfil and perfil.get("fallback_lead"):
+            registro = dict(registro)
+            registro["fallback_leads"] = [perfil["fallback_lead"]]
+        saida.append(registro)
+    return saida, buscas_feitas
+
+
 def buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA):
     """Tenta Google primeiro e usa buscador alternativo apenas se o Google falhar."""
     falhou = False
@@ -160,7 +417,7 @@ def selecionar_lote(pendentes, limite=MAX_FACULDADES):
     """Mantém um estado por vez e retoma instituições interrompidas primeiro."""
     if not pendentes:
         return []
-    uf = min(((x.get("estado") or "") for x in pendentes), key=ordem_estado)
+    uf = min(((x.get("estado") or "") for x in pendentes), key=ordem_estado_maquina3)
     do_estado = [x for x in pendentes if (x.get("estado") or "") == uf]
     return sorted(
         do_estado,
@@ -199,6 +456,8 @@ def processar_faculdade(repo, item):
     salvos_antes = stats["leads_salvos"]
     alias = alias_instituicao(item)
     cidade = item.get("cidade") or "Não identificado"
+    instagram_buscas = 0
+    instagram_cache = {}
 
     for idx in range(inicio, len(consultas)):
         consulta = consultas[idx]
@@ -230,6 +489,10 @@ def processar_faculdade(repo, item):
                     if r.get("instituicao") and r.get("nome") and r.get("ano") in {2025, 2026}
                     and fase_final_comprovada(r.get("evidencia") or "")
                 ]
+            registros_busca = filtrar_leads_qualificados(registros_busca)
+            registros_busca, instagram_buscas = enriquecer_com_instagram(
+                registros_busca, item, instagram_buscas, instagram_cache
+            )
             for registro in registros_busca:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -243,6 +506,8 @@ def processar_faculdade(repo, item):
                     instituicao_alias=alias,
                     candidato_indicio=registro.get("candidato_indicio", not fase_final_comprovada(registro.get("evidencia", ""))),
                 )
+                for relacionado in registro.get("fallback_leads", []):
+                    salvar_profissional_relacionado(repo, relacionado, item, registro["nome"])
 
             if acesso_reservado_maquina2(url):
                 continue
@@ -256,6 +521,10 @@ def processar_faculdade(repo, item):
                 stats["erros"] += 1
                 print(f"FONTE PENDENTE: {url} | {type(exc).__name__}", flush=True)
                 continue
+            registros = filtrar_leads_qualificados(registros)
+            registros, instagram_buscas = enriquecer_com_instagram(
+                registros, item, instagram_buscas, instagram_cache
+            )
             for registro in registros:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -270,6 +539,8 @@ def processar_faculdade(repo, item):
                     instituicao_alias=alias,
                     candidato_indicio=registro.get("candidato_indicio", False),
                 )
+                for relacionado in registro.get("fallback_leads", []):
+                    salvar_profissional_relacionado(repo, relacionado, item, registro["nome"])
             # Até dois links da própria página de lista podem apontar para PDFs/artigos.
             host = urlparse(url).hostname
             for link in links[:2]:
@@ -283,6 +554,10 @@ def processar_faculdade(repo, item):
                     stats["erros"] += 1
                     print(f"FONTE VINCULADA PENDENTE: {link} | {type(exc).__name__}", flush=True)
                     continue
+                subregistros = filtrar_leads_qualificados(subregistros)
+                subregistros, instagram_buscas = enriquecer_com_instagram(
+                    subregistros, item, instagram_buscas, instagram_cache
+                )
                 for registro in subregistros:
                     encontrados += 1
                     stats["leads_encontrados"] += 1
@@ -296,6 +571,8 @@ def processar_faculdade(repo, item):
                         instituicao_alias=alias,
                         candidato_indicio=registro.get("candidato_indicio", False),
                     )
+                    for relacionado in registro.get("fallback_leads", []):
+                        salvar_profissional_relacionado(repo, relacionado, item, registro["nome"])
 
         cp = {
             "leads_encontrados": encontrados,
@@ -349,7 +626,12 @@ def executar():
     print(f"M3 RESUMO | visitou={stats['fontes_visitadas']} "
           f"encontrados={stats['leads_encontrados']} salvos={stats['leads_salvos']} "
           f"duplicados={stats['duplicados']} erros={stats['erros']}", flush=True)
+    print(f"M3 INSTAGRAM | consultas={instagram_stats['consultas']} "
+          f"perfis_confirmados={instagram_stats['perfis_verificados']} "
+          f"sem_confirmacao={instagram_stats['perfis_rejeitados']} "
+          f"erros={instagram_stats['erros']}", flush=True)
 
 
 if __name__ == "__main__":
     executar()
+
