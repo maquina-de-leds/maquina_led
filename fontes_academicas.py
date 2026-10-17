@@ -289,7 +289,7 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
         # Um parágrafo pode misturar a notícia do aluno com falas de docentes.
         for frase in re.split(r'(?<=[.!?])\s+', line):
             if role_section or re.search(PAPEL,norm(frase)): continue
-            recente=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,100})[,.;]',frase)
+            recente=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,100}?)(?=\s*(?:[,.;]|\bfoi\b|\bestá\b|\besta\b|\bconseguiu\b|\bcelebra\b|\bcompartilha\b))',frase)
             if recente:
                 y,per=periodo_academico(frase)
                 y=y or publication_year
