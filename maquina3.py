@@ -19,7 +19,9 @@ ETAPA = "captacao_maquina3_formandos_v2"
 MAX_FACULDADES = 5
 MAX_RESULTADOS_BUSCA = 6
 MAX_FONTES_POR_CONSULTA = 2
+MAX_BUSCAS_INSTAGRAM_POR_FACULDADE = 8
 TOTAL_CONSULTAS = 6
+instagram_stats = {"consultas": 0, "perfis_verificados": 0, "perfis_rejeitados": 0, "erros": 0}
 
 
 def consultas_lote(item):
@@ -99,6 +101,90 @@ def candidatos_instagram_publico(resultado, item):
         "fonte_url": url,
         "candidato_indicio": candidato_indicio,
     } for nome in nomes]
+
+
+def extrair_perfil_instagram_publico(resultados, registro):
+    """Aceita perfil público direto com nome e sinal profissional compatíveis."""
+    proibidos = {"p", "reel", "reels", "tv", "stories", "explore", "accounts", "about",
+                 "directory", "web", "direct", "legal", "privacy", "developer", "challenge"}
+    particulas = {"de", "da", "do", "dos", "das", "e"}
+    nome_tokens = [t for t in re.findall(r"[a-z0-9]+", normalizar(registro.get("nome")))
+                   if t not in particulas]
+    if len(nome_tokens) < 2:
+        return None
+    minimo = max(2, (len(nome_tokens) * 2 + 2) // 3)
+    for resultado in resultados or []:
+        url = str(resultado.get("href") or resultado.get("url") or "")
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        partes = [p for p in parsed.path.split("/") if p]
+        if host not in {"instagram.com", "www.instagram.com"} or len(partes) != 1:
+            continue
+        handle = partes[0].lstrip("@")
+        if handle.lower() in proibidos or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", handle):
+            continue
+        texto = limpar_espacos(" ".join(
+            str(resultado.get(k) or "") for k in ("title", "body", "snippet")
+        ))
+        texto_norm = normalizar(texto + " " + handle.replace("_", " ").replace(".", " "))
+        encontrados = [token for token in nome_tokens if token in texto_norm]
+        if (nome_tokens[0] not in encontrados or nome_tokens[-1] not in encontrados
+                or len(set(encontrados)) < minimo):
+            continue
+        if not re.search(r"nutri|nutrition|crn", texto_norm):
+            continue
+        return {
+            "instagram": "@" + handle,
+            "instagram_url": f"https://www.instagram.com/{handle}/",
+            "evidencia": texto[:700],
+        }
+    return None
+
+
+def buscar_instagram_da_pessoa(registro, item):
+    """Procura o perfil individual após identificar a pessoa em fonte pública."""
+    nome = limpar_espacos(registro.get("nome"))
+    instituicao = limpar_espacos(item.get("instituicao"))
+    alias = limpar_espacos(alias_instituicao(item) or "")
+    cidade = limpar_espacos(item.get("cidade") or "")
+    contexto = [x for x in (instituicao, alias, cidade) if x and x.lower() != "nacional"]
+    local = " OR ".join('"' + x.replace('"', '') + '"' for x in contexto)
+    consulta = f'site:instagram.com "{nome}" (nutricionista OR nutri OR CRN)'
+    if local:
+        consulta += f" ({local})"
+    instagram_stats["consultas"] += 1
+    resultados = buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA)
+    if resultados is None:
+        instagram_stats["erros"] += 1
+        return None
+    perfil = extrair_perfil_instagram_publico(resultados, registro)
+    if perfil:
+        instagram_stats["perfis_verificados"] += 1
+        print(f"      PERFIL PÚBLICO VINCULADO: {nome} | {perfil['instagram']}", flush=True)
+    else:
+        instagram_stats["perfis_rejeitados"] += 1
+        print(f"      INSTAGRAM NÃO CONFIRMADO: {nome}", flush=True)
+    return perfil
+
+
+def enriquecer_com_instagram(registros, item, buscas_feitas=0):
+    """Enriquece candidatos com @ público confirmado, limitado por faculdade."""
+    saida = []
+    for registro in registros:
+        if registro.get("instagram") or buscas_feitas >= MAX_BUSCAS_INSTAGRAM_POR_FACULDADE:
+            saida.append(registro)
+            continue
+        buscas_feitas += 1
+        perfil = buscar_instagram_da_pessoa(registro, item)
+        if perfil:
+            registro = dict(registro)
+            registro["instagram"] = perfil["instagram"]
+            registro["evidencia"] = limpar_espacos(
+                (registro.get("evidencia") or "") + " | Perfil profissional público confirmado: "
+                + perfil["instagram_url"] + " | " + perfil["evidencia"]
+            )[:1500]
+        saida.append(registro)
+    return saida, buscas_feitas
 
 
 def buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA):
@@ -199,6 +285,7 @@ def processar_faculdade(repo, item):
     salvos_antes = stats["leads_salvos"]
     alias = alias_instituicao(item)
     cidade = item.get("cidade") or "Não identificado"
+    instagram_buscas = 0
 
     for idx in range(inicio, len(consultas)):
         consulta = consultas[idx]
@@ -230,6 +317,7 @@ def processar_faculdade(repo, item):
                     if r.get("instituicao") and r.get("nome") and r.get("ano") in {2025, 2026}
                     and fase_final_comprovada(r.get("evidencia") or "")
                 ]
+            registros_busca, instagram_buscas = enriquecer_com_instagram(registros_busca, item, instagram_buscas)
             for registro in registros_busca:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -256,6 +344,7 @@ def processar_faculdade(repo, item):
                 stats["erros"] += 1
                 print(f"FONTE PENDENTE: {url} | {type(exc).__name__}", flush=True)
                 continue
+            registros, instagram_buscas = enriquecer_com_instagram(registros, item, instagram_buscas)
             for registro in registros:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -283,6 +372,7 @@ def processar_faculdade(repo, item):
                     stats["erros"] += 1
                     print(f"FONTE VINCULADA PENDENTE: {link} | {type(exc).__name__}", flush=True)
                     continue
+                subregistros, instagram_buscas = enriquecer_com_instagram(subregistros, item, instagram_buscas)
                 for registro in subregistros:
                     encontrados += 1
                     stats["leads_encontrados"] += 1
@@ -349,6 +439,10 @@ def executar():
     print(f"M3 RESUMO | visitou={stats['fontes_visitadas']} "
           f"encontrados={stats['leads_encontrados']} salvos={stats['leads_salvos']} "
           f"duplicados={stats['duplicados']} erros={stats['erros']}", flush=True)
+    print(f"M3 INSTAGRAM | consultas={instagram_stats['consultas']} "
+          f"perfis_confirmados={instagram_stats['perfis_verificados']} "
+          f"sem_confirmacao={instagram_stats['perfis_rejeitados']} "
+          f"erros={instagram_stats['erros']}", flush=True)
 
 
 if __name__ == "__main__":
