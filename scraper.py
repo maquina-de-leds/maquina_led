@@ -55,6 +55,11 @@ stats = {
     "consultas_banco_evitadas": 0,
 }
 
+# Mede quais famílias de consulta trazem pessoas qualificadas nesta execução.
+# A próxima faculdade do mesmo ciclo prioriza as famílias com melhor rendimento.
+RENDIMENTO_BUSCAS = {}
+ORDEM_CONSULTAS_POR_INSTITUICAO = {}
+
 
 def agora():
     return datetime.now(timezone.utc).isoformat()
@@ -784,37 +789,71 @@ def consultas_documentos_alunos(instituicao, alias=None):
     return simples + [f'{termo} Nutrição {ano} {sinal}' for ano in (2025,2026) for sinal in sinais] + perfis
 
 
-def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
-    # Descoberta acadêmica ampla da M1 em blocos curtos, sem buscas individuais
-    # de Instagram (esse enriquecimento pertence a outro fluxo).
-    termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
-    temas = (
-        '"lista de alunos" OR "lista de aprovados" OR aprovados OR matriculados OR "formandos" OR '
-        '"concluintes" OR "lista de formandos" OR "turma de Nutrição" OR "alunos do curso"',
-        '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR '
-        '"trabalho escolar" OR "trabalho acadêmico" OR repositório autores entrega',
-        '"colação de grau" OR outorga OR formatura',
-        '"recém-formados" OR "último período" OR "estágio final"',
-        '"mostra" "autores" OR anais OR "caderno de resumos"',
-        '"liga acadêmica" OR "grupo de estudos" OR "grupo de alunos" OR '
-        '"grupo de estudantes" OR "centro acadêmico" OR monitoria OR extensão OR '
-        '"grupo de WhatsApp" OR "grupo WhatsApp" alunos',
-        'site:instagram.com "Nutrição" "turma" OR formanda OR "recém-formada" OR formatura',
-        'site:instagram.com/p/ Nutrição formatura OR TCC OR formandos OR estudantes',
-    )
-    consultas = [f'"{termo}" Nutrição {ano} {tema}'
-                 for ano in (2025, 2026) for termo in termos for tema in temas]
+def familia_consulta(consulta):
+    texto = normalizar(consulta)
+    if "site:instagram.com" in texto:
+        return "instagram_publico"
+    if any(sinal in texto for sinal in ("tcc", "trabalho academico", "trabalho escolar", "repositorio", "banca")):
+        return "tcc_trabalhos"
+    if any(sinal in texto for sinal in ("colacao", "outorga", "formatura", "formandos", "concluintes", "aptos a colar grau")):
+        return "formatura_colacao"
+    if any(sinal in texto for sinal in ("centro academico", "liga academica", "grupo de", "whatsapp", "monitoria", "extensao", "mostra", "anais")):
+        return "vida_academica"
+    if any(sinal in texto for sinal in ("lista de alunos", "matriculados", "lista de aprovados", "turma de nutricao", "alunos do curso")):
+        return "listas_turmas"
+    if "linkedin.com" in texto:
+        return "perfis_profissionais"
+    return "fase_final"
+
+
+def registrar_rendimento_consulta(consulta, nomes_qualificados):
+    familia = familia_consulta(consulta)
+    medida = RENDIMENTO_BUSCAS.setdefault(familia, {"consultas": 0, "nomes": 0})
+    medida["consultas"] += 1
+    medida["nomes"] += int(nomes_qualificados)
+
+
+def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True):
+    # Cada consulta mantém instituição e Nutrição como âncoras. O Google recebe
+    # famílias distintas de busca para medir rendimento e variar a abordagem.
+    nome_faculdade = limpar_espacos(instituicao)
+    termos = [f'"{nome_faculdade}"']
+    if alias and normalizar(alias) not in normalizar(nome_faculdade):
+        # A sigla é uma variação, mas nunca substitui o nome da faculdade.
+        termos.append(f'"{nome_faculdade}" {limpar_espacos(alias)}')
+    familias = {
+        "formatura_colacao": '("colação de grau" OR outorga OR formatura OR "cerimônia de formatura" OR "formandos" OR concluintes OR "aptos a colar grau" OR "lista de formandos")',
+        "tcc_trabalhos": '("TCC" OR "trabalho de conclusão" OR "trabalho acadêmico" OR "trabalho escolar") (autores OR defesa OR apresentação OR banca OR repositório OR "caderno de resumos" OR anais OR entrega) filetype:pdf',
+        "listas_turmas": '("lista de alunos" OR "alunos matriculados" OR "turma de Nutrição" OR "turma" OR "lista de aprovados") (matrícula OR matriculados OR turma OR estudantes OR discentes)',
+        "vida_academica": '("centro acadêmico" OR "liga acadêmica" OR monitoria OR extensão OR "grupo de estudos" OR "grupo de alunos" OR "grupo de estudantes" OR "grupo de WhatsApp" OR "grupo WhatsApp" OR jornada OR seminário OR ("mostra" "autores"))',
+        "instagram_publico": 'site:instagram.com/p/ ("Nutrição" OR nutricionista) (turma OR formanda OR formatura OR TCC OR formandos)',
+        "fase_final": '("recém-formados" OR "último período" OR "estágio final") Nutrição',
+    }
+    chave = normalizar(instituicao)
+    ordem_padrao = ORDEM_CONSULTAS_POR_INSTITUICAO.get(chave, list(familias)).copy()
+    if chave not in ORDEM_CONSULTAS_POR_INSTITUICAO and adaptar and RENDIMENTO_BUSCAS:
+        # Suavização evita que uma única faculdade domine a ordem do ciclo.
+        ordem_padrao.sort(key=lambda familia: (
+            -(RENDIMENTO_BUSCAS.get(familia, {}).get("nomes", 0) + 1)
+            / (RENDIMENTO_BUSCAS.get(familia, {}).get("consultas", 0) + 2),
+            list(familias).index(familia),
+        ))
+    ORDEM_CONSULTAS_POR_INSTITUICAO.setdefault(chave, ordem_padrao.copy())
+    consultas = []
+    for familia in ordem_padrao:
+        for ano in (2025, 2026):
+            for termo in termos:
+                consultas.append(f'{termo} Nutrição {ano} {familias[familia]}')
     nome_estado = dict(ESTADOS).get((uf or "").upper())
     if nome_estado:
-        consultas += [f'"{termos[0]}" Nutrição "{nome_estado}" {ano} "formandos" OR "colação de grau"'
+        consultas += [f'{termos[0]} Nutrição "{nome_estado}" {ano} (formandos OR "colação de grau" OR outorga)'
                       for ano in (2025, 2026)]
     if cidade and normalizar(cidade) != "nao identificado":
-        consultas += [f'"{termo}" "{cidade}" {uf or ""} Nutrição {ano} "turma" OR formandos'
-                      for termo in termos
-                      for ano in (2025,2026)]
-    consultas += [f'site:linkedin.com/in "{termos[0]}" Nutrição {ano} formandos OR estudante'
-                  for ano in (2025,2026)]
-    consultas += [f'site:instagram.com "{termo}" Nutrição faculdade oficial Instagram'
+        consultas += [f'"{termo}" "{cidade}" {uf or ""} Nutrição {ano} (turma OR formandos OR "colação de grau")'
+                      for termo in termos for ano in (2025, 2026)]
+    consultas += [f'site:linkedin.com/in {termos[0]} Nutrição {ano} (formandos OR estudante OR nutricionista)'
+                  for ano in (2025, 2026)]
+    consultas += [f'site:instagram.com {termo} Nutrição (faculdade OR turma OR formatura)'
                   for termo in termos]
     return list(dict.fromkeys(consultas))
 
@@ -991,11 +1030,15 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
     iid, instituicao, uf = item["id"], item["instituicao"], item["estado"]
     cidade = item.get("cidade") or "Não identificado"
     alias = alias_instituicao(item)
-    consultas = consultas_leads(instituicao, alias, None if item.get("escopo_faculdade") else cidade, uf)
+    cp = repo.controle_get(etapa_captacao_item(item))
+    # Em retomadas, mantém a ordem original das consultas para que o checkpoint
+    # continue apontando para o mesmo trecho da fila.
+    retomar = bool(cp and cp.get("status") in {"processando", "erro"})
+    consultas = consultas_leads(instituicao, alias, None if item.get("escopo_faculdade") else cidade, uf,
+                                adaptar=not retomar)
     fontes_conhecidas=repo.fontes_da_instituicao(instituicao) if hasattr(repo,"fontes_da_instituicao") else []
     if fontes_conhecidas: consultas.insert(0,"FONTES PÚBLICAS JÁ DESCOBERTAS")
     total = len(consultas)
-    cp = repo.controle_get(etapa_captacao_item(item))
     inicio = 0
     if cp and cp.get("ultimo_erro", "") and str(cp["ultimo_erro"]).startswith("Fontes inacessíveis") and cp.get("indice_pesquisa") == cp.get("total_pesquisas") and hasattr(repo,"fontes_pendentes"):
         return retentar_fontes_pendentes(repo,item,cp,source_fn,limite_consultas or 6,prazo=prazo)
@@ -1028,6 +1071,7 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         consulta = consultas[idx]
         inicio_consulta=time.monotonic()
         nomes_consulta=set()
+        qualificados_consulta=0
         salvos_consulta=stats["leads_salvos"]
         duplicados_consulta=stats["duplicados"]
         fontes_consulta=stats["fontes_visitadas"]
@@ -1075,12 +1119,15 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 if not registrar_nome_unico(nomes_consulta, registro["nome"], bool(registro.get("instagram"))):
                     print("      ♻️ EVIDÊNCIA REPETIDA NA CONSULTA:", registro["nome"], flush=True)
                     continue
+                qualificados_consulta += 1
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 registro["evidencia"] += " | Consultado em "+agora()
                 print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
                 salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),None,None,registro["evidencia"],url_resultado,
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
+        if consulta != "FONTES PÚBLICAS JÁ DESCOBERTAS":
+            registrar_rendimento_consulta(consulta, qualificados_consulta)
         termos=[normalizar(t) for t in (instituicao,alias) if t]
         resultados_relacionados=[]
         for resultado in resultados:
@@ -1282,6 +1329,14 @@ def resumo():
         ("Erros", "erros"),
     ]:
         print(f"{rotulo}: {stats[chave]}", flush=True)
+    if RENDIMENTO_BUSCAS:
+        print("Rendimento por família de busca:", flush=True)
+        for familia, dados in sorted(
+            RENDIMENTO_BUSCAS.items(),
+            key=lambda item: (-(item[1]["nomes"] / max(1, item[1]["consultas"])), item[0]),
+        ):
+            taxa = dados["nomes"] / max(1, dados["consultas"])
+            print(f"  {familia}: {dados['nomes']} nomes qualificados / {dados['consultas']} consultas ({taxa:.2f} por consulta)", flush=True)
     print("=" * 72, flush=True)
 
 
