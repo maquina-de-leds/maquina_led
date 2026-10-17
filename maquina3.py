@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fontes_academicas import (
-    acesso_reservado_maquina2, carregar_fonte, fase_final_comprovada,
-    nomes_da_lista, periodo_academico, url_permitida,
+    acesso_reservado_maquina2, carregar_fonte, extrair_resultado_busca,
+    fase_final_comprovada, nomes_da_lista, periodo_academico, url_permitida,
 )
 from scraper import (
     ESTADOS, ORIGEM_IES, SupabaseRepo, alias_instituicao, agrupar_faculdades,
@@ -26,17 +26,16 @@ def consultas_lote(item):
     nome = limpar_espacos(item.get("instituicao"))
     alias = limpar_espacos(alias_instituicao(item) or "")
     termos = list(dict.fromkeys(t for t in (alias, nome) if t))
-    termo = ' OR '.join('"'+t.replace('"', '')+'"' for t in termos)
+    termo = '(' + ' OR '.join('"'+t.replace('"', '')+'"' for t in termos) + ')'
     uf = limpar_espacos(item.get("estado") or "")
     return [
-        f'{termo} Nutrição formandos OR concluintes 2025 lista nomes formatura',
-        f'{termo} Nutrição "colação de grau" OR formatura 2025 2026 concluintes nomes',
-        f'{termo} Nutrição alunos "último semestre" OR "último período" 2026 {uf}',
-        f'{termo} Nutrição "8º semestre" OR "8º período" "2026/1" formandos concluintes {uf}',
-        f'site:instagram.com ("{nome}" OR "{alias}") Nutrição formandos OR formatura 2025 2026',
-        f'site:instagram.com ("{nome}" OR "{alias}") Nutrição alunos concluintes "último semestre" OR "2026/1"',
+        f'{termo} "Nutrição" (formandos OR concluintes OR graduandos) (2025 OR 2026) nomes',
+        f'{termo} "Nutrição" (formatura OR "colação de grau") (2025 OR 2026)',
+        f'{termo} "Nutrição" (TCC OR "trabalho de conclusão") (2025 OR 2026) autor',
+        f'{termo} "Nutrição" (aluno OR estudante OR graduando) ("8º período" OR "último semestre") 2026',
+        f'{termo} "Nutrição" ("recém-formado" OR "recém-formada" OR egresso OR egressa) (2025 OR 2026)',
+        f'{termo} Nutrição turma formatura lista alunos 2025 2026 {uf}',
     ]
-
 
 def candidatos_instagram_publico(resultado, item):
     """Usa somente título/trecho público indexado pelo Google; não abre o Instagram."""
@@ -217,19 +216,34 @@ def processar_faculdade(repo, item):
         urls = []
         for resultado in resultados:
             url = str(resultado.get("href") or resultado.get("url") or "")
-            if acesso_reservado_maquina2(url):
-                for registro in candidatos_instagram_publico(resultado, item):
-                    encontrados += 1
-                    stats["leads_encontrados"] += 1
-                    salvar_lead(
-                        repo, registro["nome"], item["instituicao"], cidade,
-                        item.get("estado"), registro["evidencia"], registro["fonte_url"],
-                        ano_forcado=registro["ano"], periodo_forcado=registro["periodo"],
-                        instituicao_alias=alias,
-                        candidato_indicio=registro["candidato_indicio"],
-                    )
-                continue
             if not url_permitida(url):
+                continue
+
+            # Aproveita também o título e o trecho público retornados pelo Google.
+            # Só salva quando o próprio resultado vincula pessoa, Nutrição, ano e instituição.
+            if acesso_reservado_maquina2(url):
+                registros_busca = candidatos_instagram_publico(resultado, item)
+            else:
+                registros_busca = extrair_resultado_busca(resultado, item["instituicao"], alias)
+                registros_busca = [
+                    r for r in registros_busca
+                    if r.get("instituicao") and r.get("nome") and r.get("ano") in {2025, 2026}
+                ]
+            for registro in registros_busca:
+                encontrados += 1
+                stats["leads_encontrados"] += 1
+                salvar_lead(
+                    repo, registro["nome"], registro.get("instituicao") or item["instituicao"],
+                    cidade, item.get("estado"), registro.get("evidencia") or "",
+                    registro.get("fonte_url") or url,
+                    instagram=registro.get("instagram"),
+                    ano_forcado=registro.get("ano"),
+                    periodo_forcado=registro.get("periodo"),
+                    instituicao_alias=alias,
+                    candidato_indicio=registro.get("candidato_indicio", not fase_final_comprovada(registro.get("evidencia", ""))),
+                )
+
+            if acesso_reservado_maquina2(url):
                 continue
             if url not in urls:
                 urls.append(url)
