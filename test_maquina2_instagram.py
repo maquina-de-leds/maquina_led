@@ -115,5 +115,18 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertEqual(m2.stats["instagram_encontrado"], 2)
 
 
+    def test_maquina2_nao_contem_atualizacao_na_tabela_de_leads(self):
+        import ast
+        from pathlib import Path
+        tree = ast.parse(Path(m2.__file__).read_text())
+        atualizacoes_leds = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "update":
+                continue
+            chamada = ast.unparse(node.func.value)
+            if '.table("leds")' in chamada or ".table('leds')" in chamada:
+                atualizacoes_leds.append(node.lineno)
+        self.assertEqual(atualizacoes_leds, [])
+
 if __name__ == "__main__":
     unittest.main()

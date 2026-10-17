@@ -31,12 +31,13 @@ def conectar_banco():
 # ============================================================
 
 LIMITE_CANDIDATOS_POR_EXECUCAO = 50
-LIMITE_LEADS_POR_EXECUCAO = 200
+LIMITE_LEADS_POR_EXECUCAO = 50
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
 
 MAX_RESULTADOS = 10
+ETAPA_CURSOR_M2 = "m2_enriquecimento_cursor_v1"
 
 
 stats = {
@@ -167,43 +168,13 @@ def parece_pessoa(nome):
 
 
 # ============================================================
-# MARCAR REGISTRO NÃO-PESSOA
+# PRESERVAR REGISTROS EXISTENTES
 # ============================================================
 
 def marcar_como_b2b(lead):
-
-    try:
-
-        (
-            supabase
-            .table("leds")
-            .update({
-                "qualificado":
-                    False,
-
-                "proxima_acao":
-                    "revisao_b2b"
-            })
-            .eq(
-                "id",
-                lead["id"]
-            )
-            .execute()
-        )
-
-        print(
-            "   🏢 Registro separado para possível B2B",
-            flush=True
-        )
-
-    except Exception as erro:
-
-        print(
-            f"   ⚠️ Erro marcando B2B: {erro}",
-            flush=True
-        )
-
-        stats["erros"] += 1
+    """Ignora registros que não parecem pessoas sem editar a tabela leds."""
+    print("   Registro ignorado para revisão; lead de origem preservado", flush=True)
+    return False
 
 
 # ============================================================
@@ -241,6 +212,33 @@ def lead_apto_para_enriquecimento(lead):
 # PEGAR LEADS SEM INSTAGRAM
 # ============================================================
 
+def obter_cursor_m2():
+    resposta = (supabase.table("controle_busca").select("indice_pesquisa")
+                .eq("etapa", ETAPA_CURSOR_M2).limit(1).execute())
+    if not resposta.data:
+        return 0
+    return max(0, int(resposta.data[0].get("indice_pesquisa") or 0))
+
+
+def salvar_cursor_m2(lead_id):
+    agora_iso = datetime.now(timezone.utc).isoformat()
+    resposta = (supabase.table("controle_busca").select("id")
+                .eq("etapa", ETAPA_CURSOR_M2).limit(1).execute())
+    dados = {
+        "estado": "BR", "cidade": "Nacional",
+        "instituicao": "Checkpoint da Máquina 2",
+        "etapa": ETAPA_CURSOR_M2, "status": "checkpoint",
+        "indice_pesquisa": max(0, int(lead_id)),
+        "atualizado_em": agora_iso, "ultimo_erro": None,
+    }
+    if resposta.data:
+        (supabase.table("controle_busca").update(dados)
+         .eq("id", resposta.data[0]["id"]).execute())
+    else:
+        dados["iniciado_em"] = agora_iso
+        supabase.table("controle_busca").insert(dados).execute()
+
+
 def buscar_pendentes():
 
     print("")
@@ -251,26 +249,30 @@ def buscar_pendentes():
 
     try:
 
-        resposta = (
-            supabase
-            .table("leds")
-            .select(
-                "id,nome,instagram,linkedin,whatsapp,"
-                "instituicao,cidade,estado,ano_alvo,"
-                "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,maquina2_tentativas"
-            )
-            .eq('nao_contatar', False)
-            .eq('qualificado', True)
-            .is_('instagram', 'null')
-            .order('maquina2_verificado_em', nullsfirst=True)
-            .order('id')
-            .limit(
-                LIMITE_LEADS_POR_EXECUCAO
-            )
-            .execute()
-        )
+        cursor = obter_cursor_m2()
 
-        leads = [lead for lead in (resposta.data or []) if lead_apto_para_enriquecimento(lead)]
+        def carregar(cursor_id):
+            consulta = (
+                supabase.table("leds")
+                .select("id,nome,instagram,linkedin,whatsapp,instituicao,cidade,estado,ano_alvo,"
+                        "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url")
+                .eq('nao_contatar', False)
+                .eq('qualificado', True)
+                .is_('instagram', 'null')
+                .order('id')
+                .limit(LIMITE_LEADS_POR_EXECUCAO)
+            )
+            if cursor_id:
+                consulta = consulta.gt('id', cursor_id)
+            return consulta.execute().data or []
+
+        registros = carregar(cursor)
+        if not registros and cursor:
+            print("🔁 Fila M2 chegou ao fim; retomando do primeiro lead", flush=True)
+            salvar_cursor_m2(0)
+            registros = carregar(0)
+
+        leads = [lead for lead in registros if lead_apto_para_enriquecimento(lead)]
 
         stats["pendentes"] = len(
             leads
@@ -613,75 +615,13 @@ def buscar_instagram(ddgs, lead, limite=None):
 
 # ============================================================
 # ============================================================
-# ATUALIZAR CONTATO DO LEAD
+# PRESERVAR REGISTROS EXISTENTES
 # ============================================================
 
-def atualizar_lead(
-    lead_id,
-    instagram=None,
-    linkedin=None
-):
-
-    dados = {}
-
-    if instagram:
-
-        dados[
-            "instagram"
-        ] = normalizar_instagram(
-            instagram
-        )
-
-        dados[
-            "proxima_acao"
-        ] = "primeiro_contato_instagram"
-
-    if linkedin:
-
-        dados[
-            "linkedin"
-        ] = linkedin
-
-    if (
-        not instagram
-        and not linkedin
-    ):
-
-        dados[
-            "proxima_acao"
-        ] = "buscar_instagram"
-
-    if not dados:
-        return
-
-    try:
-
-        resposta = (
-            supabase
-            .table("leds")
-            .update(
-                dados
-            )
-            .eq(
-                "id",
-                lead_id
-            )
-            .eq('nao_contatar', False)
-            .or_('não_contatar.is.null,não_contatar.eq.false')
-            .eq('qualificado', True)
-            .execute()
-        )
-        return bool(resposta.data)
-
-    except Exception as erro:
-
-        print(
-            f"      ❌ Erro atualizando Supabase: {erro}",
-            flush=True
-        )
-
-        stats["erros"] += 1
-        raise RuntimeError('Não foi possível confirmar atualização do lead') from erro
+def atualizar_lead(lead_id, instagram=None, linkedin=None):
+    """Compatibilidade legada: a Máquina 2 não edita leads existentes."""
+    print("      Lead de origem preservado; candidato fica separado para revisão", flush=True)
+    return False
 
 
 # ============================================================
@@ -708,15 +648,7 @@ def validar_candidato(ddgs, lead):
                     continue
                 if lead.get('instituicao') and registro.get('instituicao') != lead['instituicao']:
                     continue
-                dados = {'qualificado': True, 'proxima_acao': 'primeiro_contato_instagram' if lead.get('instagram') else 'buscar_instagram',
-                         'ano_alvo': registro['ano'], 'periodo_alvo': registro['periodo'],
-                         'evidencia': registro['evidencia'], 'fonte_url': url,
-                         'fonte_validacao': 'fase_academica_validada_maquina2'}
-                resposta = (supabase.table('leds').update(dados).eq('id', lead['id'])
-                            .eq('nao_contatar', False).or_('não_contatar.is.null,não_contatar.eq.false').eq('qualificado', False).execute())
-                if not resposta.data:
-                    return False
-                lead.update(dados)
+                print("Evidência acadêmica encontrada; lead preservado para revisão manual", flush=True)
                 return True
         pausa()
     return False
@@ -761,9 +693,8 @@ def processar_lead(ddgs, lead):
     if salvos:
         return
 
-    atualizar_lead(lead["id"])
     stats["sem_contato"] += 1
-    print("   ⏳ Lead continua pendente de Instagram", flush=True)
+    print("   ⏳ Sem candidato; lead de origem preservado", flush=True)
 
 
 
@@ -831,10 +762,7 @@ def executar():
                     print(f'FALHA NO ENRIQUECIMENTO: {type(exc).__name__}; lead preservado', flush=True)
                 finally:
                     signal.setitimer(signal.ITIMER_REAL, 0)
-                    (supabase.table('leds').update({
-                        'maquina2_verificado_em': datetime.now(timezone.utc).isoformat(),
-                        'maquina2_tentativas': int(lead.get('maquina2_tentativas') or 0) + 1,
-                    }).eq('id', lead['id']).execute())
+                    salvar_cursor_m2(lead["id"])
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, anterior)
