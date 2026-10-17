@@ -6,6 +6,10 @@ import fontes_academicas
 
 
 class MachineOneSearchEfficiencyTests(unittest.TestCase):
+    def setUp(self):
+        scraper.RENDIMENTO_BUSCAS.clear()
+        scraper.ORDEM_CONSULTAS_POR_INSTITUICAO.clear()
+
     def test_queries_are_bounded_and_cover_both_years_and_academic_signals(self):
         queries = scraper.consultas_leads(
             "Universidade Teste", "UT", cidade="Itu", uf="SP"
@@ -25,6 +29,19 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         ):
             self.assertTrue(any(signal in q for q in queries), signal)
         self.assertTrue(any("site:instagram.com" in q.lower() for q in queries))
+        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in queries))
+
+    def test_queries_prioritize_families_with_better_qualified_yield(self):
+        scraper.RENDIMENTO_BUSCAS.clear()
+        scraper.ORDEM_CONSULTAS_POR_INSTITUICAO.clear()
+        scraper.RENDIMENTO_BUSCAS.update({
+            "instagram_publico": {"consultas": 2, "nomes": 8},
+            "formatura_colacao": {"consultas": 10, "nomes": 0},
+        })
+        queries = scraper.consultas_leads("Universidade Teste", "UT")
+        self.assertEqual(scraper.familia_consulta(queries[0]), "instagram_publico")
+        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in queries))
+        scraper.RENDIMENTO_BUSCAS.clear()
 
     def test_public_instagram_result_keeps_handle_only_with_qualification_evidence(self):
         result = {
