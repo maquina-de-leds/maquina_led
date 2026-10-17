@@ -789,7 +789,7 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     # de Instagram (esse enriquecimento pertence a outro fluxo).
     termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
     temas = (
-        '"lista de alunos" OR aprovados OR matriculados OR "formandos" OR '
+        '"lista de alunos" OR "lista de aprovados" OR aprovados OR matriculados OR "formandos" OR '
         '"concluintes" OR "lista de formandos" OR "turma de Nutrição" OR "alunos do curso"',
         '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR '
         '"trabalho escolar" OR "trabalho acadêmico" OR repositório autores entrega',
