@@ -369,7 +369,7 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if (re.search(r'\b(?:aprovad[oa]s?|convocad[oa]s?|classificad[oa]s?)\b', n)
             and not re.search(r'\b(?:matriculad[oa]s?|ingressantes?|calouros?|cursando|em curso|'
                               r'estudantes?|alun[oa]s? (?:do|de) curso|graduand[oa]s?|'
-                              r'formand[oa]s?|concluintes?|recem formad[oa]s?)\b', n)):
+                              r'formand[oa]s?|concluintes?|recem[- ]formad[oa]s?)\b', n)):
         return []
     if re.search(r'exemplos? de curriculo|modelos? de curriculo|personagem fictici|caso hipotetic',n):
         return []
