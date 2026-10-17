@@ -789,14 +789,17 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
     # de Instagram (esse enriquecimento pertence a outro fluxo).
     termos = list(dict.fromkeys(limpar_espacos(t) for t in (instituicao, alias) if t))
     temas = (
-        '"formandos" OR "concluintes" OR "lista de formandos"',
+        '"lista de alunos" OR aprovados OR matriculados OR "formandos" OR '
+        '"concluintes" OR "lista de formandos"',
         '"TCC" OR defesa OR apresentação OR "trabalho de conclusão" OR repositório autores entrega',
         '"colação de grau" OR outorga OR formatura',
         '"recém-formados" OR "último período" OR "estágio final"',
         '"mostra" "autores" OR anais OR "caderno de resumos"',
         '"liga acadêmica" OR "grupo de estudos" OR "grupo de alunos" OR '
-        '"grupo de estudantes" OR "centro acadêmico" OR monitoria OR extensão alunos',
-        '"turma" "Nutrição"',
+        '"grupo de estudantes" OR "centro acadêmico" OR monitoria OR extensão OR '
+        '"grupo de WhatsApp" OR "grupo WhatsApp" alunos',
+        'site:instagram.com "Nutrição" "turma" OR formanda OR "recém-formada" OR formatura',
+        'site:instagram.com/p/ Nutrição formatura OR TCC OR formandos OR estudantes',
     )
     consultas = [f'"{termo}" Nutrição {ano} {tema}'
                  for ano in (2025, 2026) for termo in termos for tema in temas]
@@ -810,6 +813,8 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None):
                       for ano in (2025,2026)]
     consultas += [f'site:linkedin.com/in "{termos[0]}" Nutrição {ano} formandos OR estudante'
                   for ano in (2025,2026)]
+    consultas += [f'site:instagram.com "{termo}" Nutrição faculdade oficial Instagram'
+                  for termo in termos]
     return list(dict.fromkeys(consultas))
 
 

@@ -365,6 +365,12 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     n=norm(texto)
     if 'nutricao' not in n:
         return []
+    # Aprovação em vestibular/processo seletivo não confirma matrícula ou vínculo ativo.
+    if (re.search(r'\b(?:aprovad[oa]s?|convocad[oa]s?|classificad[oa]s?)\b', n)
+            and not re.search(r'\b(?:matriculad[oa]s?|ingressantes?|calouros?|cursando|em curso|'
+                              r'estudantes?|alun[oa]s? (?:do|de) curso|graduand[oa]s?|'
+                              r'formand[oa]s?|concluintes?|recem formad[oa]s?)\b', n)):
+        return []
     if re.search(r'exemplos? de curriculo|modelos? de curriculo|personagem fictici|caso hipotetic',n):
         return []
     if re.search(r'\b(?:morre|morreu|falecimento|obito)\b',norm(titulo)):
@@ -411,7 +417,19 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
                      evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Semestre pendente de confirmação',
                      contexto_academico=texto) for nome in nomes_da_lista(lista.group(1))]
     if re.search(PAPEL,n): return []
-    nome=pessoa(re.split(r'\s*[|–—]\s*|\s+-\s+',titulo)[0])
+    nome_titulo = re.split(r'\s*[|•–—]\s*|\s+-\s+', titulo)[0]
+    nome_titulo = re.sub(r'\s*\(@?[A-Za-z0-9._]{1,30}\)\s*$', '', nome_titulo).strip()
+    nome_titulo = re.sub(r'\s+@([A-Za-z0-9._]{1,30})\s*$', '', nome_titulo).strip()
+    nome=pessoa(nome_titulo)
+    instagram = None
+    parsed_url = urlparse(str(resultado.get('href') or resultado.get('url') or ''))
+    host = (parsed_url.hostname or '').lower()
+    perfil = [parte for parte in parsed_url.path.split('/') if parte]
+    bloqueados = {'p','reel','reels','tv','stories','explore','accounts','about','directory'}
+    if (host == 'instagram.com' or host.endswith('.instagram.com')) and len(perfil) == 1:
+        handle = perfil[0]
+        if re.fullmatch(r'[A-Za-z0-9._]{1,30}', handle) and handle.lower() not in bloqueados:
+            instagram = '@' + handle
     aluno_citado=re.search(r'\b(?:alun[oa]|estudante)\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição[^.!?]{0,160}?,\s*([A-ZÀ-Ý][^,.;]{2,80}),',trecho)
     if aluno_citado: nome=pessoa(aluno_citado.group(1))
     formada_citada=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,90}?)(?=,|\s+(?:foi|celebra|compartilha|conquistou)\b)',trecho)
@@ -421,7 +439,7 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
         nome=pessoa(m.group(1)) if m else None
     if not nome or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
-    return [dict(nome=nome,ano=ano,periodo=periodo,instagram=None,instituicao=instituicao if vinculada else None,
+    return [dict(nome=nome,ano=ano,periodo=periodo,instagram=instagram,instituicao=instituicao if vinculada else None,
                  evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',
                  contexto_academico=texto)]
 
@@ -804,3 +822,4 @@ def recuperar_fonte_na_busca(url, instituicao, alias, search_fn):
             registros.append(r)
         if registros: break
     return list({norm(r['nome']):r for r in registros}.values()),[]
+
