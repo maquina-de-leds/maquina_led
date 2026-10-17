@@ -8,7 +8,7 @@ class AlternativoTests(unittest.TestCase):
   def busca(q,b,n):
    chamadas.append((q,b));return [{'href':'https://example.edu/tcc'}] if b=='bing' else []
   self.assertEqual(len(s.buscar_web('TCC',fetch_fn=busca)),1)
-  self.assertEqual([b for q,b in chamadas],['auto','auto','bing'])
+  self.assertEqual([b for q,b in chamadas],['google','google','bing'])
  @patch.object(s.time,'sleep')
  def test_sem_resposta_nem_controle_e_indisponibilidade(self,_):
   def falha(*a):raise RuntimeError('No results found.')
