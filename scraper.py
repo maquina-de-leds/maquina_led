@@ -704,21 +704,15 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
             erros.append((backend,exc))
             print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
         if indice < len(tentativas)-1: time.sleep(2.0)
+    # Só concluímos que a consulta não encontrou resultados quando todos os
+    # mecanismos tentados responderam sem erro. Um health check com outra
+    # consulta não prova que a consulta original foi executada; transformá-lo
+    # em resultado vazio marcava pesquisas indisponíveis como concluídas.
     if respondeu_vazio and not erros: return []
-    # Controle de saúde não transforma timeout da consulta original em vazio.
-    if any('no results' not in str(exc).lower() for _, exc in erros):
-        print('      ⚠️ Busca parcial: consulta original mantém pendência', flush=True)
+    if erros:
+        resumo = ", ".join(f"{backend}:{type(exc).__name__}" for backend, exc in erros)
+        print(f"      ⚠️ Busca incompleta; consulta preservada para nova tentativa ({resumo})", flush=True)
         return None
-    if erros and not respondeu_vazio and not any('no results' in str(e).lower() for _,e in erros):
-        print("      ⚠️ Busca externa indisponível em automático e Bing",flush=True)
-        return None
-    # 'No results found' sozinho não comprova que o mecanismo está disponível.
-    for backend in ('auto','bing'):
-        try:
-            if list(fetch_fn('Brasil',backend,1) or []):
-                print(f"      CONTROLE BUSCADOR: {backend} respondeu; consulta sem resultados",flush=True)
-                return []
-        except Exception: pass
     print("      ⚠️ Busca externa indisponível após controle de funcionamento",flush=True)
     return None
 
