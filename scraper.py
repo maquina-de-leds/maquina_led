@@ -822,7 +822,7 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
         # A sigla é uma variação, mas nunca substitui o nome da faculdade.
         termos.append(f'"{nome_faculdade}" {limpar_espacos(alias)}')
     familias = {
-        "formatura_colacao": '("colação de grau" OR "outorga de grau" OR outorga OR formatura OR "cerimônia de formatura" OR "formandos" OR concluintes OR "aptos a colar grau" OR "lista de formandos")',
+        "formatura_colacao": '("colação de grau" OR "outorga de grau" OR outorga OR formatura OR "cerimônia de formatura" OR "formandos" OR concluintes OR "aptos a colar grau" OR "lista de formandos" OR "boletim de serviços" OR "calendário defesas" OR juramentista)',
         "tcc_trabalhos": '("TCC" OR "trabalho de conclusão" OR "trabalho acadêmico" OR "trabalho escolar") (autores OR defesa OR apresentação OR banca OR repositório OR "caderno de resumos" OR anais OR entrega) filetype:pdf',
         "listas_turmas": '("lista de alunos" OR "alunos matriculados" OR "turma de Nutrição" OR "turma" OR "lista de aprovados") (matrícula OR matriculados OR turma OR estudantes OR discentes)',
         "vida_academica": '("centro acadêmico" OR "liga acadêmica" OR monitoria OR extensão OR "grupo de estudos" OR "grupo de alunos" OR "grupo de estudantes" OR "grupo de WhatsApp" OR "grupo WhatsApp" OR jornada OR seminário OR ("mostra" "autores"))',
@@ -839,11 +839,12 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
             list(familias).index(familia),
         ))
     ORDEM_CONSULTAS_POR_INSTITUICAO.setdefault(chave, ordem_padrao.copy())
-    consultas = [f'"{nome_faculdade}" Nutrição {ano} TCC repositório' for ano in (2025, 2026)]
+    consultas = []
     for familia in ordem_padrao:
         for ano in (2025, 2026):
             for termo in termos:
                 consultas.append(f'{termo} Nutrição {ano} {familias[familia]}')
+    consultas += [f'"{nome_faculdade}" Nutrição {ano} TCC repositório' for ano in (2025, 2026)]
     nome_estado = dict(ESTADOS).get((uf or "").upper())
     if nome_estado:
         consultas += [f'{termos[0]} Nutrição "{nome_estado}" {ano} (formandos OR "colação de grau" OR outorga)'
