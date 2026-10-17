@@ -115,6 +115,8 @@ class FluxoTests(unittest.TestCase):
         self.assertEqual(s.stats['duplicados'],1)
     def setUp(self):
         for key in s.stats: s.stats[key]=0
+        s.RENDIMENTO_BUSCAS.clear()
+        s.ORDEM_CONSULTAS_POR_INSTITUICAO.clear()
     def test_consultas_institucionais(self):
         qs=s.consultas_leads('Universidade Teste','UT')
         self.assertTrue(any('site:linkedin.com/in' in q for q in qs))
@@ -400,3 +402,4 @@ class GruposAcademicosTests(unittest.TestCase):
         for criterio in ['grupo de alunos','grupo de estudantes','grupo de estudos','liga acadêmica','centro acadêmico']:
             for ano in ['2025','2026']:
                 self.assertTrue(any(criterio in q and ano in q and 'Nutrição' in q and 'Universidade Teste' in q for q in qs))
+
