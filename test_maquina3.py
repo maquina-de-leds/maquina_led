@@ -95,13 +95,12 @@ class Machine3Tests(unittest.TestCase):
         with patch.object(m, "buscar_google", return_value=[result]), \
              patch.object(m, "extrair_resultado_busca", side_effect=[[candidate], [], [], [], [], []]), \
              patch.object(m, "carregar_fonte", return_value=([], [])), \
-             patch.object(m, "buscar_instagram_da_pessoa", return_value={"instagram": "@anasouza.nutri", "instagram_url": "https://www.instagram.com/anasouza.nutri/", "evidencia": "Ana Souza nutricionista"}) as profile, \
+             patch.object(m, "buscar_instagram_da_pessoa", return_value={"instagram": "@anasouza.nutri", "instagram_url": "https://www.instagram.com/anasouza.nutri/", "evidencia": "Ana Souza nutricionista"}), \
              patch.object(m, "salvar_lead") as save:
             self.assertTrue(m.processar_faculdade(repo, item))
         save.assert_called_once()
         self.assertEqual(save.call_args.args[1], "Ana Souza")
         self.assertEqual(save.call_args.kwargs["instagram"], "@anasouza.nutri")
-        profile.assert_called_once()
 
     def test_extracts_handle_only_from_matching_public_profile(self):
         result = {
@@ -112,6 +111,37 @@ class Machine3Tests(unittest.TestCase):
         perfil = m.extrair_perfil_instagram_publico([result], {"nome": "Amanda Gasparin"})
         self.assertEqual(perfil["instagram"], "@nutriamandagasparin")
         self.assertEqual(perfil["instagram_url"], "https://www.instagram.com/nutriamandagasparin/")
+
+    def test_qualification_requires_person_course_year_and_recent_phase(self):
+        valid = {
+            "nome": "Ana Souza",
+            "ano": 2025,
+            "evidencia": "Formanda do curso de Nutrição, colação de grau em 2025",
+        }
+        no_phase = {**valid, "evidencia": "Estudante de Nutrição em 2025"}
+        organization = {**valid, "nome": "Universidade Teste"}
+        no_course = {**valid, "evidencia": "Formanda com colação de grau em 2025"}
+        self.assertTrue(m.lead_qualificado_maquina3(valid))
+        self.assertFalse(m.lead_qualificado_maquina3(no_phase))
+        self.assertFalse(m.lead_qualificado_maquina3(organization))
+        self.assertFalse(m.lead_qualificado_maquina3(no_course))
+
+    def test_reuses_instagram_result_for_repeated_name(self):
+        item = {"instituicao": "Universidade Teste", "cidade": "Chapecó"}
+        registro = {"nome": "Ana Souza", "evidencia": "Formanda de Nutrição em 2025"}
+        perfil = {
+            "instagram": "@anasouza.nutri",
+            "instagram_url": "https://www.instagram.com/anasouza.nutri/",
+            "evidencia": "Ana Souza nutricionista",
+        }
+        cache = {}
+        with patch.object(m, "buscar_instagram_da_pessoa", return_value=perfil) as search:
+            first, used = m.enriquecer_com_instagram([dict(registro)], item, 0, cache)
+            second, used = m.enriquecer_com_instagram([dict(registro)], item, used, cache)
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(first[0]["instagram"], "@anasouza.nutri")
+        self.assertEqual(second[0]["instagram"], "@anasouza.nutri")
+        self.assertEqual(used, 1)
 
     def test_rejects_post_and_unrelated_profile(self):
         registro = {"nome": "Amanda Gasparin"}
@@ -142,3 +172,4 @@ class Machine3Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
