@@ -15,7 +15,7 @@ from scraper import (
     buscar_web, ddgs_texto, limpar_espacos, normalizar, ordem_estado, salvar_lead, stats,
 )
 
-ETAPA = "captacao_maquina3_formandos_v2"
+ETAPA = "captacao_maquina3_formandos_v3"
 MAX_FACULDADES = 5
 MAX_RESULTADOS_BUSCA = 6
 MAX_FONTES_POR_CONSULTA = 2
@@ -141,6 +141,37 @@ def extrair_perfil_instagram_publico(resultados, registro):
     return None
 
 
+def lead_qualificado_maquina3(registro):
+    """Exige nome de pessoa e evidência de Nutrição em fase final/recente."""
+    nome = limpar_espacos(registro.get("nome") or "")
+    nome_norm = normalizar(nome)
+    tokens = re.findall(r"[a-z]+", nome_norm)
+    termos_nao_pessoa = {
+        "universidade", "faculdade", "instituto", "centro", "curso", "nutricao",
+        "tcc", "trabalho", "conclusao", "formandos", "concluintes", "turma",
+    }
+    if len(tokens) < 2 or len(tokens) > 8 or any(t in termos_nao_pessoa for t in tokens):
+        return False
+
+    ano = registro.get("ano")
+    if str(ano) not in {"2025", "2026"}:
+        return False
+    evidencia = limpar_espacos(registro.get("evidencia") or "")
+    evidencia_norm = normalizar(evidencia)
+    tem_nutricao = "nutricao" in evidencia_norm
+    tem_fase = bool(re.search(
+        r"formand|concluint|colacao|formatura|egress|recem formad|graduand|"
+        r"ultimo semestre|ultimo periodo|8[oa]? semestre|8[oa]? periodo",
+        evidencia_norm,
+    ))
+    return tem_nutricao and tem_fase
+
+
+def filtrar_leads_qualificados(registros):
+    """Mantém apenas nomes de pessoas com evidência acadêmica recente verificável."""
+    return [registro for registro in registros if lead_qualificado_maquina3(registro)]
+
+
 def buscar_instagram_da_pessoa(registro, item):
     """Procura o perfil individual após identificar a pessoa em fonte pública."""
     nome = limpar_espacos(registro.get("nome"))
@@ -167,15 +198,32 @@ def buscar_instagram_da_pessoa(registro, item):
     return perfil
 
 
-def enriquecer_com_instagram(registros, item, buscas_feitas=0):
-    """Enriquece candidatos com @ público confirmado, limitado por faculdade."""
+def enriquecer_com_instagram(registros, item, buscas_feitas=0, cache=None):
+    """Enriquece pessoas únicas com @ público, reaproveitando buscas da faculdade."""
+    cache = cache if cache is not None else {}
     saida = []
     for registro in registros:
-        if registro.get("instagram") or buscas_feitas >= MAX_BUSCAS_INSTAGRAM_POR_FACULDADE:
+        chave = normalizar(registro.get("nome") or "")
+        if registro.get("instagram"):
+            saida.append(registro)
+            continue
+        if chave in cache:
+            perfil = cache[chave]
+            if perfil:
+                registro = dict(registro)
+                registro["instagram"] = perfil["instagram"]
+                registro["evidencia"] = limpar_espacos(
+                    (registro.get("evidencia") or "") + " | Perfil profissional público confirmado: "
+                    + perfil["instagram_url"] + " | " + perfil["evidencia"]
+                )[:1500]
+            saida.append(registro)
+            continue
+        if buscas_feitas >= MAX_BUSCAS_INSTAGRAM_POR_FACULDADE:
             saida.append(registro)
             continue
         buscas_feitas += 1
         perfil = buscar_instagram_da_pessoa(registro, item)
+        cache[chave] = perfil
         if perfil:
             registro = dict(registro)
             registro["instagram"] = perfil["instagram"]
@@ -286,6 +334,7 @@ def processar_faculdade(repo, item):
     alias = alias_instituicao(item)
     cidade = item.get("cidade") or "Não identificado"
     instagram_buscas = 0
+    instagram_cache = {}
 
     for idx in range(inicio, len(consultas)):
         consulta = consultas[idx]
@@ -317,7 +366,10 @@ def processar_faculdade(repo, item):
                     if r.get("instituicao") and r.get("nome") and r.get("ano") in {2025, 2026}
                     and fase_final_comprovada(r.get("evidencia") or "")
                 ]
-            registros_busca, instagram_buscas = enriquecer_com_instagram(registros_busca, item, instagram_buscas)
+            registros_busca = filtrar_leads_qualificados(registros_busca)
+            registros_busca, instagram_buscas = enriquecer_com_instagram(
+                registros_busca, item, instagram_buscas, instagram_cache
+            )
             for registro in registros_busca:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -344,7 +396,10 @@ def processar_faculdade(repo, item):
                 stats["erros"] += 1
                 print(f"FONTE PENDENTE: {url} | {type(exc).__name__}", flush=True)
                 continue
-            registros, instagram_buscas = enriquecer_com_instagram(registros, item, instagram_buscas)
+            registros = filtrar_leads_qualificados(registros)
+            registros, instagram_buscas = enriquecer_com_instagram(
+                registros, item, instagram_buscas, instagram_cache
+            )
             for registro in registros:
                 encontrados += 1
                 stats["leads_encontrados"] += 1
@@ -372,7 +427,10 @@ def processar_faculdade(repo, item):
                     stats["erros"] += 1
                     print(f"FONTE VINCULADA PENDENTE: {link} | {type(exc).__name__}", flush=True)
                     continue
-                subregistros, instagram_buscas = enriquecer_com_instagram(subregistros, item, instagram_buscas)
+                subregistros = filtrar_leads_qualificados(subregistros)
+                subregistros, instagram_buscas = enriquecer_com_instagram(
+                    subregistros, item, instagram_buscas, instagram_cache
+                )
                 for registro in subregistros:
                     encontrados += 1
                     stats["leads_encontrados"] += 1
@@ -447,3 +505,4 @@ def executar():
 
 if __name__ == "__main__":
     executar()
+
