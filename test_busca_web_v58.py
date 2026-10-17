@@ -60,13 +60,11 @@ class BuscarWebV58Tests(unittest.TestCase):
         sleep.assert_called_once_with(2.0)
 
     @patch.object(s.time, "sleep")
-    def test_sem_resultados_confirmado_por_busca_de_saude_retorna_vazio(self, sleep):
+    def test_resultados_nao_confirmados_sao_preservados_para_retry(self, sleep):
         chamadas = []
 
         def fetch(consulta, backend, max_results):
             chamadas.append((consulta, backend, max_results))
-            if consulta == "Brasil":
-                return [{"title": "Resultado de saúde"}]
             raise RuntimeError("No results found")
 
         resultado = s.buscar_web(
@@ -75,12 +73,11 @@ class BuscarWebV58Tests(unittest.TestCase):
             fetch_fn=fetch,
         )
 
-        self.assertEqual(resultado, [])
+        self.assertIsNone(resultado)
         self.assertEqual(chamadas, [
             ("consulta sem ocorrências", "google", 3),
             ("consulta sem ocorrências", "google", 3),
             ("consulta sem ocorrências", "bing", 3),
-            ("Brasil", "auto", 1),
         ])
         self.assertEqual(sleep.call_args_list, [call(2.0), call(2.0)])
 
