@@ -701,8 +701,14 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
             if resultados: return resultados
             respondeu_vazio=True
         except Exception as exc:
-            erros.append((backend,exc))
-            print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
+            # DDGS 9.x representa consultas sem hits como excecao, diferente
+            # de erros de rede/servico. Trate so a mensagem exata como vazio.
+            if normalizar(str(exc)).strip(" .") == "no results found":
+                respondeu_vazio=True
+                print(f"      BUSCADOR: {backend} | sem resultados",flush=True)
+            else:
+                erros.append((backend,exc))
+                print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
         if indice < len(tentativas)-1: time.sleep(2.0)
     # Só concluímos que a consulta não encontrou resultados quando todos os
     # mecanismos tentados responderam sem erro. Um health check com outra

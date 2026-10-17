@@ -65,7 +65,7 @@ class BuscarWebV58Tests(unittest.TestCase):
 
         def fetch(consulta, backend, max_results):
             chamadas.append((consulta, backend, max_results))
-            raise RuntimeError("No results found")
+            raise RuntimeError("Temporary network error")
 
         resultado = s.buscar_web(
             "consulta sem ocorrências",
