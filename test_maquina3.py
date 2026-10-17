@@ -89,7 +89,7 @@ class Machine3Tests(unittest.TestCase):
             "ano": 2026,
             "periodo": "2026",
             "instituicao": "Universidade Teste",
-            "evidencia": "Universidade Teste | Nutrição | estudante 2026",
+            "evidencia": "Universidade Teste | Nutrição | formanda 2026",
             "fonte_url": result["href"],
         }
         with patch.object(m, "buscar_google", return_value=[result]), \
