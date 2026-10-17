@@ -128,6 +128,15 @@ class Machine3Tests(unittest.TestCase):
         self.assertEqual(perfil["instagram"], "@nutriamandagasparin")
         self.assertEqual(perfil["instagram_url"], "https://www.instagram.com/nutriamandagasparin/")
 
+    def test_extracts_handle_linked_from_professional_directory(self):
+        result = {
+            "href": "https://dietbox.me/pt-BR/amanda-gasparin",
+            "title": "Nutricionista Amanda Gasparin em Chapecó",
+            "body": "CRN 10-13039. Instagram www.instagram.com/nutriamandagasparin",
+        }
+        perfil = m.extrair_perfil_instagram_publico([result], {"nome": "Amanda Gasparin"})
+        self.assertEqual(perfil["instagram"], "@nutriamandagasparin")
+
     def test_qualification_requires_person_course_year_and_recent_phase(self):
         valid = {
             "nome": "Ana Souza",
@@ -169,6 +178,22 @@ class Machine3Tests(unittest.TestCase):
         self.assertEqual(perfil["nome"], "Carla Mendes")
         self.assertEqual(perfil["instagram"], "@carlanutri")
         self.assertIsNone(m.extrair_perfil_relacionado(results, "Carla Mendes"))
+
+    def test_reserve_search_can_find_related_nutritionist_outside_institution(self):
+        result = {
+            "href": "https://www.instagram.com/carlanutri/",
+            "title": "Carla Mendes (@carlanutri) • Instagram",
+            "body": "Nutricionista clínica, CRN 12345",
+        }
+        with patch.object(m, "buscar_google", side_effect=[[], [result]]) as search, \
+             patch.object(m, "extrair_perfil_instagram_publico", return_value=None):
+            fallback = m.buscar_instagram_da_pessoa(
+                {"nome": "Ana Souza"},
+                {"instituicao": "Universidade Teste", "cidade": "Chapecó"},
+            )
+        self.assertEqual(search.call_count, 2)
+        self.assertNotIn("Universidade Teste", search.call_args_list[1].args[0])
+        self.assertEqual(fallback["fallback_lead"]["instagram"], "@carlanutri")
 
     def test_saves_related_profile_without_falsifying_graduation_year(self):
         repo = FakeLeadRepo()
