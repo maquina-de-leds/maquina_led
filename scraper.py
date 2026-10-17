@@ -1071,7 +1071,6 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
         consulta = consultas[idx]
         inicio_consulta=time.monotonic()
         nomes_consulta=set()
-        qualificados_consulta=0
         salvos_consulta=stats["leads_salvos"]
         duplicados_consulta=stats["duplicados"]
         fontes_consulta=stats["fontes_visitadas"]
@@ -1119,15 +1118,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 if not registrar_nome_unico(nomes_consulta, registro["nome"], bool(registro.get("instagram"))):
                     print("      ♻️ EVIDÊNCIA REPETIDA NA CONSULTA:", registro["nome"], flush=True)
                     continue
-                qualificados_consulta += 1
                 encontrados_local += 1
                 stats["leads_encontrados"] += 1
                 registro["evidencia"] += " | Consultado em "+agora()
                 print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
                 salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),None,None,registro["evidencia"],url_resultado,
                             ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
-        if consulta != "FONTES PÚBLICAS JÁ DESCOBERTAS":
-            registrar_rendimento_consulta(consulta, qualificados_consulta)
         termos=[normalizar(t) for t in (instituicao,alias) if t]
         resultados_relacionados=[]
         for resultado in resultados:
@@ -1220,6 +1216,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             if fonte_lida and hasattr(repo, 'registrar_pendencia_fonte'):
                 repo.registrar_pendencia_fonte(item, url, concluida=True)
                 pendentes_conhecidas.discard(url)
+        if consulta != "FONTES PÚBLICAS JÁ DESCOBERTAS":
+            registrar_rendimento_consulta(consulta, len(nomes_consulta))
         indice_cp = primeira_busca_pendente if primeira_busca_pendente is not None else idx + 1
         checkpoint_captacao(repo,item,"erro" if primeira_busca_pendente is not None else "processando",indice_cp,total,consulta=consultas[indice_cp] if indice_cp<total else None,erro="Busca externa indisponível" if primeira_busca_pendente is not None else ("Fontes pendentes; repetir varredura" if falhas_fontes else None),
                             encontrados=encontrados_local,salvos=salvos_checkpoint+stats["leads_salvos"]-salvos_antes)
