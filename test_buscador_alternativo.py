@@ -8,7 +8,7 @@ class AlternativoTests(unittest.TestCase):
   def busca(q,b,n):
    chamadas.append((q,b));return [{'href':'https://example.edu/tcc'}] if b=='bing' else []
   self.assertEqual(len(s.buscar_web('TCC',fetch_fn=busca)),1)
-  self.assertEqual([b for q,b in chamadas],['google','google','bing'])
+  self.assertEqual([b for q,b in chamadas],['google','bing'])
  @patch.object(s.time,'sleep')
  def test_sem_resposta_nem_controle_e_indisponibilidade(self,_):
   def falha(*a):raise RuntimeError('Temporary network error')
@@ -20,7 +20,7 @@ class AlternativoTests(unittest.TestCase):
    chamadas.append((q,b))
    raise RuntimeError('Temporary network error')
   self.assertIsNone(s.buscar_web('TCC',fetch_fn=busca))
-  self.assertEqual(chamadas,[('TCC','google'),('TCC','google'),('TCC','bing')])
+  self.assertEqual(chamadas,[('TCC','google'),('TCC','bing')])
  @patch.object(s.time,'sleep')
  def test_no_results_found_e_vazio_confirmado(self,_):
   chamadas=[]
@@ -28,4 +28,4 @@ class AlternativoTests(unittest.TestCase):
    chamadas.append(b)
    raise RuntimeError('No results found.')
   self.assertEqual(s.buscar_web('TCC',fetch_fn=busca),[])
-  self.assertEqual(chamadas,['google','google','bing'])
+  self.assertEqual(chamadas,['google','bing'])

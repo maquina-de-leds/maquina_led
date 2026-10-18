@@ -689,9 +689,9 @@ def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca primeiro no Google duas vezes e usa Bing como reserva."""
+    """Busca no Google e usa Bing como reserva, sem repetir buscas vazias."""
     erros=[]; respondeu_vazio=False
-    tentativas = ('google', 'google', 'bing')
+    tentativas = ('google', 'bing')
     for indice,backend in enumerate(tentativas):
         try:
             try: resultados=fetch_fn(consulta,backend,max_results)
@@ -709,7 +709,7 @@ def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
             else:
                 erros.append((backend,exc))
                 print(f"      BUSCADOR: {backend} | erro: {type(exc).__name__}",flush=True)
-        if indice < len(tentativas)-1: time.sleep(2.0)
+        if indice < len(tentativas)-1: time.sleep(1.0)
     # Só concluímos que a consulta não encontrou resultados quando todos os
     # mecanismos tentados responderam sem erro. Um health check com outra
     # consulta não prova que a consulta original foi executada; transformá-lo
@@ -822,11 +822,11 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
         # A sigla é uma variação, mas nunca substitui o nome da faculdade.
         termos.append(f'("{nome_faculdade}" OR {limpar_espacos(alias)})')
     familias = {
+        "instagram_publico": 'site:instagram.com ("perfil de nutricionista" OR nutricionista) (formanda OR "recém-formada" OR "estudante de Nutrição" OR "graduanda em Nutrição")',
         "formatura_colacao": '("colação de grau" OR "outorga de grau" OR outorga OR formatura OR "cerimônia de formatura" OR "formandos" OR concluintes OR "aptos a colar grau" OR "lista de formandos" OR "boletim de serviços" OR "calendário defesas" OR juramentista)',
         "tcc_trabalhos": '("TCC" OR "trabalho de conclusão" OR "trabalho acadêmico" OR "trabalho escolar") (autores OR defesa OR apresentação OR banca OR repositório OR "caderno de resumos" OR anais OR entrega) filetype:pdf',
         "listas_turmas": '("lista de alunos" OR "alunos matriculados" OR "turma de Nutrição" OR "turma" OR "lista de aprovados") (matrícula OR matriculados OR turma OR estudantes OR discentes)',
         "vida_academica": '("centro acadêmico" OR "liga acadêmica" OR monitoria OR extensão OR "grupo de estudos" OR "grupo de alunos" OR "grupo de estudantes" OR "grupo de WhatsApp" OR "grupo WhatsApp" OR jornada OR seminário OR ("mostra" "autores"))',
-        "instagram_publico": 'site:instagram.com/p/ ("Nutrição" OR nutricionista) (turma OR formanda OR formatura OR TCC OR formandos)',
         "fase_final": '("recém-formados" OR "último período" OR "estágio final") Nutrição',
     }
     chave = normalizar(instituicao)
@@ -843,7 +843,12 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
     for familia in ordem_padrao:
         for ano in (2025, 2026):
             for termo in termos:
-                consultas.append(f'{termo} Nutrição {ano} {familias[familia]}')
+                if familia == "instagram_publico":
+                    # Descoberta ampla como a busca manual do usuário; a extração
+                    # continua exigindo pessoa, Nutrição e evidência pública de 2025/26.
+                    consultas.append(f'{familias[familia]} {ano}')
+                else:
+                    consultas.append(f'{termo} Nutrição {ano} {familias[familia]}')
     consultas += [f'"{nome_faculdade}" Nutrição {ano} TCC repositório' for ano in (2025, 2026)]
     nome_estado = dict(ESTADOS).get((uf or "").upper())
     if nome_estado:
