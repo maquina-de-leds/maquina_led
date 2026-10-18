@@ -2,17 +2,12 @@ name: Automacao Maquina de Leads
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['*.py', 'requirements.txt', '.github/workflows/automacao.yml']
-  schedule:
-    - cron: '*/5 * * * *'
 permissions:
   contents: read
 
 concurrency:
   group: maquina-1-fila
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   executar:
