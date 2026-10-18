@@ -49,12 +49,22 @@ class Machine3Tests(unittest.TestCase):
 
     def test_falls_back_if_google_is_unavailable(self):
         fallback = [{"href": "https://example.edu/"}]
-        with patch.object(m, "ddgs_texto", side_effect=RuntimeError("Google unavailable")) as google, \
-             patch.object(m, "buscar_web", return_value=fallback) as alternate:
+        with patch.object(m, "ddgs_texto", side_effect=[
+            RuntimeError("Google unavailable"),
+            RuntimeError("Google unavailable"),
+            fallback,
+        ]) as google, patch.object(m, "buscar_web") as alternate:
             results = m.buscar_google("Nutrição formandos 2025")
         self.assertEqual(results, fallback)
-        self.assertEqual(google.call_count, 2)
-        alternate.assert_called_once_with("Nutrição formandos 2025", max_results=m.MAX_RESULTADOS_BUSCA)
+        self.assertEqual([call.kwargs["backend"] for call in google.call_args_list], ["google", "google", "bing"])
+        alternate.assert_not_called()
+
+    def test_no_results_from_google_goes_to_bing_without_repeating_google(self):
+        fallback = [{"href": "https://example.edu/"}]
+        with patch.object(m, "ddgs_texto", side_effect=[RuntimeError("No results found."), fallback]) as search:
+            results = m.buscar_google("Nutrição formandos 2025")
+        self.assertEqual(results, fallback)
+        self.assertEqual([call.kwargs["backend"] for call in search.call_args_list], ["google", "bing"])
 
     def test_state_sequence_starts_sc_sp_pr_then_covers_all_states(self):
         self.assertEqual(m.ORDEM_ESTADOS_M3[:3], ["SC", "SP", "PR"])

@@ -360,21 +360,31 @@ def enriquecer_com_instagram(registros, item, buscas_feitas=0, cache=None):
 
 
 def buscar_google(consulta, max_results=MAX_RESULTADOS_BUSCA):
-    """Tenta Google primeiro e usa buscador alternativo apenas se o Google falhar."""
-    falhou = False
+    """Busca no Google e consulta o Bing uma vez quando o Google falha ou não acha."""
     for tentativa in range(2):
         try:
             resultados = list(ddgs_texto(consulta, backend="google", max_results=max_results) or [])
             print(f"      GOOGLE: resultados: {len(resultados)}", flush=True)
-            return resultados
+            if resultados:
+                return resultados
+            break
         except Exception as exc:
-            falhou = True
+            if normalizar(str(exc)).strip(" .") == "no results found":
+                print("      GOOGLE: sem resultados", flush=True)
+                break
             detalhe = limpar_espacos(str(exc))[:180]
             print(f"      GOOGLE: erro {type(exc).__name__}: {detalhe} | tentativa {tentativa + 1}/2", flush=True)
-    if falhou:
-        print("      GOOGLE indisponível; usando busca alternativa para esta consulta.", flush=True)
-        return buscar_web(consulta, max_results=max_results)
-    return None
+    print("      GOOGLE sem resposta útil; consultando Bing uma vez.", flush=True)
+    try:
+        resultados = list(ddgs_texto(consulta, backend="bing", max_results=max_results) or [])
+        print(f"      BING: resultados: {len(resultados)}", flush=True)
+        return resultados
+    except Exception as exc:
+        if normalizar(str(exc)).strip(" .") == "no results found":
+            print("      BING: sem resultados", flush=True)
+            return []
+        print(f"      BING: erro {type(exc).__name__}: {limpar_espacos(str(exc))[:180]}", flush=True)
+        return None
 
 
 def etapa_item(item):
