@@ -46,5 +46,21 @@ class ResultadoCicloTests(unittest.TestCase):
             with patch('builtins.print') as imprimir: s.executar()
             self.assertTrue(any('CICLO FINALIZADO COM PENDÊNCIAS' in str(c) for c in imprimir.call_args_list))
 
+
+class PilotoUFBASelectionTests(unittest.TestCase):
+    def test_piloto_restringe_a_instituicao_validada_de_nutricao(self):
+        fila = [
+            {"instituicao": "Universidade Federal da Bahia", "curso": "Nutrição", "validada": True, "id": 330},
+            {"instituicao": "Universidade Salvador", "curso": "Nutrição", "validada": True, "id": 336},
+            {"instituicao": "Universidade Federal da Bahia", "curso": "Medicina", "validada": True, "id": 337},
+            {"instituicao": "Universidade Federal da Bahia", "curso": "Nutrição", "validada": False, "id": 338},
+        ]
+        resultado = s.filtrar_fila_piloto_ufba(fila)
+        self.assertEqual([item["id"] for item in resultado], [330])
+
+    def test_piloto_nao_aceita_outra_faculdade(self):
+        with self.assertRaises(ValueError):
+            s.filtrar_fila_piloto_ufba([], "Universidade Salvador")
+
 if __name__=='__main__': unittest.main()
 
