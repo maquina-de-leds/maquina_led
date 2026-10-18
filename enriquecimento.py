@@ -32,7 +32,9 @@ def conectar_banco():
 
 LIMITE_CANDIDATOS_POR_EXECUCAO = 50
 LIMITE_LEADS_POR_EXECUCAO = 50
-INTERVALO_REBUSCA_DIAS = 14
+# Sem espera de dias entre execuções: o cursor mantém a ordem da fila.
+# Pausas de rede, deduplicação e limites por execução continuam ativos.
+INTERVALO_REBUSCA_DIAS = 0
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
