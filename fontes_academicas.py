@@ -126,6 +126,29 @@ def periodo_academico(text):
     return None, None
 
 
+def nome_e_marca_institucional(nome, instituicao, alias=None):
+    """Rejects institutional initials followed by a location/name token, not people."""
+    candidato = norm(nome)
+    if not candidato:
+        return False
+    alvos = [norm(x) for x in (instituicao, alias) if x]
+    if candidato in alvos:
+        return True
+    stop = {"de", "da", "do", "das", "dos", "e", "em"}
+    for alvo in alvos:
+        palavras = re.findall(r"[a-z0-9]+", alvo)
+        significativas = [p for p in palavras if p not in stop]
+        sigla = "".join(p[0] for p in palavras if p not in stop)
+        nome_palavras = re.findall(r"[a-z0-9]+", candidato)
+        # A sigla só é conclusiva quando o título também repete uma palavra
+        # distintiva da instituição (ex.: FIB + Bauru).
+        if (len(sigla) >= 3 and len(nome_palavras) >= 2
+                and nome_palavras[0] == sigla
+                and any(p in nome_palavras[1:] for p in significativas)):
+            return True
+    return False
+
+
 def pessoa(text):
     text = re.sub(r'^\s*(?:\d+[.)\-–]?\s*|e\s+)', '', text).strip(' |:;,.–-')
     if ',' in text:
@@ -437,7 +460,8 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if not nome:
         m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
         nome=pessoa(m.group(1)) if m else None
-    if not nome or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n): return []
+    if (not nome or nome_e_marca_institucional(nome, instituicao, alias)
+            or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n)): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
     return [dict(nome=nome,ano=ano,periodo=periodo,instagram=instagram,instituicao=instituicao if vinculada else None,
                  evidencia=(instituicao if vinculada else 'Faculdade não informada')+' | Nutrição | Evidência no resultado de busca: '+texto+' | Conclusão pendente de confirmação',

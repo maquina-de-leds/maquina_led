@@ -49,6 +49,26 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
                 self.assertIsNone(fontes_academicas.pessoa(entity))
         self.assertTrue(fontes_academicas.pessoa("Ana Souza"))
 
+    def test_institution_acronym_and_city_are_not_a_person_name(self):
+        result = {
+            "title": "Fib Bauru • Instagram",
+            "body": "Estudante de Nutrição, formanda 2026 das Faculdades Integradas de Bauru",
+            "href": "https://www.instagram.com/fibbauru/",
+        }
+        self.assertEqual(
+            fontes_academicas.extrair_resultado_busca(
+                result, "Faculdades Integradas de Bauru"
+            ),
+            [],
+        )
+        self.assertEqual(
+            fontes_academicas.extrair_resultado_busca(
+                {**result, "title": "Ana Souza • Instagram"},
+                "Faculdades Integradas de Bauru",
+            )[0]["nome"],
+            "Ana Souza",
+        )
+
     def test_public_instagram_result_keeps_handle_only_with_qualification_evidence(self):
         result = {
             "title": "Joana da Silva (@joana.nutri) • Instagram",
