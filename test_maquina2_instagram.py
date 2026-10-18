@@ -60,6 +60,20 @@ class Maquina2InstagramTests(unittest.TestCase):
         }
         self.assertFalse(m2.resultado_compativel(resultado))
 
+    def test_aceita_perfil_publico_com_nome_do_lead_mesmo_sem_keyword_nutri(self):
+        resultado = {
+            "title": "Ana Souza (@ana.souza)",
+            "href": "https://www.instagram.com/ana.souza/",
+        }
+        self.assertTrue(m2.resultado_compativel(resultado, {"nome": "Ana Souza"}))
+
+    def test_aceita_handle_publico_com_sinal_de_nutricao(self):
+        resultado = {
+            "title": "Perfil profissional",
+            "href": "https://www.instagram.com/marina.nutri/",
+        }
+        self.assertTrue(m2.resultado_compativel(resultado))
+
     def test_retorna_varios_perfis_distintos_da_mesma_busca(self):
         resultados = [
             {
@@ -115,7 +129,22 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertEqual(m2.stats["instagram_encontrado"], 2)
 
 
-    def test_maquina2_nao_contem_atualizacao_na_tabela_de_leads(self):
+    def test_filtro_m2_rebusca_apenas_nunca_verificados_ou_antigos(self):
+        from datetime import datetime, timezone
+        class Consulta:
+            def __init__(self):
+                self.expressao = None
+            def or_(self, expressao):
+                self.expressao = expressao
+                return self
+
+        consulta = Consulta()
+        instante = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+        m2.filtrar_pendentes_rebusca(consulta, agora=instante)
+        self.assertIn("maquina2_verificado_em.is.null", consulta.expressao)
+        self.assertIn("maquina2_verificado_em.lt.2026-10-04", consulta.expressao)
+
+    def test_atualiza_somente_metadados_de_tentativa_da_maquina2(self):
         import ast
         from pathlib import Path
         tree = ast.parse(Path(m2.__file__).read_text())
@@ -125,8 +154,10 @@ class Maquina2InstagramTests(unittest.TestCase):
                 continue
             chamada = ast.unparse(node.func.value)
             if '.table("leds")' in chamada or ".table('leds')" in chamada:
-                atualizacoes_leds.append(node.lineno)
-        self.assertEqual(atualizacoes_leds, [])
+                atualizacoes_leds.append(node)
+        self.assertEqual(len(atualizacoes_leds), 1)
+        campos = {chave.value for chave in atualizacoes_leds[0].args[0].keys}
+        self.assertEqual(campos, {"maquina2_tentativas", "maquina2_verificado_em"})
 
 if __name__ == "__main__":
     unittest.main()
