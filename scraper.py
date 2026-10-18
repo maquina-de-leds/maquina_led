@@ -1204,7 +1204,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                     print("      PERFIL SOCIAL NÃO SALVO:",str(exc)[:180],flush=True)
                 continue
             if host_institucional or not texto.strip() or (contexto_academico and ('nutricao' in texto or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos))):
-                resultados_relacionados.append(resultado)            else:
+                resultados_relacionados.append(resultado)
+            else:
                 print("      RESULTADO SEM CONTEXTO ACADÊMICO RELEVANTE:",resultado.get("href") or resultado.get("url"),flush=True)
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
         for posicao,(url, depth) in enumerate(fila):
