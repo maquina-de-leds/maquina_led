@@ -28,6 +28,16 @@ INEP_FONTES = [
     (2024, "https://download.inep.gov.br/microdados/microdados_censo_da_educacao_superior_2024.zip"),
 ]
 
+
+def filtrar_instituicoes_lista_confirmada(consulta):
+    """Restringe as buscas à lista validada com fonte institucional, sem a carga bruta do INEP."""
+    return (
+        consulta.eq("curso", "Nutrição")
+        .eq("validada", True)
+        .neq("fonte_url", INEP_FONTES[0][1])
+    )
+
+
 ESTADOS = [
     ("AC", "Acre"), ("AL", "Alagoas"), ("AP", "Amapá"), ("AM", "Amazonas"),
     ("BA", "Bahia"), ("CE", "Ceará"), ("DF", "Distrito Federal"),
@@ -214,14 +224,8 @@ class SupabaseRepo:
             print(f"⚠️ Não foi possível limpar resíduos V4; eles serão ignorados: {exc}", flush=True)
 
     def fila_estado(self, uf):
-        r = (
-            self.client.table("instituicoes_nutricao")
-            .select("*")
-            .eq("origem", ORIGEM_IES)
-            .eq("estado", uf)
-            .in_("status", ["pendente", "processando", "erro"])
-            .execute()
-        )
+        consulta = self.client.table("instituicoes_nutricao").select("*")
+        r = filtrar_instituicoes_lista_confirmada(consulta).eq("estado", uf).execute()
         dados = r.data or []
         ordem = {"pendente": 0, "processando": 1, "erro": 2}
         return sorted(dados, key=lambda x: (ordem.get(x.get("status"), 9), normalizar(x.get("instituicao"))))
@@ -231,9 +235,8 @@ class SupabaseRepo:
         dados = []
         offset = 0
         while True:
-            r = (self.client.table("instituicoes_nutricao").select("*")
-                 .eq("origem", ORIGEM_IES).order("id")
-                 .range(offset, offset + 999).execute())
+            consulta = self.client.table("instituicoes_nutricao").select("*").order("id")
+            r = filtrar_instituicoes_lista_confirmada(consulta).range(offset, offset + 999).execute()
             lote = r.data or []
             dados.extend(lote)
             if len(lote) < 1000:
@@ -282,9 +285,9 @@ class SupabaseRepo:
         return not vinculo
 
     def contar_pendentes_uf(self, uf):
-        r=(self.client.table("instituicoes_nutricao").select("id",count="exact")
-           .eq("origem",ORIGEM_IES).eq("estado",uf)
-           .in_("status",["pendente","processando","erro"]).execute())
+        consulta = self.client.table("instituicoes_nutricao").select("id", count="exact")
+        consulta = filtrar_instituicoes_lista_confirmada(consulta).eq("estado", uf)
+        r = consulta.in_("status", ["pendente", "processando", "erro", "validado"]).execute()
         return r.count or 0
 
     def atualizar_instituicao(self, iid, **dados):
