@@ -2,6 +2,11 @@ name: Automacao Maquina de Leads
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['*.py', 'requirements.txt', '.github/workflows/automacao.yml']
+  schedule:
+    - cron: '*/20 * * * *'
 permissions:
   contents: read
 
@@ -12,7 +17,7 @@ concurrency:
 jobs:
   executar:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 18
     steps:
       - name: Baixar codigo
         uses: actions/checkout@v4
@@ -29,4 +34,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          M1_INSTITUICAO_PILOTO: Universidade Federal da Bahia
         run: python -u scraper.py
