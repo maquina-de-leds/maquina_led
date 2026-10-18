@@ -423,3 +423,18 @@ class ListaInstituicoesTests(unittest.TestCase):
         self.assertIn(("neq", "fonte_url", s.INEP_FONTES[0][1]), consulta.filtros)
 
 
+
+class FonteErroPermanenteTests(unittest.TestCase):
+    def test_ignora_links_sem_recuperacao_previsivel(self):
+        for erro in (
+            "403 Client Error: Forbidden",
+            "404 Client Error: Not Found",
+            "Fonte acima de 8 MB",
+            "PDF acima de 40 páginas; leitura integral pendente",
+            "Formato não suportado; leitura não concluída",
+        ):
+            with self.subTest(erro=erro):
+                self.assertTrue(s.fonte_erro_permanente(erro))
+
+    def test_preserva_retry_para_erro_transitorio(self):
+        self.assertFalse(s.fonte_erro_permanente("Read timed out"))
