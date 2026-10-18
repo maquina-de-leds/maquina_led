@@ -891,6 +891,10 @@ def registrar_nome_unico(nomes_consulta, nome, tem_instagram=False):
 
 def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False):
     from fontes_academicas import pessoa, fase_final_comprovada
+    # Páginas de vagas não são evidência de alunos ou formandos.
+    if re.search(r"https?://(?:[^/]+\.)?linkedin\.com/jobs(?:[/?#]|$)", str(url or ""), re.I):
+        stats["rejeitados"] += 1
+        return False
     if not pessoa(nome):
         stats["rejeitados"] += 1
         return False
