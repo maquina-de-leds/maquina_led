@@ -36,7 +36,7 @@ class Machine3Tests(unittest.TestCase):
         self.assertTrue(all("Nutrição" in q for q in queries))
         self.assertTrue(any("2025" in q for q in queries))
         self.assertTrue(any("2026" in q for q in queries))
-        self.assertFalse(any("site:instagram.com" in q for q in queries))
+        self.assertTrue(any("site:instagram.com" in q for q in queries))
         self.assertTrue(any("TCC" in q for q in queries))
         self.assertTrue(any("último semestre" in q for q in queries))
         self.assertTrue(any("site:instagram.com" in q and "formatura" in q for q in queries))
