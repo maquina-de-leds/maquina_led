@@ -50,6 +50,8 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         self.assertTrue(fontes_academicas.pessoa("Ana Souza"))
         self.assertIsNone(fontes_academicas.pessoa("Nova Área do Aluno"))
         self.assertIsNone(fontes_academicas.pessoa("Portal do Aluno"))
+        self.assertIsNone(fontes_academicas.pessoa("Unicep São Carlos"))
+        self.assertIsNone(fontes_academicas.pessoa("UNIP Campinas"))
 
     def test_institution_acronym_and_city_are_not_a_person_name(self):
         result = {
