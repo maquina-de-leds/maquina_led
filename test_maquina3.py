@@ -39,6 +39,7 @@ class Machine3Tests(unittest.TestCase):
         self.assertFalse(any("site:instagram.com" in q for q in queries))
         self.assertTrue(any("TCC" in q for q in queries))
         self.assertTrue(any("último semestre" in q for q in queries))
+        self.assertTrue(any("site:instagram.com" in q and "formatura" in q for q in queries))
 
     def test_uses_google_search_backend(self):
         with patch.object(m, "ddgs_texto", return_value=[{"href": "https://example.edu/"}]) as search:
