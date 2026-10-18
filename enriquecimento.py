@@ -534,13 +534,21 @@ def instagram_ja_usado(
 # ============================================================
 def salvar_candidato(lead, candidato):
     handle = normalizar_instagram(candidato.get("instagram"))
+    # Identidade coincidente não comprova profissão. Revalidar na gravação
+    # protege também chamadas que não passaram por buscar_instagram.
+    if not resultado_compativel({
+        "title": candidato.get("nome_perfil"),
+        "body": candidato.get("evidencia_nutricao"),
+        "href": candidato.get("fonte_url"),
+    }):
+        return False
     if not handle or instagram_ja_usado(handle, lead["id"]):
         return False
     perfil = str(candidato.get("nome_perfil") or handle).strip()[:200]
     consulta = str(candidato.get("consulta") or "")[:500]
     fonte_url = str(candidato.get("fonte_url") or "")[:1000]
     resposta = supabase.table("instagram_candidatos").insert({
-        "lead_origem_id": lead["id"],
+        "lead_origem_id": None,
         "nome_pesquisado": lead.get("nome"),
         "nome_perfil": perfil,
         "instagram": handle,
@@ -550,7 +558,8 @@ def salvar_candidato(lead, candidato):
         "status": "novo",
         "observacao": (
             f"Perfil ligado à Nutrição encontrado ao pesquisar "
-            f"'{lead.get('nome')}'. Não confirmado como a mesma pessoa."
+            f"'{lead.get('nome')}'. Não confirmado como a mesma pessoa. "
+            f"Evidência pública: {candidato.get('evidencia_nutricao') or perfil}"
         )
     }).execute()
     return bool(resposta.data)
@@ -582,7 +591,7 @@ def montar_consultas_instagram(lead):
     )
 
     consultas = [
-        f'"{nome}" Instagram',
+        f'"{nome}" Nutrição @ Instagram',
         f'"{nome}" Nutrição Instagram',
         f'"{nome}" nutricionista Instagram',
         f'"{nome}" site:instagram.com',
@@ -614,9 +623,12 @@ def montar_consultas_instagram(lead):
 # ============================================================
 
 def resultado_compativel(resultado, lead=None):
-    """Aceita perfil com sinal de Nutrição, nome correspondente ou @ nutricional."""
-    texto_original = str(resultado.get("title") or "") + " " + str(resultado.get("body") or "")
-    texto = normalizar(texto_original)
+    """Exige sinal temático do próprio perfil; nome sozinho nunca qualifica."""
+    titulo = titulo_do_perfil(resultado.get("title"))
+    texto = normalizar(titulo)
+    if (re.search(r"\b(?:congresso|ganepao|liga academica|centro academico|escavador)\b", texto)
+            or re.match(r"(?:universidade|faculdade|instituto|hospital|loja|empresa)\b", texto)):
+        return False
     if re.search(r"\b(?:nutricao|nutricionista|nutricional|nutritivo|nutritiva|crn)\b", texto):
         return True
 
@@ -624,35 +636,31 @@ def resultado_compativel(resultado, lead=None):
     handle = extrair_instagram_url(url)
     if handle and re.search(r"(?:nutri|nutricion|crn)", handle, flags=re.I):
         return True
-    if lead and handle:
-        nome = normalizar(str(lead.get("nome") or ""))
-        alvo = [parte for parte in nome.split() if len(parte) >= 3]
-        perfil = normalizar(texto_original + " " + handle.lstrip("@").replace(".", " ").replace("_", " "))
-        if len(alvo) >= 2 and all(parte in perfil for parte in alvo):
-            return True
+    # Snippets agregados podem mencionar outro nutricionista. Só aceitar
+    # descrição temática quando não houver títulos/handles de outros perfis.
+    body = str(resultado.get("body") or "")
+    if not re.search(r"instagram|@[\w.]", body, flags=re.I):
+        return bool(re.search(r"\b(?:nutricao|nutricionista|nutricional|crn)\b", normalizar(body)))
     return False
+
+
+def titulo_do_perfil(titulo):
+    """Descarta resultados concatenados após o título do primeiro perfil."""
+    titulo = " ".join(str(titulo or "").split()).strip()
+    return re.split(r"(?:[•|\-]\s*Instagram|\bon Instagram)\b", titulo, maxsplit=1, flags=re.I)[0].strip()
 
 
 def _perfil_do_resultado(resultado):
     url = str(resultado.get("href") or resultado.get("url") or "")
     handle = extrair_instagram_url(url)
     if not handle:
-        texto = str(resultado.get("title") or "") + " " + str(resultado.get("body") or "")
-        for usuario in re.findall(
-            r"(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9._]+)",
-            texto,
-            flags=re.I
-        ):
-            handle = extrair_instagram_url(f"https://www.instagram.com/{usuario}/")
-            if handle:
-                break
-    if not handle:
         return None
-    titulo = " ".join(str(resultado.get("title") or "").split()).strip()
+    titulo = titulo_do_perfil(resultado.get("title"))
     return {
         "instagram": normalizar_instagram(handle),
         "nome_perfil": titulo or handle,
         "fonte_url": url,
+        "evidencia_nutricao": str(resultado.get("body") or "")[:1000],
     }
 
 
@@ -978,20 +986,42 @@ def salvar_ciclo_m2(estado):
 def contar_novos_arrobas_ciclo(estado):
     # A base anterior ao início do ciclo nunca entra na meta.
     offset, handles = 0, set()
+    anteriores = handles_anteriores_ciclo(int(estado.get("indice_pesquisa") or 0))
     ultimo = int(estado.get("indice_pesquisa") or 0)
     while True:
-        pagina = (supabase.table("instagram_candidatos").select("id,instagram")
+        pagina = (supabase.table("instagram_candidatos").select("id,instagram,nome_perfil,instagram_url")
                   .gt("id", int(estado.get("indice_pesquisa") or 0))
                   .order("id").range(offset, offset + 999).execute()).data or []
         for candidato in pagina:
             ultimo = max(ultimo, int(candidato["id"]))
             handle = normalizar_instagram(candidato.get("instagram"))
-            if handle:
+            if handle and handle not in anteriores and resultado_compativel({
+                "title": candidato.get("nome_perfil"),
+                "href": candidato.get("instagram_url") or f"https://www.instagram.com/{handle.lstrip('@')}/",
+            }):
                 handles.add(handle)
         if len(pagina) < 1000:
             break
         offset += 1000
     return len(handles), ultimo
+
+
+def handles_anteriores_ciclo(marco):
+    """Não reconta @ antigos mesmo se outra origem os inserir sem arroba."""
+    handles = set()
+    for tabela in ("instagram_candidatos", "leds"):
+        offset = 0
+        while True:
+            consulta = supabase.table(tabela).select("id,instagram").order("id")
+            if tabela == "instagram_candidatos":
+                consulta = consulta.lte("id", marco)
+            pagina = consulta.range(offset, offset + 999).execute().data or []
+            handles.update(normalizar_instagram(row.get("instagram")) for row in pagina)
+            if len(pagina) < 1000:
+                break
+            offset += 1000
+    handles.discard(None)
+    return handles
 
 
 def registrar_progresso_ciclo(estado, quantidade, ultimo_id, agora=None):

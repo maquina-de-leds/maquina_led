@@ -60,12 +60,53 @@ class Maquina2InstagramTests(unittest.TestCase):
         }
         self.assertFalse(m2.resultado_compativel(resultado))
 
-    def test_aceita_perfil_publico_com_nome_do_lead_mesmo_sem_keyword_nutri(self):
+    def test_nome_do_lead_sem_evidencia_tematica_nao_qualifica(self):
         resultado = {
             "title": "Ana Souza (@ana.souza)",
             "href": "https://www.instagram.com/ana.souza/",
         }
-        self.assertTrue(m2.resultado_compativel(resultado, {"nome": "Ana Souza"}))
+        self.assertFalse(m2.resultado_compativel(resultado, {"nome": "Ana Souza"}))
+
+    def test_rejeita_congresso_mesmo_com_nutricao_no_titulo(self):
+        self.assertFalse(m2.resultado_compativel({
+            "title": "Ganepão • maior congresso de nutrição da América Latina",
+            "href": "https://www.instagram.com/ganepao/",
+        }))
+
+    def test_nao_transfere_tema_de_outro_perfil_concatenado(self):
+        self.assertFalse(m2.resultado_compativel({
+            "title": "Ana Souza (@anasouza) • Instagram photos and videosBia | Nutrição - Instagram",
+            "body": "Ana Souza Instagram. Nutricionista Bia (@bia.nutri)",
+            "href": "https://www.instagram.com/anasouza/",
+        }))
+
+    def test_nao_extrai_handle_solto_de_pagina_de_terceiro(self):
+        self.assertIsNone(m2._perfil_do_resultado({
+            "title": "Nutricionistas famosos", "body": "instagram.com/ana.nutri/",
+            "href": "https://exemplo.com/lista",
+        }))
+
+    def test_candidato_independente_sem_vinculo_de_identidade(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        cliente = MagicMock()
+        cliente.table.return_value.insert.return_value.execute.return_value = SimpleNamespace(data=[{"id": 123}])
+        with patch.object(m2, "supabase", cliente), patch.object(m2, "instagram_ja_usado", return_value=False):
+            self.assertTrue(m2.salvar_candidato({"id": 7, "nome": "Ana Souza"}, {
+                "instagram": "@bia.nutri", "nome_perfil": "Bia Santos | Nutrição",
+                "fonte_url": "https://www.instagram.com/bia.nutri/",
+            }))
+        self.assertIsNone(cliente.table.return_value.insert.call_args.args[0]["lead_origem_id"])
+
+    def test_gravacao_rejeita_candidato_sem_evidencia(self):
+        from unittest.mock import MagicMock
+        cliente = MagicMock()
+        with patch.object(m2, "supabase", cliente):
+            self.assertFalse(m2.salvar_candidato({"id": 7, "nome": "Ana Souza"}, {
+                "instagram": "@ana.souza", "nome_perfil": "Ana Souza",
+                "fonte_url": "https://www.instagram.com/ana.souza/",
+            }))
+        cliente.table.assert_not_called()
 
     def test_aceita_handle_publico_com_sinal_de_nutricao(self):
         resultado = {
@@ -212,9 +253,22 @@ class CiclosMaquina2Tests(unittest.TestCase):
                 assert nome == "instagram_candidatos"
                 return self.consulta
         cliente = Cliente()
-        with patch.object(m2, "supabase", cliente):
+        with patch.object(m2, "supabase", cliente), patch.object(m2, "handles_anteriores_ciclo", return_value=set()):
             self.assertEqual(m2.contar_novos_arrobas_ciclo(self.estado()), (2, 103))
         self.assertEqual(cliente.consulta.base, 100)
+
+    def test_contagem_exclui_antigos_e_instituicoes_sem_mudar_marco(self):
+        from unittest.mock import MagicMock
+        cliente = MagicMock()
+        cliente.table.return_value.select.return_value.gt.return_value.order.return_value.range.return_value.execute.return_value.data = [
+            {"id": 101, "instagram": "ana.nutri", "nome_perfil": "Ana Nutricionista"},
+            {"id": 102, "instagram": "@ganepao", "nome_perfil": "Ganepão | Congresso de Nutrição"},
+            {"id": 103, "instagram": "@bia.nutri", "nome_perfil": "Bia Nutricionista"},
+        ]
+        estado = self.estado()
+        with patch.object(m2, "supabase", cliente), patch.object(m2, "handles_anteriores_ciclo", return_value={"@ana.nutri"}):
+            self.assertEqual(m2.contar_novos_arrobas_ciclo(estado), (1, 103))
+        self.assertEqual(estado["indice_pesquisa"], 100)
 
     def test_continua_varios_lotes_ate_50_sem_pausar_antes(self):
         estado = self.estado()
