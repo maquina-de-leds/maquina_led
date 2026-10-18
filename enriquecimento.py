@@ -676,10 +676,15 @@ def buscar_instagram(ddgs, lead, limite=None):
     for consulta in montar_consultas_instagram(lead):
         print(f"      🔎 {consulta}", flush=True)
         try:
-            resultados = list(ddgs.text(
-                consulta + " -site:linkedin.com",
-                max_results=MAX_RESULTADOS
-            ))
+            from scraper import buscar_web
+            resultados = buscar_web(
+                consulta + " -site:linkedin.com", max_results=MAX_RESULTADOS,
+                fetch_fn=lambda q, backend, limite: list(ddgs.text(
+                    q, backend=backend, max_results=limite
+                )),
+            )
+            if resultados is None:
+                raise RuntimeError("Google/Bing indisponíveis; consulta não concluída")
         except Exception as erro:
             stats["erros"] += 1
             print(f"      ⚠️ Busca indisponível: {erro}", flush=True)

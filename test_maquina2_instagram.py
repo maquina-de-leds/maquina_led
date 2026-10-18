@@ -8,7 +8,7 @@ class BuscaFake:
     def __init__(self, resultados):
         self.resultados = resultados
 
-    def text(self, consulta, max_results=10):
+    def text(self, consulta, max_results=10, backend=None):
         return self.resultados
 
 
@@ -202,6 +202,35 @@ class Maquina2InstagramTests(unittest.TestCase):
                 gravacoes_controle.append(node)
         self.assertEqual(len(atualizacoes_leds), 0)
         self.assertGreaterEqual(len(gravacoes_controle), 2)
+
+
+
+    def test_busca_usa_bing_quando_google_falha_sem_usar_auto(self):
+        chamadas = []
+        class Busca:
+            def text(self, consulta, max_results=10, backend=None):
+                chamadas.append(backend)
+                if backend == "google":
+                    raise ConnectionError("TLS indisponível")
+                return [{"title": "Bia Nutricionista",
+                         "href": "https://www.instagram.com/bia.nutri/"}]
+        with patch.object(m2, "montar_consultas_instagram", return_value=["Nutrição"]), \
+             patch.object(m2, "instagram_ja_usado", return_value=False), \
+             patch.object(m2, "pausa"), patch("scraper.time.sleep"):
+            encontrados = m2.buscar_instagram(Busca(), {"id": 7}, limite=1)
+        self.assertEqual(chamadas, ["google", "bing"])
+        self.assertEqual(encontrados[0]["instagram"], "@bia.nutri")
+        self.assertEqual(m2.stats["erros"], 0)
+
+    def test_falha_dos_dois_buscadores_nao_vira_sucesso_vazio(self):
+        class Busca:
+            def text(self, *args, **kwargs):
+                raise ConnectionError("offline")
+        with patch.object(m2, "montar_consultas_instagram", return_value=["Nutrição"]), \
+             patch.object(m2, "pausa"), patch("scraper.time.sleep"):
+            encontrados = m2.buscar_instagram(Busca(), {"id": 7})
+        self.assertEqual(encontrados, [])
+        self.assertEqual(m2.stats["erros"], 1)
 
 
 class CiclosMaquina2Tests(unittest.TestCase):
