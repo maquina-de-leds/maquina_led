@@ -162,5 +162,102 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertEqual(len(atualizacoes_leds), 0)
         self.assertGreaterEqual(len(gravacoes_controle), 2)
 
+
+class CiclosMaquina2Tests(unittest.TestCase):
+    def estado(self):
+        return {"id": 9, "status": "processando", "indice_pesquisa": 100,
+                "tentativas": 0, "leads_encontrados": 0, "leads_salvos": 0}
+
+    def test_parcial_nao_pausa_nem_perde_marco(self):
+        estado = self.estado()
+        m2.registrar_progresso_ciclo(estado, 49, 149)
+        self.assertEqual(estado["status"], "processando")
+        self.assertEqual(estado["indice_pesquisa"], 100)
+        self.assertEqual(estado["leads_salvos"], 49)
+        self.assertEqual(estado["tentativas"], 0)
+
+    def test_50_salvos_abrem_pausa_persistente_de_300_segundos(self):
+        from datetime import datetime, timezone, timedelta
+        agora = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+        estado = self.estado()
+        m2.registrar_progresso_ciclo(estado, 50, 170, agora=agora)
+        self.assertEqual(estado["status"], "pausa")
+        self.assertEqual(estado["indice_pesquisa"], 170)
+        self.assertEqual(estado["tentativas"], 1)
+        self.assertEqual(estado["leads_encontrados"], 50)
+        self.assertEqual(m2.segundos_pausa_ciclo(estado, agora=agora), 300)
+        self.assertEqual(m2.segundos_pausa_ciclo(estado, agora=agora+timedelta(seconds=100)), 200)
+        self.assertEqual(m2.segundos_pausa_ciclo(estado, agora=agora+timedelta(seconds=301)), 0)
+
+    def test_contagem_exclui_base_antiga_e_deduplica_caixa(self):
+        from types import SimpleNamespace
+        class Consulta:
+            def __init__(self):
+                self.base = None
+            def select(self, *args): return self
+            def gt(self, campo, valor):
+                self.base = valor
+                return self
+            def order(self, *args): return self
+            def range(self, inicio, fim): return self
+            def execute(self):
+                return SimpleNamespace(data=[
+                    {"id": 101, "instagram": "@Ana.Nutri"},
+                    {"id": 102, "instagram": "@ana.nutri"},
+                    {"id": 103, "instagram": "@Bia.Nutri"},
+                ])
+        class Cliente:
+            def __init__(self): self.consulta = Consulta()
+            def table(self, nome):
+                assert nome == "instagram_candidatos"
+                return self.consulta
+        cliente = Cliente()
+        with patch.object(m2, "supabase", cliente):
+            self.assertEqual(m2.contar_novos_arrobas_ciclo(self.estado()), (2, 103))
+        self.assertEqual(cliente.consulta.base, 100)
+
+    def test_continua_varios_lotes_ate_50_sem_pausar_antes(self):
+        estado = self.estado()
+        banco = {"novos": 0, "cursor": 0}
+        sementes = []
+        def lote(**kwargs):
+            sementes.append(m2.stats["instagram_encontrado"])
+            banco["novos"] = min(50, banco["novos"] + 20)
+            banco["cursor"] += 50
+            m2.stats["pendentes"] = 50
+        with patch.object(m2, "conectar_banco", return_value=object()), \
+             patch.object(m2, "carregar_ciclo_m2", return_value=estado), \
+             patch.object(m2, "salvar_ciclo_m2"), \
+             patch.object(m2, "contar_novos_arrobas_ciclo", side_effect=lambda e: (banco["novos"], 100+banco["novos"])), \
+             patch.object(m2, "obter_cursor_m2", side_effect=lambda: banco["cursor"]), \
+             patch.object(m2, "executar", side_effect=lote) as executar, \
+             patch.object(m2.time, "monotonic", return_value=0), \
+             patch.object(m2.time, "sleep") as dormir:
+            m2.executar_ciclos(duracao_maxima=60)
+        self.assertEqual(executar.call_count, 3)
+        self.assertEqual(sementes, [0, 20, 40])
+        self.assertEqual(estado["status"], "pausa")
+        self.assertEqual(estado["leads_salvos"], 50)
+        dormir.assert_not_called()  # Pausa fica persistida para o próximo runner.
+
+    def test_falha_preserva_gravacoes_parciais_e_sinaliza_erro(self):
+        estado = self.estado()
+        banco = {"novos": 0}
+        def falhar(**kwargs):
+            banco["novos"] = 12
+            raise RuntimeError("buscador indisponível")
+        with patch.object(m2, "conectar_banco", return_value=object()), \
+             patch.object(m2, "carregar_ciclo_m2", return_value=estado), \
+             patch.object(m2, "salvar_ciclo_m2"), \
+             patch.object(m2, "contar_novos_arrobas_ciclo", side_effect=lambda e: (banco["novos"], 100+banco["novos"])), \
+             patch.object(m2, "obter_cursor_m2", return_value=0), \
+             patch.object(m2, "executar", side_effect=falhar), \
+             patch.object(m2.time, "monotonic", return_value=0):
+            with self.assertRaisesRegex(RuntimeError, "buscador"):
+                m2.executar_ciclos(duracao_maxima=60)
+        self.assertEqual(estado["leads_salvos"], 12)
+        self.assertEqual(estado["indice_pesquisa"], 100)
+
+
 if __name__ == "__main__":
     unittest.main()
