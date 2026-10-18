@@ -390,7 +390,7 @@ def seguidores_instagram_do_texto(texto):
     sufixo=m.group(2)
     try:
         if sufixo:
-            valor=float(numero.replace('.','').replace(',','.')) * 1000
+            valor=float(numero.replace(',','.')) * 1000
         else:
             valor=int(re.sub(r'\D','',numero))
         return int(round(valor))
