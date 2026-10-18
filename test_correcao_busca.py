@@ -66,7 +66,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
         itens=s.agrupar_faculdades(dados)
         cps=[{'etapa':s.etapa_captacao_item(itens[0]),'status':'concluido'},
              {'etapa':s.etapa_captacao_item(itens[1]),'status':'erro'}]
-        client=Mock(); client.table.return_value.select.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=dados)
+        client=Mock(); client.table.return_value.select.return_value.eq.return_value.eq.return_value.neq.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=dados)
         client.table.return_value.select.return_value.order.return_value.range.return_value.execute.return_value=SimpleNamespace(data=cps)
         repo=s.SupabaseRepo(client)
         with patch.object(repo,'controle_get') as individual:
