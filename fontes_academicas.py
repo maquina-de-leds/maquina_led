@@ -380,13 +380,31 @@ def extrair_documento(linhas, instituicao, alias=None, texto_vinculo='', metas=N
     return list(unique.values())
 
 
+def seguidores_instagram_do_texto(texto):
+    """Lê contagem de seguidores somente de uma página/resultado do Instagram."""
+    n=norm(texto)
+    m=re.search(r'(?<![\w])([\d.,]+)\s*(mil|k)?\s*(?:seguidores|followers)\b',n)
+    if not m:
+        return None
+    numero=m.group(1).replace(' ','')
+    sufixo=m.group(2)
+    try:
+        if sufixo:
+            valor=float(numero.replace('.','').replace(',','.')) * 1000
+        else:
+            valor=int(re.sub(r'\D','',numero))
+        return int(round(valor))
+    except (TypeError, ValueError):
+        return None
+
+
 def extrair_resultado_busca(resultado, instituicao, alias=None):
     """Trecho público deve conter vínculo; nunca usa o ano digitado na consulta."""
     titulo=str(resultado.get('title') or '')
     trecho=str(resultado.get('body') or resultado.get('snippet') or '')
     texto=titulo+' | '+trecho
     n=norm(texto)
-    if 'nutricao' not in n:
+    if not re.search(r'\bnutricao\b|\bnutricionist[as]?\b', n):
         return []
     # Aprovação em vestibular/processo seletivo não confirma matrícula ou vínculo ativo.
     if (re.search(r'\b(?:aprovad[oa]s?|convocad[oa]s?|classificad[oa]s?)\b', n)
@@ -419,10 +437,22 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if perfil_fase:
         ano=None
         periodo=f'{fase.group(1)}º período/semestre (data e conclusão a validar)'
-    if ano not in ANOS and not fase: return []
+    url=str(resultado.get('href') or resultado.get('url') or '')
+    parsed_url_pre=urlparse(url)
+    host_pre=(parsed_url_pre.hostname or '').lower()
+    partes_pre=[parte for parte in parsed_url_pre.path.split('/') if parte]
+    instagram_em_url=((host_pre == 'instagram.com' or host_pre.endswith('.instagram.com'))
+                      and len(partes_pre)==1
+                      and re.fullmatch(r'[A-Za-z0-9._]{1,30}',partes_pre[0])
+                      and partes_pre[0].lower() not in {'p','reel','reels','tv','stories','explore','accounts','about','directory'})
+    instagram_em_linkedin=bool((host_pre == 'linkedin.com' or host_pre.endswith('.linkedin.com'))
+                               and re.search(r'^/in/',parsed_url_pre.path)
+                               and re.search(r'(?:https?://)?(?:www\.)?instagram\.com/[A-Za-z0-9._]{1,30}',texto,re.I))
+    perfil_social_indicio=bool(re.search(r'\b(?:nutricionist[as]?|estudantes? de nutricao|graduand[oa]s? em nutricao|graduad[oa]s? em nutricao|formad[oa]s? em nutricao)\b',n)
+                               and (instagram_em_url or instagram_em_linkedin))
+    if ano not in ANOS and not fase and not perfil_social_indicio: return []
     # Capa de TCC indexada: o próprio trecho identifica ano e nome do autor.
     # O endereço só identifica o tipo de documento, nunca fornece seu ano.
-    url=str(resultado.get('href') or resultado.get('url') or '')
     capa_tcc=bool(re.search(r'\.pdf(?:\?|$)',url,re.I) and re.search(r'tcc|trabalho.de.conclus',url,re.I))
     if capa_tcc and ano in ANOS and 'curso de nutricao' in n:
         autor=re.search(r'\b202[56]\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ]+(?:\s+(?:[A-ZÀ-Ý][A-Za-zÀ-ÿ]+|de|da|do|dos|das)){1,8})\s*$',trecho)
@@ -453,6 +483,13 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
         handle = perfil[0]
         if re.fullmatch(r'[A-Za-z0-9._]{1,30}', handle) and handle.lower() not in bloqueados:
             instagram = '@' + handle
+    # Usa o arroba explicitamente vinculado ao perfil pessoal do LinkedIn.
+    if (host == 'linkedin.com' or host.endswith('.linkedin.com')) and re.search(r'^/in/', parsed_url.path):
+        handles_linkedin = set(re.findall(r'(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9._]{1,30})', texto, re.I))
+        handles_linkedin = {h.rstrip('.').lower() for h in handles_linkedin if h.lower() not in bloqueados}
+        if len(handles_linkedin) == 1 and nome:
+            instagram = '@' + next(iter(handles_linkedin))
+    seguidores_instagram = seguidores_instagram_do_texto(texto) if (host == 'instagram.com' or host.endswith('.instagram.com')) else None
     aluno_citado=re.search(r'\b(?:alun[oa]|estudante)\s+d[oa]\s+[Cc]urso\s+de\s+Nutrição[^.!?]{0,160}?,\s*([A-ZÀ-Ý][^,.;]{2,80}),',trecho)
     if aluno_citado: nome=pessoa(aluno_citado.group(1))
     formada_citada=re.search(r'\b[Rr]ecém[- ]formad[oa]\s+em\s+Nutrição(?:\s+pel[ao]\s+[^,.;]{1,100})?,\s*([A-ZÀ-Ý][^,.;]{2,90}?)(?=,|\s+(?:foi|celebra|compartilha|conquistou)\b)',trecho)
@@ -460,6 +497,23 @@ def extrair_resultado_busca(resultado, instituicao, alias=None):
     if not nome:
         m=re.search(r'\b(?:alun[oa]|estudante|graduand[oa]|academic[oa])\s+([A-ZÀ-Ý][^,;|.]{2,90}?)\s+(?:d[oa] curso de|de|d[oa])\s+Nutrição',trecho)
         nome=pessoa(m.group(1)) if m else None
+    perfil_social_publico=bool(
+        nome and instagram
+        and re.search(r'\b(?:nutricionist[as]?|estudantes? de nutricao|graduand[oa]s? em nutricao|graduad[oa]s? em nutricao|formad[oa]s? em nutricao)\b', n)
+        and not nome_e_marca_institucional(nome, instituicao, alias)
+    )
+    if perfil_social_publico:
+        if seguidores_instagram is not None and seguidores_instagram > 3000:
+            return []
+        contagem='?' if seguidores_instagram is None else str(seguidores_instagram)
+        return [dict(nome=nome,ano=None,periodo='Perfil público; ano acadêmico não informado',
+                     instagram=instagram,instituicao=instituicao if vinculada else None,
+                     candidato_indicio=True,perfil_social_publico=True,
+                     seguidores_instagram=seguidores_instagram,
+                     evidencia=(instituicao if vinculada else 'Vínculo institucional não confirmado')
+                         +' | Nutrição | Perfil pessoal público associado ao Instagram | Seguidores Instagram: '+contagem
+                         +' | Evidência no resultado de busca: '+texto,
+                     contexto_academico=texto)]
     if (not nome or nome_e_marca_institucional(nome, instituicao, alias)
             or not re.search(r'estud|curs|graduand|formand|formad|academic|discente',n)): return []
     if not periodo: periodo=f'{fase.group(1)}º período/semestre (ano não informado)'
