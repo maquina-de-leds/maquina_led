@@ -788,7 +788,7 @@ def processar_lead(ddgs, lead):
 
 
 
-def executar():
+def executar(duracao_maxima=3000):
 
     global supabase
     from ddgs import DDGS
@@ -829,7 +829,7 @@ def executar():
 
     with DDGS() as ddgs:
 
-        prazo = time.monotonic() + 3000
+        prazo = time.monotonic() + duracao_maxima
         anterior = signal.getsignal(signal.SIGALRM)
         def esgotado(*args):
             raise JanelaEncerrada('Janela da Máquina 2 encerrada; lead preservado')
@@ -934,9 +934,137 @@ def executar():
     if stats['erros']:
         raise RuntimeError('Máquina 2 concluiu com falhas operacionais; consulte o resumo')
 
+
+ETAPA_CICLO_M2 = "m2_ciclos_50_arrobas_v1"
+PAUSA_ENTRE_CICLOS_SEGUNDOS = 300
+
+
+def carregar_ciclo_m2():
+    dados = (supabase.table("controle_busca").select("*")
+             .eq("etapa", ETAPA_CICLO_M2).limit(1).execute()).data or []
+    if dados:
+        return dados[0]
+    ultimos = (supabase.table("instagram_candidatos").select("id")
+               .order("id", desc=True).limit(1).execute()).data or []
+    estado = {
+        "estado": "BR", "cidade": "Nacional",
+        "instituicao": "Ciclos de 50 arrobas da Máquina 2",
+        "etapa": ETAPA_CICLO_M2, "status": "processando",
+        "indice_pesquisa": int(ultimos[0]["id"]) if ultimos else 0,
+        "leads_salvos": 0, "leads_encontrados": 0, "tentativas": 0,
+        "iniciado_em": datetime.now(timezone.utc).isoformat(),
+        "finalizado_em": None,
+    }
+    salvar_ciclo_m2(estado)
+    return estado
+
+
+def salvar_ciclo_m2(estado):
+    dados = {k: v for k, v in estado.items() if k in {
+        "estado", "cidade", "instituicao", "etapa", "status",
+        "indice_pesquisa", "leads_salvos", "leads_encontrados",
+        "tentativas", "iniciado_em", "finalizado_em",
+    }}
+    dados["atualizado_em"] = datetime.now(timezone.utc).isoformat()
+    if estado.get("id"):
+        supabase.table("controle_busca").update(dados).eq("id", estado["id"]).execute()
+    else:
+        resposta = supabase.table("controle_busca").insert(dados).execute()
+        if not resposta.data:
+            raise RuntimeError("Não foi possível confirmar o checkpoint do ciclo M2")
+        estado["id"] = resposta.data[0]["id"]
+
+
+def contar_novos_arrobas_ciclo(estado):
+    # A base anterior ao início do ciclo nunca entra na meta.
+    offset, handles = 0, set()
+    ultimo = int(estado.get("indice_pesquisa") or 0)
+    while True:
+        pagina = (supabase.table("instagram_candidatos").select("id,instagram")
+                  .gt("id", int(estado.get("indice_pesquisa") or 0))
+                  .order("id").range(offset, offset + 999).execute()).data or []
+        for candidato in pagina:
+            ultimo = max(ultimo, int(candidato["id"]))
+            handle = normalizar_instagram(candidato.get("instagram"))
+            if handle:
+                handles.add(handle)
+        if len(pagina) < 1000:
+            break
+        offset += 1000
+    return len(handles), ultimo
+
+
+def registrar_progresso_ciclo(estado, quantidade, ultimo_id, agora=None):
+    agora = agora or datetime.now(timezone.utc)
+    estado["leads_salvos"] = quantidade
+    if quantidade >= LIMITE_CANDIDATOS_POR_EXECUCAO:
+        estado.update(
+            status="pausa", indice_pesquisa=ultimo_id,
+            finalizado_em=agora.isoformat(),
+            tentativas=int(estado.get("tentativas") or 0) + 1,
+            leads_encontrados=int(estado.get("leads_encontrados") or 0) + quantidade,
+        )
+    return estado
+
+
+def segundos_pausa_ciclo(estado, agora=None):
+    if estado.get("status") != "pausa":
+        return 0
+    agora = agora or datetime.now(timezone.utc)
+    fim = datetime.fromisoformat(estado["finalizado_em"])
+    return max(0, (fim + timedelta(seconds=PAUSA_ENTRE_CICLOS_SEGUNDOS) - agora).total_seconds())
+
+
+def executar_ciclos(duracao_maxima=3000):
+    """Ciclos retomáveis; somente candidatos realmente gravados contam."""
+    global supabase
+    supabase = conectar_banco()
+    estado = carregar_ciclo_m2()
+    prazo = time.monotonic() + duracao_maxima
+    visitados = set()
+    while time.monotonic() < prazo:
+        if estado.get("status") == "pausa":
+            espera = segundos_pausa_ciclo(estado)
+            print(f"M2 CICLO: pausa restante de {espera:.0f}s após 50 novos arrobas", flush=True)
+            if espera >= prazo - time.monotonic():
+                return
+            # Esperas curtas preservam a possibilidade de interromper o worker.
+            while espera > 0:
+                time.sleep(min(30, espera))
+                espera = segundos_pausa_ciclo(estado)
+            estado.update(status="processando", leads_salvos=0, finalizado_em=None)
+            salvar_ciclo_m2(estado)
+            visitados.clear()
+
+        quantidade, ultimo = contar_novos_arrobas_ciclo(estado)
+        registrar_progresso_ciclo(estado, quantidade, ultimo)
+        salvar_ciclo_m2(estado)
+        if estado["status"] == "pausa":
+            continue
+        marcador = (obter_cursor_m2(), quantidade)
+        if marcador in visitados:
+            print("M2 CICLO: fila percorrida sem novos resultados; progresso preservado para retomada", flush=True)
+            return
+        visitados.add(marcador)
+        for chave in stats:
+            stats[chave] = 0
+        stats["instagram_encontrado"] = quantidade
+        print(f"M2 CICLO: {quantidade}/50 novos arrobas confirmados no banco", flush=True)
+        try:
+            executar(duracao_maxima=max(0, prazo - time.monotonic()))
+        finally:
+            # Releitura confirma gravações e recupera também lotes interrompidos.
+            quantidade, ultimo = contar_novos_arrobas_ciclo(estado)
+            registrar_progresso_ciclo(estado, quantidade, ultimo)
+            salvar_ciclo_m2(estado)
+        if not stats["pendentes"] and estado["status"] != "pausa":
+            print("M2 CICLO: sem nomes elegíveis; meta parcial preservada, não concluída", flush=True)
+            return
+
+
 if __name__ == "__main__":
 
-    executar()
+    executar_ciclos()
 
     print(
         "✅ MÁQUINA 2 FINALIZADA",
