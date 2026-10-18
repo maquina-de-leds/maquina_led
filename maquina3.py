@@ -49,7 +49,7 @@ def consultas_lote(item):
         f'{termo} "Nutrição" (TCC OR "trabalho de conclusão") (2025 OR 2026) autor',
         f'{termo} "Nutrição" (aluno OR estudante OR graduando) ("8º período" OR "último semestre") 2026',
         f'{termo} "Nutrição" ("recém-formado" OR "recém-formada" OR egresso OR egressa) (2025 OR 2026)',
-        f'{termo} Nutrição turma formatura lista alunos 2025 2026 {uf}',
+        f'site:instagram.com {termo} "Nutrição" (formandos OR formatura OR "colação de grau" OR concluintes) (2025 OR 2026) {uf}',
     ]
 
 def candidatos_instagram_publico(resultado, item):
