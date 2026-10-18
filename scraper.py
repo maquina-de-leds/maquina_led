@@ -998,6 +998,11 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "nivel_rede": 0,
         "fonte_validacao": "candidato_academico_fase_a_validar" if candidato_indicio else "fonte_publica_validada_v58",
     }
+    limite_ciclo = getattr(repo, "_limite_novos_ciclo_m1", None)
+    if isinstance(limite_ciclo, int):
+        dados["lead_origem"] = TAG_CICLO_M1
+        if dados["qualificado"] and getattr(repo, "_novos_ciclo_m1", 0) >= limite_ciclo:
+            raise MetaCicloM1()
     if repo.inserir_lead(dados) is False:
         stats['duplicados'] += 1
         return False
@@ -1006,6 +1011,10 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         cache[chave]=instituicao
     stats["leads_salvos"] += 1
     print(f"      ✅ SALVO: {nome}" + (f" | {instagram}" if instagram else " | Instagram pendente"), flush=True)
+    if isinstance(limite_ciclo, int) and dados["qualificado"]:
+        repo._novos_ciclo_m1 = getattr(repo, "_novos_ciclo_m1", 0) + 1
+        if repo._novos_ciclo_m1 >= limite_ciclo:
+            raise MetaCicloM1()
     return True
 
 
@@ -1479,10 +1488,10 @@ def registrar_falha_instituicao(repo, item, exc):
         print(f'AVISO: registro da falha indisponível: {type(registro).__name__}; progresso anterior preservado', flush=True)
 
 
-def executar():
+def executar(repo=None, duracao_maxima=480):
     print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
-    repo = SupabaseRepo.from_env()
+    repo = repo or SupabaseRepo.from_env()
 
     if not garantir_fila_oficial(repo):
         resumo()
@@ -1509,7 +1518,7 @@ def executar():
         print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
     fila = fila_estado_atual(repo, fila)
     print(f"📚 Fila do estado atual: {len(fila)} faculdades pendentes.", flush=True)
-    prazo=time.monotonic()+480
+    prazo=time.monotonic()+min(480, duracao_maxima)
     falhas_instituicoes = 0
     for item in selecionar_janela(fila, MAX_INSTITUICOES_POR_EXECUCAO):
         if time.monotonic() >= prazo:
@@ -1544,11 +1553,120 @@ def preparar_lista():
     print(f"Faculdades pendentes na pesquisa nacional: {len(repo.fila_nacional())}. Inclui EaD.",flush=True)
 
 
+
+ETAPA_CICLO_M1 = "m1_ciclos_50_leads_v1"
+TAG_CICLO_M1 = "maquina1_ciclos50"
+META_CICLO_M1 = 50
+
+
+class MetaCicloM1(BaseException):
+    """Interrompe a fonte após gravar a meta; a retomada deduplica o trecho já lido."""
+
+
+def carregar_ciclo_m1(repo):
+    estado = repo.controle_get(ETAPA_CICLO_M1)
+    if estado:
+        return estado
+    ultimos = (repo.client.table("leds").select("id")
+               .order("id", desc=True).limit(1).execute()).data or []
+    estado = {
+        "status": "processando", "indice_pesquisa": int(ultimos[0]["id"]) if ultimos else 0,
+        "leads_salvos": 0, "leads_encontrados": 0, "tentativas": 0,
+        "finalizado_em": None,
+    }
+    salvar_ciclo_m1(repo, estado)
+    return estado
+
+
+def salvar_ciclo_m1(repo, estado):
+    dados = {k: estado.get(k) for k in (
+        "status", "indice_pesquisa", "leads_salvos", "leads_encontrados",
+        "tentativas", "finalizado_em",
+    )}
+    dados.update(estado="BR", cidade="Nacional", instituicao="Ciclos de 50 leads da Máquina 1")
+    repo.controle_salvar(ETAPA_CICLO_M1, dados)
+
+
+def contar_novos_leads_ciclo_m1(repo, estado):
+    offset, ids = 0, set()
+    ultimo = int(estado.get("indice_pesquisa") or 0)
+    while True:
+        pagina = (repo.client.table("leds").select("id")
+                  .eq("lead_origem", TAG_CICLO_M1).eq("qualificado", True)
+                  .gt("id", int(estado.get("indice_pesquisa") or 0))
+                  .order("id").range(offset, offset + 999).execute()).data or []
+        for lead in pagina:
+            ids.add(int(lead["id"]))
+            ultimo = max(ultimo, int(lead["id"]))
+        if len(pagina) < 1000:
+            break
+        offset += 1000
+    return len(ids), ultimo
+
+
+def registrar_progresso_ciclo_m1(estado, quantidade, ultimo_id, instante=None):
+    instante = instante or datetime.now(timezone.utc)
+    estado["leads_salvos"] = quantidade
+    if quantidade >= META_CICLO_M1:
+        estado.update(
+            status="pausa", indice_pesquisa=ultimo_id,
+            finalizado_em=instante.isoformat(),
+            tentativas=int(estado.get("tentativas") or 0) + 1,
+            leads_encontrados=int(estado.get("leads_encontrados") or 0) + quantidade,
+        )
+    return estado
+
+
+def segundos_pausa_ciclo_m1(estado, instante=None):
+    if estado.get("status") != "pausa":
+        return 0
+    instante = instante or datetime.now(timezone.utc)
+    fim = datetime.fromisoformat(estado["finalizado_em"])
+    return max(0, (fim + timedelta(seconds=300) - instante).total_seconds())
+
+
+def executar_ciclos_m1(duracao_maxima=3000):
+    repo = SupabaseRepo.from_env()
+    estado = carregar_ciclo_m1(repo)
+    prazo = time.monotonic() + duracao_maxima
+    while time.monotonic() < prazo:
+        if estado.get("status") == "pausa":
+            espera = segundos_pausa_ciclo_m1(estado)
+            print(f"M1 CICLO: pausa restante de {espera:.0f}s após 50 leads novos", flush=True)
+            if espera >= prazo - time.monotonic():
+                return
+            while espera > 0:
+                time.sleep(min(30, espera))
+                espera = segundos_pausa_ciclo_m1(estado)
+            estado.update(status="processando", leads_salvos=0, finalizado_em=None)
+            salvar_ciclo_m1(repo, estado)
+        quantidade, ultimo = contar_novos_leads_ciclo_m1(repo, estado)
+        registrar_progresso_ciclo_m1(estado, quantidade, ultimo)
+        salvar_ciclo_m1(repo, estado)
+        if estado["status"] == "pausa":
+            continue
+        repo._limite_novos_ciclo_m1 = META_CICLO_M1 - quantidade
+        repo._novos_ciclo_m1 = 0
+        antes = stats["instituicoes_processadas"]
+        print(f"M1 CICLO: {quantidade}/50 novos leads qualificados confirmados no banco", flush=True)
+        try:
+            executar(repo=repo, duracao_maxima=max(0, prazo-time.monotonic()))
+        except MetaCicloM1:
+            print("M1 CICLO: meta alcançada; fonte preservada para retomada com deduplicação", flush=True)
+        finally:
+            quantidade, ultimo = contar_novos_leads_ciclo_m1(repo, estado)
+            registrar_progresso_ciclo_m1(estado, quantidade, ultimo)
+            salvar_ciclo_m1(repo, estado)
+        if estado["status"] != "pausa" and stats["instituicoes_processadas"] == antes:
+            print("M1 CICLO: sem avanço na fila; meta parcial preservada para próxima execução", flush=True)
+            return
+
+
 if __name__ == "__main__":
     import sys
     if "--preparar-fila" in sys.argv:
         preparar_lista()
     else:
-        executar()
+        executar_ciclos_m1()
 
 
