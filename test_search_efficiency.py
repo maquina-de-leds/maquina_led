@@ -81,7 +81,7 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
             return []
 
         results = scraper.buscar_web("Nutrição 2026", fetch_fn=fetch)
-        self.assertEqual(calls, ["google", "bing"])
+        self.assertEqual(calls, ["google", "google", "bing"])
         self.assertEqual(len(results), 1)
 
     @patch.object(scraper.time, "sleep")
@@ -107,6 +107,7 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
 
         self.assertIsNone(scraper.buscar_web("Nutrição 2026", fetch_fn=fetch))
         self.assertEqual(calls, [
+            ("Nutrição 2026", "google"),
             ("Nutrição 2026", "google"),
             ("Nutrição 2026", "bing"),
         ])
