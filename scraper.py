@@ -820,7 +820,7 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
     termos = [f'"{nome_faculdade}"']
     if alias and normalizar(alias) not in normalizar(nome_faculdade):
         # A sigla é uma variação, mas nunca substitui o nome da faculdade.
-        termos.append(f'"{nome_faculdade}" {limpar_espacos(alias)}')
+        termos.append(f'("{nome_faculdade}" OR {limpar_espacos(alias)})')
     familias = {
         "formatura_colacao": '("colação de grau" OR "outorga de grau" OR outorga OR formatura OR "cerimônia de formatura" OR "formandos" OR concluintes OR "aptos a colar grau" OR "lista de formandos" OR "boletim de serviços" OR "calendário defesas" OR juramentista)',
         "tcc_trabalhos": '("TCC" OR "trabalho de conclusão" OR "trabalho acadêmico" OR "trabalho escolar") (autores OR defesa OR apresentação OR banca OR repositório OR "caderno de resumos" OR anais OR entrega) filetype:pdf',
