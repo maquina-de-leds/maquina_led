@@ -43,6 +43,10 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in queries))
         scraper.RENDIMENTO_BUSCAS.clear()
 
+    def test_institution_brand_is_not_a_person_name(self):
+        self.assertIsNone(fontes_academicas.pessoa("EAD UniCesumar"))
+        self.assertTrue(fontes_academicas.pessoa("Ana Souza"))
+
     def test_public_instagram_result_keeps_handle_only_with_qualification_evidence(self):
         result = {
             "title": "Joana da Silva (@joana.nutri) • Instagram",
