@@ -129,7 +129,7 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertEqual(m2.stats["instagram_encontrado"], 2)
 
 
-    def test_filtro_m2_rebusca_apenas_nunca_verificados_ou_antigos(self):
+    def test_filtro_m2_nao_impoe_espera_de_14_dias(self):
         from datetime import datetime, timezone
         class Consulta:
             def __init__(self):
@@ -142,7 +142,8 @@ class Maquina2InstagramTests(unittest.TestCase):
         instante = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
         m2.filtrar_pendentes_rebusca(consulta, agora=instante)
         self.assertIn("maquina2_verificado_em.is.null", consulta.expressao)
-        self.assertIn("maquina2_verificado_em.lt.2026-10-04", consulta.expressao)
+        self.assertEqual(m2.INTERVALO_REBUSCA_DIAS, 0)
+        self.assertIn("maquina2_verificado_em.lt.2026-10-18T12:00:00+00:00", consulta.expressao)
 
     def test_registra_cooldown_fora_da_tabela_de_leads(self):
         import ast
