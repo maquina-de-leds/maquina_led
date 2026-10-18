@@ -29,6 +29,16 @@ INEP_FONTES = [
 ]
 
 
+def fonte_erro_permanente(erro):
+    """Fontes que não voltam a ser lidas no formato suportado pelo scraper."""
+    texto = str(erro or "").lower()
+    return any(sinal in texto for sinal in (
+        "403 client error", "404 client error",
+        "fonte acima de 8 mb", "pdf acima de 40 páginas",
+        "formato não suportado",
+    ))
+
+
 def filtrar_instituicoes_lista_confirmada(consulta):
     """Restringe as buscas à lista validada com fonte institucional, sem a carga bruta do INEP."""
     return (
@@ -389,15 +399,17 @@ class SupabaseRepo:
                 .eq("nao_contatar", False).execute())
             print(f"REVISÃO DE NOME COMPROVADA: {nome} | registros isolados: {len(r.data or [])}", flush=True)
 
-    def registrar_pendencia_fonte(self, item, url, erro=None, concluida=False, somente_nova=False):
+    def registrar_pendencia_fonte(self, item, url, erro=None, concluida=False, somente_nova=False, ignorada=False):
         import hashlib
         etapa = etapa_captacao_item(item) + "_fonte_" + hashlib.sha256(url.encode()).hexdigest()[:20]
         atual = self.controle_get(etapa)
         if somente_nova and atual: return
-        tentativas = 0 if concluida else int((atual or {}).get('tentativas') or 0) + 1
+        tentativas = (0 if concluida else
+                      int((atual or {}).get('tentativas') or 0) + (0 if ignorada else 1))
+        status = "concluido" if concluida else ("ignorado" if ignorada else "erro")
         self.controle_salvar(etapa, {
             "instituicao": item["instituicao"], "estado": item.get("estado"),
-            "cidade": item.get("cidade"), "status": "concluido" if concluida else "erro",
+            "cidade": item.get("cidade"), "status": status,
             "consulta_atual": url, "ultimo_erro": None if concluida else str(erro)[:1000],
             'tentativas': tentativas,
         })
@@ -406,11 +418,18 @@ class SupabaseRepo:
         import hashlib
         etapa = etapa_captacao_item(item) + '_fonte_' + hashlib.sha256(url.encode()).hexdigest()[:20]
         cp = self.controle_get(etapa)
-        if not cp or cp.get('status') != 'erro':
+        if not cp or cp.get('status') not in {'erro', 'ignorado'}:
             return True
+        if cp.get('status') == 'ignorado':
+            return False
+        if fonte_erro_permanente(cp.get('ultimo_erro')):
+            self.registrar_pendencia_fonte(item, url, cp.get('ultimo_erro'), ignorada=True)
+            print(f'FONTE IGNORADA: {url} | falha permanente', flush=True)
+            return False
         tentativas = int(cp.get('tentativas') or 0)
         if tentativas >= 5:
-            print(f'FONTE REQUER REVISÃO: {url}; cinco tentativas preservadas', flush=True)
+            self.registrar_pendencia_fonte(item, url, cp.get('ultimo_erro') or 'Limite de tentativas atingido', ignorada=True)
+            print(f'FONTE ENCERRADA: {url}; cinco tentativas sem leitura', flush=True)
             return False
         try:
             atualizacao = datetime.fromisoformat(cp['atualizado_em'].replace('Z', '+00:00'))
@@ -435,7 +454,7 @@ class SupabaseRepo:
         for offset in range(0,100000,1000):
             lote=(self.client.table('controle_busca').select('consulta_atual')
                   .like('etapa', etapa_captacao_item(item)+'_fonte_%')
-                  .eq('status','concluido').order('id').range(offset,offset+999).execute()).data or []
+                  .in_('status',['concluido','ignorado']).order('id').range(offset,offset+999).execute()).data or []
             urls.update(r['consulta_atual'] for r in lote if r.get('consulta_atual'))
             if len(lote)<1000: return urls
         raise RuntimeError('Paginação das fontes concluídas incompleta')
@@ -1193,12 +1212,18 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                     registros, links = [], []
                 if not registros: stats["fontes_sem_nomes"] += 1
             except Exception as exc:
-                falhas_fontes += 1
-                stats["erros"] += 1
+                permanente = fonte_erro_permanente(exc)
+                if not permanente:
+                    falhas_fontes += 1
+                    stats["erros"] += 1
                 if hasattr(repo,"registrar_pendencia_fonte"):
-                    repo.registrar_pendencia_fonte(item,url,exc)
-                    pendentes_conhecidas.add(url)
-                print(f"      ⚠️ FONTE PENDENTE: {url} | {str(exc)[:250]}",flush=True)
+                    repo.registrar_pendencia_fonte(item,url,exc,ignorada=permanente)
+                    if permanente:
+                        pendentes_conhecidas.discard(url)
+                    else:
+                        pendentes_conhecidas.add(url)
+                rotulo = "FONTE IGNORADA" if permanente else "FONTE PENDENTE"
+                print(f"      ⚠️ {rotulo}: {url} | {str(exc)[:250]}",flush=True)
                 try:
                     registros,links=recuperar_fonte_na_busca(url,instituicao,alias,search_fn)
                 except Exception as recuperacao:
@@ -1291,9 +1316,13 @@ def retentar_fontes_pendentes(repo, item, cp, source_fn, limite, prazo=None):
             stats["fontes_visitadas"]+=1
             registros,links=source_fn(url,item["instituicao"],alias_instituicao(item))
         except Exception as exc:
-            repo.registrar_pendencia_fonte(item,url,exc)
-            stats["erros"]+=1
-            print(f"FONTE AINDA PENDENTE: {url} | {type(exc).__name__}",flush=True)
+            if fonte_erro_permanente(exc):
+                repo.registrar_pendencia_fonte(item,url,exc,ignorada=True)
+                print(f"FONTE ENCERRADA: {url} | falha permanente",flush=True)
+            else:
+                repo.registrar_pendencia_fonte(item,url,exc)
+                stats["erros"]+=1
+                print(f"FONTE AINDA PENDENTE: {url} | {type(exc).__name__}",flush=True)
             continue
         for registro in registros:
             encontrados+=1
