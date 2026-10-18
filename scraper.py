@@ -1548,9 +1548,22 @@ def executar(repo=None, duracao_maxima=480):
 
     if instituicao_piloto:
         # O piloto consulta somente a instituição escolhida e não reabre/modifica a fila nacional.
-        fila = filtrar_fila_piloto_ufba(repo.fila_estado("BA"), instituicao_piloto)
+        # A lista geral exclui itens cuja fonte é o arquivo bruto do INEP;
+        # para o piloto, lemos diretamente o registro já validado da UFBA em Salvador.
+        resposta = (
+            repo.client.table("instituicoes_nutricao")
+            .select("*")
+            .eq("estado", "BA")
+            .eq("cidade", "Salvador")
+            .eq("instituicao", "Universidade Federal da Bahia")
+            .eq("curso", "Nutrição")
+            .eq("validada", True)
+            .limit(10)
+            .execute()
+        )
+        fila = filtrar_fila_piloto_ufba(resposta.data or [], instituicao_piloto)
         if not fila:
-            raise RuntimeError("UFBA não encontrada como instituição validada de Nutrição no banco.")
+            raise RuntimeError("UFBA Salvador não encontrada como instituição validada de Nutrição no banco.")
         print(f"📚 Piloto restrito: {len(fila)} registro(s) validado(s) da UFBA.", flush=True)
     else:
         print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
@@ -1725,6 +1738,9 @@ if __name__ == "__main__":
     import sys
     if "--preparar-fila" in sys.argv:
         preparar_lista()
+    elif os.environ.get("M1_INSTITUICAO_PILOTO"):
+        # Uma única janela curta no piloto; evita o ciclo nacional de 50 leads.
+        executar(duracao_maxima=480)
     else:
         executar_ciclos_m1()
 
