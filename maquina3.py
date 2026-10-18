@@ -11,7 +11,8 @@ from fontes_academicas import (
     fase_final_comprovada, nomes_da_lista, periodo_academico, pessoa, url_permitida,
 )
 from scraper import (
-    ESTADOS, ORIGEM_IES, SupabaseRepo, alias_instituicao, agrupar_faculdades,
+    ESTADOS, SupabaseRepo, alias_instituicao, agrupar_faculdades,
+    filtrar_instituicoes_lista_confirmada,
     buscar_web, ddgs_texto, formatar_nome_pessoa, limpar_espacos, normalizar,
     ordem_estado, salvar_lead, stats,
 )
@@ -384,9 +385,10 @@ def carregar_fila(repo):
     registros = []
     offset = 0
     while True:
-        lote = (repo.client.table("instituicoes_nutricao").select("*")
-                .eq("origem", ORIGEM_IES).order("id")
-                .range(offset, offset + 999).execute()).data or []
+        consulta = repo.client.table("instituicoes_nutricao").select("*").order("id")
+        lote = filtrar_instituicoes_lista_confirmada(consulta).range(
+            offset, offset + 999
+        ).execute().data or []
         registros.extend(lote)
         if len(lote) < 1000:
             break
