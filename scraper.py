@@ -1526,35 +1526,52 @@ def registrar_falha_instituicao(repo, item, exc):
 
 
 def executar(repo=None, duracao_maxima=480):
-    print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
-    print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
+    instituicao_piloto = limpar_espacos(os.environ.get("M1_INSTITUICAO_PILOTO", ""))
+    if instituicao_piloto:
+        print(f"🚀 MÁQUINA 1 - PILOTO CONTROLADO: {instituicao_piloto} {VERSAO.upper()}", flush=True)
+    else:
+        print(f"🚀 MÁQUINA 1 - CAPTAÇÃO NACIONAL DE LEADS {VERSAO.upper()}", flush=True)
     repo = repo or SupabaseRepo.from_env()
 
-    if not garantir_fila_oficial(repo):
-        resumo()
-        raise SystemExit(1)
-
-    if not preparar_varredura_v58(repo):
-        resumo()
-        raise SystemExit(1)
-
-    try:
-        repo.isolar_erros_de_nome_comprovados()
-    except Exception as exc:
-        stats['erros'] += 1
-        print(f'AVISO: revisão de nomes adiada: {type(exc).__name__}; captura continua', flush=True)
-    try:
-        print(f"📊 Total de cadastros no Supabase antes do ciclo: {repo.contar_leads()}", flush=True)
-    except Exception as exc:
-        print(f"⚠️ Contagem do banco indisponível: {type(exc).__name__}", flush=True)
-    fila = repo.fila_nacional()
-    try:
-        recuperar_pendencias_registradas(repo,fila)
-    except Exception as exc:
-        stats['erros'] += 1
-        print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
-    fila = fila_estado_atual(repo, fila)
-    print(f"📚 Fila do estado atual: {len(fila)} faculdades pendentes.", flush=True)
+    if instituicao_piloto:
+        # O piloto consulta somente a instituição escolhida e não reabre/modifica a fila nacional.
+        if normalizar(instituicao_piloto) not in {"universidade federal da bahia", "ufba"}:
+            raise ValueError("O piloto da Máquina 1 está autorizado somente para a UFBA.")
+        fila = repo.fila_estado("BA")
+        fila = [
+            item for item in fila
+            if normalizar(item.get("instituicao")) == "universidade federal da bahia"
+            and item.get("curso") == "Nutrição"
+            and item.get("validada") is True
+        ]
+        if not fila:
+            raise RuntimeError("UFBA não encontrada como instituição validada de Nutrição no banco.")
+        print(f"📚 Piloto restrito: {len(fila)} registro(s) validado(s) da UFBA.", flush=True)
+    else:
+        print("📚 Fonte da fila: INEP / Censo da Educação Superior", flush=True)
+        if not garantir_fila_oficial(repo):
+            resumo()
+            raise SystemExit(1)
+        if not preparar_varredura_v58(repo):
+            resumo()
+            raise SystemExit(1)
+        try:
+            repo.isolar_erros_de_nome_comprovados()
+        except Exception as exc:
+            stats['erros'] += 1
+            print(f"AVISO: revisão de nomes adiada: {type(exc).__name__}; captura continua", flush=True)
+        try:
+            print(f"📊 Total de cadastros no Supabase antes do ciclo: {repo.contar_leads()}", flush=True)
+        except Exception as exc:
+            print(f"⚠️ Contagem do banco indisponível: {type(exc).__name__}", flush=True)
+        fila = repo.fila_nacional()
+        try:
+            recuperar_pendencias_registradas(repo, fila)
+        except Exception as exc:
+            stats['erros'] += 1
+            print(f'AVISO: recuperação de pendências legadas adiada: {type(exc).__name__}; captura continua', flush=True)
+        fila = fila_estado_atual(repo, fila)
+        print(f"📚 Fila do estado atual: {len(fila)} faculdades pendentes.", flush=True)
     prazo=time.monotonic()+min(480, duracao_maxima)
     falhas_instituicoes = 0
     for item in selecionar_janela(fila, MAX_INSTITUICOES_POR_EXECUCAO):
