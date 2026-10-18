@@ -3,7 +3,7 @@ import re
 import time
 import random
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import unicodedata
 from urllib.parse import urlparse
 from fontes_academicas import url_permitida
@@ -32,6 +32,7 @@ def conectar_banco():
 
 LIMITE_CANDIDATOS_POR_EXECUCAO = 50
 LIMITE_LEADS_POR_EXECUCAO = 50
+INTERVALO_REBUSCA_DIAS = 14
 
 PAUSA_MIN = 2
 PAUSA_MAX = 4
@@ -239,6 +240,26 @@ def salvar_cursor_m2(lead_id):
         supabase.table("controle_busca").insert(dados).execute()
 
 
+def filtrar_pendentes_rebusca(consulta, agora=None):
+    agora = agora or datetime.now(timezone.utc)
+    limite = (agora - timedelta(days=INTERVALO_REBUSCA_DIAS)).isoformat()
+    return consulta.or_(f"maquina2_verificado_em.is.null,maquina2_verificado_em.lt.{limite}")
+
+
+def registrar_verificacao_m2(lead):
+    tentativas = int(lead.get("maquina2_tentativas") or 0) + 1
+    return (
+        supabase.table("leds")
+        .update({
+            "maquina2_tentativas": tentativas,
+            "maquina2_verificado_em": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", lead["id"])
+        .is_("instagram", "null")
+        .execute()
+    )
+
+
 def buscar_pendentes():
 
     print("")
@@ -255,16 +276,17 @@ def buscar_pendentes():
             consulta = (
                 supabase.table("leds")
                 .select("id,nome,instagram,linkedin,whatsapp,instituicao,cidade,estado,ano_alvo,"
-                        "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url")
+                        "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,"
+                        "maquina2_tentativas,maquina2_verificado_em")
                 .eq('nao_contatar', False)
                 .eq('qualificado', True)
                 .is_('instagram', 'null')
                 .order('id')
-                .limit(LIMITE_LEADS_POR_EXECUCAO)
             )
+            consulta = filtrar_pendentes_rebusca(consulta)
             if cursor_id:
                 consulta = consulta.gt('id', cursor_id)
-            return consulta.execute().data or []
+            return consulta.limit(LIMITE_LEADS_POR_EXECUCAO).execute().data or []
 
         registros = carregar(cursor)
         if not registros and cursor:
@@ -533,15 +555,23 @@ def montar_consultas_instagram(lead):
 # ============================================================
 
 def resultado_compativel(resultado, lead=None):
-    """Aceita outros perfis quando o resultado traz evidência de Nutrição."""
-    texto = normalizar(
-        str(resultado.get("title") or "") + " " +
-        str(resultado.get("body") or "")
-    )
-    return bool(re.search(
-        r"\b(?:nutricao|nutricionista|nutricional|nutritivo|nutritiva|crn)\b",
-        texto
-    ))
+    """Aceita perfil com sinal de Nutrição, nome correspondente ou @ nutricional."""
+    texto_original = str(resultado.get("title") or "") + " " + str(resultado.get("body") or "")
+    texto = normalizar(texto_original)
+    if re.search(r"\b(?:nutricao|nutricionista|nutricional|nutritivo|nutritiva|crn)\b", texto):
+        return True
+
+    url = str(resultado.get("href") or resultado.get("url") or "")
+    handle = extrair_instagram_url(url)
+    if handle and re.search(r"(?:nutri|nutricion|crn)", handle, flags=re.I):
+        return True
+    if lead and handle:
+        nome = normalizar(str(lead.get("nome") or ""))
+        alvo = [parte for parte in nome.split() if len(parte) >= 3]
+        perfil = normalizar(texto_original + " " + handle.lstrip("@").replace(".", " ").replace("_", " "))
+        if len(alvo) >= 2 and all(parte in perfil for parte in alvo):
+            return True
+    return False
 
 
 def _perfil_do_resultado(resultado):
@@ -584,12 +614,13 @@ def buscar_instagram(ddgs, lead, limite=None):
                 max_results=MAX_RESULTADOS
             ))
         except Exception as erro:
+            stats["erros"] += 1
             print(f"      ⚠️ Busca indisponível: {erro}", flush=True)
             pausa()
             continue
 
         for resultado in resultados:
-            if not resultado_compativel(resultado):
+            if not resultado_compativel(resultado, lead):
                 continue
             url = str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url):
@@ -752,16 +783,26 @@ def executar():
                 restante = prazo - time.monotonic()
                 if restante <= 0:
                     break
+                erros_antes = stats["erros"]
+                busca_concluida = True
                 signal.setitimer(signal.ITIMER_REAL, min(45, restante))
                 try:
                     processar_lead(ddgs, lead)
                 except JanelaEncerrada:
+                    busca_concluida = False
                     print('LEAD ADIADO: prazo de busca encerrado', flush=True)
                 except Exception as exc:
+                    busca_concluida = False
                     stats['erros'] += 1
                     print(f'FALHA NO ENRIQUECIMENTO: {type(exc).__name__}; lead preservado', flush=True)
                 finally:
                     signal.setitimer(signal.ITIMER_REAL, 0)
+                    if busca_concluida and stats["erros"] == erros_antes:
+                        try:
+                            registrar_verificacao_m2(lead)
+                        except Exception as exc:
+                            stats["erros"] += 1
+                            print(f'AVISO: não registrou prazo de nova busca: {type(exc).__name__}', flush=True)
                     salvar_cursor_m2(lead["id"])
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
