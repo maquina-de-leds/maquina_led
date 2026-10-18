@@ -17,3 +17,8 @@ create index if not exists instagram_buscas_status_id_idx
     on public.instagram_buscas (status, id);
 
 alter table public.instagram_buscas enable row level security;
+
+-- Operacao exclusiva pelo backend com chave secreta/service_role.
+-- Nao conceder acesso direto a anon/authenticated; RLS permanece habilitado.
+revoke all on public.instagram_buscas from anon, authenticated;
+revoke all on sequence public.instagram_buscas_id_seq from anon, authenticated;
