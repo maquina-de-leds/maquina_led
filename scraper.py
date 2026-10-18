@@ -689,9 +689,9 @@ def ddgs_texto(consulta, backend="auto", max_results=MAX_RESULTADOS):
 
 
 def buscar_web(consulta, max_results=MAX_RESULTADOS, fetch_fn=ddgs_texto):
-    """Busca primeiro no Google duas vezes e usa Bing como reserva."""
+    """Busca no Google e usa Bing como reserva quando não há resultados."""
     erros=[]; respondeu_vazio=False
-    tentativas = ('google', 'google', 'bing')
+    tentativas = ('google', 'bing')
     for indice,backend in enumerate(tentativas):
         try:
             try: resultados=fetch_fn(consulta,backend,max_results)
