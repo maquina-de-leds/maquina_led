@@ -24,12 +24,16 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
             "apresentação", "repositório",
             '"colação de grau"', '"recém-formados"', '"último período"',
             '"estágio final"', '"mostra" "autores"', '"turma"',
-            'site:instagram.com/p/', '"grupo de WhatsApp"',
+            'site:instagram.com', '"grupo de WhatsApp"',
             '"Itu" SP', "site:linkedin.com/in",
         ):
             self.assertTrue(any(signal in q for q in queries), signal)
         self.assertTrue(any("site:instagram.com" in q.lower() for q in queries))
-        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in queries))
+        searches_by_institution = [q for q in queries if '"perfil de nutricionista"' not in q]
+        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in searches_by_institution))
+        public_profiles = [q for q in queries if '"perfil de nutricionista"' in q]
+        self.assertEqual(len(public_profiles), 2)
+        self.assertTrue(all('site:instagram.com' in q and any(y in q for y in ("2025", "2026")) for q in public_profiles))
 
     def test_queries_prioritize_families_with_better_qualified_yield(self):
         scraper.RENDIMENTO_BUSCAS.clear()
@@ -40,7 +44,8 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         })
         queries = scraper.consultas_leads("Universidade Teste", "UT")
         self.assertEqual(scraper.familia_consulta(queries[0]), "instagram_publico")
-        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q for q in queries))
+        self.assertTrue(all('"Universidade Teste"' in q and "Nutrição" in q
+                            for q in queries if '"perfil de nutricionista"' not in q))
         scraper.RENDIMENTO_BUSCAS.clear()
 
     def test_institution_brand_is_not_a_person_name(self):
@@ -107,7 +112,7 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
             return []
 
         results = scraper.buscar_web("Nutrição 2026", fetch_fn=fetch)
-        self.assertEqual(calls, ["google", "google", "bing"])
+        self.assertEqual(calls, ["google", "bing"])
         self.assertEqual(len(results), 1)
 
     @patch.object(scraper.time, "sleep")
@@ -132,11 +137,7 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
             raise RuntimeError("Temporary network error")
 
         self.assertIsNone(scraper.buscar_web("Nutrição 2026", fetch_fn=fetch))
-        self.assertEqual(calls, [
-            ("Nutrição 2026", "google"),
-            ("Nutrição 2026", "google"),
-            ("Nutrição 2026", "bing"),
-        ])
+        self.assertEqual(calls, [("Nutrição 2026", "google"), ("Nutrição 2026", "bing")])
 
 
 if __name__ == "__main__":

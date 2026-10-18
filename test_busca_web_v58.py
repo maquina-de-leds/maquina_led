@@ -17,8 +17,8 @@ class BuscarWebV58Tests(unittest.TestCase):
         resultado = s.buscar_web("Nutrição turma 2026", max_results=5, fetch_fn=fetch)
 
         self.assertEqual(resultado, [])
-        self.assertEqual(chamadas, [("Nutrição turma 2026", "google", 5)] * 2 + [("Nutrição turma 2026", "bing", 5)])
-        self.assertEqual(sleep.call_args_list, [call(2.0), call(2.0)])
+        self.assertEqual(chamadas, [("Nutrição turma 2026", "google", 5), ("Nutrição turma 2026", "bing", 5)])
+        self.assertEqual(sleep.call_args_list, [call(1.0)])
 
     @patch.object(s.time, "sleep")
     def test_lista_vazia_na_primeira_tentativa_retorna_resultado_no_retry(self, sleep):
@@ -35,9 +35,8 @@ class BuscarWebV58Tests(unittest.TestCase):
         resultado = s.buscar_web("Nutrição turma 2026", fetch_fn=fetch)
 
         self.assertEqual(resultado, [achado])
-        self.assertEqual(len(chamadas), 2)
-        self.assertTrue(all(chamada[1] == "google" for chamada in chamadas))
-        sleep.assert_called_once_with(2.0)
+        self.assertEqual([chamada[1] for chamada in chamadas], ["google", "bing"])
+        sleep.assert_called_once_with(1.0)
 
     @patch.object(s.time, "sleep")
     def test_erro_transitorio_repete_e_retorna_resultado(self, sleep):
@@ -57,7 +56,7 @@ class BuscarWebV58Tests(unittest.TestCase):
 
         self.assertEqual(resultado, [achado])
         self.assertEqual(chamadas, ["formandos Nutrição"] * 2)
-        sleep.assert_called_once_with(2.0)
+        sleep.assert_called_once_with(1.0)
 
     @patch.object(s.time, "sleep")
     def test_resultados_nao_confirmados_sao_preservados_para_retry(self, sleep):
@@ -76,10 +75,9 @@ class BuscarWebV58Tests(unittest.TestCase):
         self.assertIsNone(resultado)
         self.assertEqual(chamadas, [
             ("consulta sem ocorrências", "google", 3),
-            ("consulta sem ocorrências", "google", 3),
             ("consulta sem ocorrências", "bing", 3),
         ])
-        self.assertEqual(sleep.call_args_list, [call(2.0), call(2.0)])
+        self.assertEqual(sleep.call_args_list, [call(1.0)])
 
     @patch.object(s.time, "sleep")
     def test_falha_persistente_do_motor_retorna_none(self, sleep):
@@ -92,8 +90,8 @@ class BuscarWebV58Tests(unittest.TestCase):
         resultado = s.buscar_web("Nutrição 2026", fetch_fn=fetch)
 
         self.assertIsNone(resultado)
-        self.assertEqual([c[1] for c in chamadas], ["google", "google", "bing"])
-        self.assertEqual(sleep.call_args_list, [call(2.0), call(2.0)])
+        self.assertEqual([c[1] for c in chamadas], ["google", "bing"])
+        self.assertEqual(sleep.call_args_list, [call(1.0)])
 
 
 if __name__ == "__main__":
