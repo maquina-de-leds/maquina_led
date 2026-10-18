@@ -1160,10 +1160,14 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 else:
                     relacionados.append(resultado)
             resultados=relacionados
+        perfis_sociais_processados=set()
         for resultado in resultados:
             url_resultado=str(resultado.get("href") or resultado.get("url") or "")
             if not url_permitida(url_resultado): continue
-            for registro in extrair_resultado_busca(resultado,instituicao,alias):
+            registros_resultado=extrair_resultado_busca(resultado,instituicao,alias)
+            for registro in registros_resultado:
+                if registro.get("perfil_social_publico"):
+                    perfis_sociais_processados.add(url_resultado)
                 if not registrar_nome_unico(nomes_consulta, registro["nome"], bool(registro.get("instagram"))):
                     print("      ♻️ EVIDÊNCIA REPETIDA NA CONSULTA:", registro["nome"], flush=True)
                     continue
@@ -1172,7 +1176,12 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
                 registro["evidencia"] += " | Consultado em "+agora()
                 print("      EVIDÊNCIA NA BUSCA:",registro["nome"],"|",url_resultado,flush=True)
                 salvar_lead(repo,registro["nome"],registro.get("instituicao",instituicao),None,None,registro["evidencia"],url_resultado,
-                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None)
+                            instagram=registro.get("instagram"),linkedin=registro.get("linkedin"),
+                            ano_forcado=registro["ano"],periodo_forcado=registro["periodo"],
+                            instituicao_alias=alias if registro.get("instituicao",instituicao)==instituicao else None,
+                            candidato_indicio=registro.get("candidato_indicio",False),
+                            perfil_social_publico=registro.get("perfil_social_publico",False),
+                            seguidores_instagram=registro.get("seguidores_instagram"))
         termos=[normalizar(t) for t in (instituicao,alias) if t]
         resultados_relacionados=[]
         for resultado in resultados:
@@ -1185,6 +1194,8 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
             host_institucional=host in hosts_conhecidos or any(t and t.replace(' ','') in host.split('.') for t in termos)
             contexto_academico=bool(re.search(FASE+r'|projetos aprovados|iniciacao cientifica',texto)) or bool(re.search(r'\.pdf(?:\?|$)',str(resultado.get('href') or resultado.get('url') or '')))
+            if str(resultado.get("href") or resultado.get("url") or "") in perfis_sociais_processados:
+                continue
             registro_social = None
             if texto.strip() and ("nutricao" in texto or "nutricionista" in texto):
                 try:
