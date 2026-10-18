@@ -879,6 +879,8 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
     if cidade and normalizar(cidade) != "nao identificado":
         consultas += [f'"{termo}" "{cidade}" {uf or ""} Nutrição {ano} (turma OR formandos OR "colação de grau")'
                       for termo in termos for ano in (2025, 2026)]
+    consultas += [f'site:linkedin.com/in {termo} (Nutrição OR nutricionista) (Instagram OR instagram.com)' for termo in termos]
+    consultas += [f'site:instagram.com {termo} (nutricionista OR "estudante de Nutrição" OR graduanda OR graduando)' for termo in termos]
     consultas += [f'site:linkedin.com/in {termos[0]} Nutrição {ano} (formandos OR estudante OR nutricionista)'
                   for ano in (2025, 2026)]
     consultas += [f'site:instagram.com {termo} Nutrição (faculdade OR turma OR formatura)'
@@ -911,7 +913,7 @@ def registrar_nome_unico(nomes_consulta, nome, tem_instagram=False):
     return True
 
 
-def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False):
+def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None, linkedin=None, ano_forcado=None, periodo_forcado=None, instituicao_alias=None, candidato_indicio=False, perfil_social_publico=False, seguidores_instagram=None):
     from fontes_academicas import pessoa, fase_final_comprovada
     # Páginas de vagas não são evidência de alunos ou formandos.
     if re.search(r"https?://(?:[^/]+\.)?linkedin\.com/jobs(?:[/?#]|$)", str(url or ""), re.I):
@@ -930,7 +932,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     # conter a prova real, independentemente desse marcador interno.
     texto_sem_marcador = re.sub(r"fase final comprovada", "", texto, flags=re.I)
     fase_independente = fase_final_comprovada(texto_sem_marcador)
-    if not instituicao and not fase_independente:
+    if not instituicao and not fase_independente and not perfil_social_publico:
         stats["rejeitados"] += 1
         return False
     if (not fase_confirmada
@@ -965,8 +967,12 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
     ano = ano_forcado
     periodo = periodo_forcado
     periodo_sem_ano = ano is None and periodo and re.search(r'[78]º período/semestre',periodo) and "nutricao" in normalizar(texto)
-    if (ano not in {2025,2026} and not periodo_sem_ano) or not periodo:
-        raise ValueError("Lead precisa de ano/período extraídos da fonte acadêmica")
+    periodo_social = bool(perfil_social_publico and instagram and periodo == "Perfil público; ano acadêmico não informado")
+    if (ano not in {2025,2026} and not periodo_sem_ano and not periodo_social) or not periodo:
+        raise ValueError("Lead precisa de ano/período acadêmico ou evidência de perfil social público")
+    if seguidores_instagram is not None and seguidores_instagram > 3000:
+        stats["rejeitados"] += 1
+        return False
     candidato_indicio = candidato_indicio or not fase_confirmada
     dados = {
         "nome": nome,
@@ -981,7 +987,7 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "qualificado": not candidato_indicio,
         "data_primeiro_contato": None,
         "data_ultimo_contato": None,
-        "proxima_acao": "validar_fase_academica" if candidato_indicio else ("primeiro_contato_instagram" if instagram else "buscar_instagram"),
+        "proxima_acao": "validar_perfil_social" if periodo_social else ("validar_fase_academica" if candidato_indicio else ("primeiro_contato_instagram" if instagram else "buscar_instagram")),
         "tentativas_contato": 0,
         "cliente": False,
         "funil_destino": None,
@@ -993,6 +999,8 @@ def salvar_lead(repo, nome, instituicao, cidade, uf, texto, url, instagram=None,
         "fonte_url": url or None,
         "ano_alvo": ano,
         "periodo_alvo": periodo or ("2025/2026" if ano else None),
+        "seguidores_instagram": seguidores_instagram,
+        "seguidores_status": "informado" if seguidores_instagram is not None else ("nao_informado" if periodo_social else None),
         "origem_lead": "captacao_academica",
         "rede_processada": False,
         "nivel_rede": 0,
@@ -1177,9 +1185,26 @@ def processar_instituicao(repo, item, search_fn=buscar_web, source_fn=None, cont
             hosts_conhecidos={(urlparse(u).hostname or "").lower() for u in fontes_conhecidas}
             host_institucional=host in hosts_conhecidos or any(t and t.replace(' ','') in host.split('.') for t in termos)
             contexto_academico=bool(re.search(FASE+r'|projetos aprovados|iniciacao cientifica',texto)) or bool(re.search(r'\.pdf(?:\?|$)',str(resultado.get('href') or resultado.get('url') or '')))
+            registro_social = None
+            if texto.strip() and ("nutricao" in texto or "nutricionista" in texto):
+                try:
+                    candidatos_sociais = extrair_resultado_busca(resultado,instituicao,alias)
+                    registro_social = next((r for r in candidatos_sociais if r.get("perfil_social_publico")),None)
+                except Exception as exc:
+                    print("      FALHA AO EXTRAIR PERFIL SOCIAL DO RESULTADO:",str(exc)[:160],flush=True)
+            if registro_social:
+                try:
+                    salvar_lead(repo,registro_social["nome"],registro_social.get("instituicao",instituicao),
+                                None,None,registro_social["evidencia"],str(resultado.get("href") or resultado.get("url") or ""),
+                                instagram=registro_social.get("instagram"),ano_forcado=None,
+                                periodo_forcado=registro_social["periodo"],instituicao_alias=alias if registro_social.get("instituicao") else None,
+                                candidato_indicio=True,perfil_social_publico=True,
+                                seguidores_instagram=registro_social.get("seguidores_instagram"))
+                except Exception as exc:
+                    print("      PERFIL SOCIAL NÃO SALVO:",str(exc)[:180],flush=True)
+                continue
             if host_institucional or not texto.strip() or (contexto_academico and ('nutricao' in texto or any(re.search(r'(?<!\w)'+re.escape(t)+r'(?!\w)',texto) for t in termos))):
-                resultados_relacionados.append(resultado)
-            else:
+                resultados_relacionados.append(resultado)            else:
                 print("      RESULTADO SEM CONTEXTO ACADÊMICO RELEVANTE:",resultado.get("href") or resultado.get("url"),flush=True)
         fila = [(str(r.get("href") or r.get("url") or ""),0) for r in resultados_relacionados]
         for posicao,(url, depth) in enumerate(fila):
