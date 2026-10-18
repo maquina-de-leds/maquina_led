@@ -111,7 +111,7 @@ class CorrecaoBuscaTests(unittest.TestCase):
         fonte.assert_not_called()
         self.assertEqual([x['nome'] for x in repo.saved],['Ana Silva'])
         self.assertEqual(repo.cp['status'],'concluido')
-        self.assertIsNone(repo.saved[0]['instagram'])
+        self.assertEqual(repo.saved[0]['instagram'],'@ana.nutricao')
 
     def test_alternativa_tem_data_propria_e_preserva_url(self):
         u='https://jornal.org/noticia/recem-formada-em-nutricao-conquista-vaga'
