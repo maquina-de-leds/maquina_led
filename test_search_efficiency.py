@@ -44,7 +44,9 @@ class MachineOneSearchEfficiencyTests(unittest.TestCase):
         scraper.RENDIMENTO_BUSCAS.clear()
 
     def test_institution_brand_is_not_a_person_name(self):
-        self.assertIsNone(fontes_academicas.pessoa("EAD UniCesumar"))
+        for entity in ("EAD UniCesumar", "Anhanguera Educacional", "Grupo Anhanguera", "Kroton Educacional"):
+            with self.subTest(entity=entity):
+                self.assertIsNone(fontes_academicas.pessoa(entity))
         self.assertTrue(fontes_academicas.pessoa("Ana Souza"))
 
     def test_public_instagram_result_keeps_handle_only_with_qualification_evidence(self):
