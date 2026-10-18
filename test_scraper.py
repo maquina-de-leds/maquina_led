@@ -403,3 +403,23 @@ class GruposAcademicosTests(unittest.TestCase):
             for ano in ['2025','2026']:
                 self.assertTrue(any(criterio in q and ano in q and 'Nutrição' in q and 'Universidade Teste' in q for q in qs))
 
+
+class ListaInstituicoesTests(unittest.TestCase):
+    def test_filtro_usa_somente_curso_confirmado_com_fonte_institucional(self):
+        class Consulta:
+            def __init__(self):
+                self.filtros = []
+            def eq(self, coluna, valor):
+                self.filtros.append(("eq", coluna, valor))
+                return self
+            def neq(self, coluna, valor):
+                self.filtros.append(("neq", coluna, valor))
+                return self
+
+        consulta = Consulta()
+        s.filtrar_instituicoes_lista_confirmada(consulta)
+        self.assertIn(("eq", "curso", "Nutrição"), consulta.filtros)
+        self.assertIn(("eq", "validada", True), consulta.filtros)
+        self.assertIn(("neq", "fonte_url", s.INEP_FONTES[0][1]), consulta.filtros)
+
+
