@@ -12,12 +12,12 @@ permissions:
 
 concurrency:
   group: maquina-1-fila
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 jobs:
   executar:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 55
     steps:
       - name: Baixar codigo
         uses: actions/checkout@v4
