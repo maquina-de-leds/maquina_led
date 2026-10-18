@@ -1485,6 +1485,19 @@ def fila_estado_atual(repo, fila):
     return []
 
 
+def filtrar_fila_piloto_ufba(fila, instituicao="UFBA"):
+    """Retorna somente o curso validado de Nutrição da UFBA para o teste piloto."""
+    alvo = normalizar(instituicao)
+    if alvo not in {"ufba", "universidade federal da bahia"}:
+        raise ValueError("O piloto da Máquina 1 está autorizado somente para a UFBA.")
+    return [
+        item for item in fila
+        if normalizar(item.get("instituicao")) == "universidade federal da bahia"
+        and item.get("curso") == "Nutrição"
+        and item.get("validada") is True
+    ]
+
+
 def selecionar_janela(fila, limite):
     """Conclui o estado prioritário antes de avançar; novas IES vêm primeiro nele."""
     estados = [i.get("estado") for i in fila if i.get("estado")]
@@ -1535,15 +1548,7 @@ def executar(repo=None, duracao_maxima=480):
 
     if instituicao_piloto:
         # O piloto consulta somente a instituição escolhida e não reabre/modifica a fila nacional.
-        if normalizar(instituicao_piloto) not in {"universidade federal da bahia", "ufba"}:
-            raise ValueError("O piloto da Máquina 1 está autorizado somente para a UFBA.")
-        fila = repo.fila_estado("BA")
-        fila = [
-            item for item in fila
-            if normalizar(item.get("instituicao")) == "universidade federal da bahia"
-            and item.get("curso") == "Nutrição"
-            and item.get("validada") is True
-        ]
+        fila = filtrar_fila_piloto_ufba(repo.fila_estado("BA"), instituicao_piloto)
         if not fila:
             raise RuntimeError("UFBA não encontrada como instituição validada de Nutrição no banco.")
         print(f"📚 Piloto restrito: {len(fila)} registro(s) validado(s) da UFBA.", flush=True)
