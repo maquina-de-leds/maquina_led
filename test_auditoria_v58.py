@@ -126,17 +126,29 @@ class Maquina2Tests(unittest.TestCase):
         cursor = Mock(); query = Mock()
         for method in ('select', 'eq', 'limit'):
             getattr(cursor, method).return_value = cursor
-        for method in ('select', 'eq', 'is_', 'order', 'limit', 'gt'):
+        for method in ('select', 'eq', 'is_', 'order', 'limit', 'gt', 'or_'):
             getattr(query, method).return_value = query
         cursor.execute.return_value.data = []
         lead = self.candidato(); lead['qualificado'] = True; lead['instituicao'] = 'Instituto Saúde'
         query.execute.return_value.data = [lead]
         client.table.side_effect = [cursor, query]
-        with patch.object(e, 'supabase', client):
+        with patch.object(e, 'supabase', client), patch.object(e, 'ids_verificados_recentemente_m2', return_value=set()):
             self.assertEqual(len(e.buscar_pendentes()), 1)
         self.assertIn(unittest.mock.call('nao_contatar', False), query.eq.call_args_list)
         self.assertIn(unittest.mock.call('qualificado', True), query.eq.call_args_list)
         query.is_.assert_called_with('instagram', 'null')
+
+    def test_verificacao_m2_grava_checkpoint_sem_editar_lead(self):
+        client = Mock(); query = Mock()
+        query.select.return_value = query
+        query.eq.return_value = query
+        query.limit.return_value = query
+        query.execute.return_value.data = []
+        client.table.return_value = query
+        with patch.object(e, 'supabase', client):
+            e.registrar_verificacao_m2({'id': 7, 'nome': 'Ana Silva'})
+        self.assertEqual(client.table.call_args_list[0], unittest.mock.call('controle_busca'))
+        self.assertNotIn(unittest.mock.call('leds'), client.table.call_args_list)
 
     def test_nao_contatar_nem_valida(self):
         lead = self.candidato(); lead['nao_contatar'] = True
@@ -210,9 +222,10 @@ class RetomadaTests(unittest.TestCase):
 
     def test_backoff_e_teto_de_tentativas(self):
         repo = s.SupabaseRepo(Mock()); repo.controle_get = Mock()
+        repo.controle_salvar = Mock()
         for tentativas, minutos, esperado in [(1, 5, False), (1, 31, True), (3, 31, False), (3, 121, True), (5, 10000, False)]:
             repo.controle_get.return_value = {'status': 'erro', 'tentativas': tentativas, 'atualizado_em': (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat()}
-            self.assertEqual(repo.fonte_pode_retentar({'id': 1}, 'https://example.org/doc'), esperado)
+            self.assertEqual(repo.fonte_pode_retentar({'id': 1, 'instituicao': 'Universidade Teste'}, 'https://example.org/doc'), esperado)
 
     def test_url_adiada_nao_e_marcada_concluida(self):
         repo = RepoPendencias(); repo.pendentes['https://example.org/doc'] = '503'

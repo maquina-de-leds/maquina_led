@@ -7,9 +7,11 @@ from test_scraper import Repo
 class RepoPendencias(Repo):
     def __init__(self):
         super().__init__(); self.pendentes={}; self.concluidas=set()
-    def registrar_pendencia_fonte(self,item,url,erro=None,concluida=False,somente_nova=False):
+    def registrar_pendencia_fonte(self,item,url,erro=None,concluida=False,somente_nova=False,ignorada=False):
         if somente_nova and (url in self.pendentes or url in self.concluidas): return
         if concluida:
+            self.pendentes.pop(url,None); self.concluidas.add(url)
+        elif ignorada:
             self.pendentes.pop(url,None); self.concluidas.add(url)
         else: self.pendentes[url]=erro
     def fontes_pendentes(self,item): return list(self.pendentes)

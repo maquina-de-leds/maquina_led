@@ -144,20 +144,22 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertIn("maquina2_verificado_em.is.null", consulta.expressao)
         self.assertIn("maquina2_verificado_em.lt.2026-10-04", consulta.expressao)
 
-    def test_atualiza_somente_metadados_de_tentativa_da_maquina2(self):
+    def test_registra_cooldown_fora_da_tabela_de_leads(self):
         import ast
         from pathlib import Path
         tree = ast.parse(Path(m2.__file__).read_text())
         atualizacoes_leds = []
+        gravacoes_controle = []
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "update":
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
             chamada = ast.unparse(node.func.value)
-            if '.table("leds")' in chamada or ".table('leds')" in chamada:
+            if node.func.attr == "update" and ('.table("leds")' in chamada or ".table('leds')" in chamada):
                 atualizacoes_leds.append(node)
-        self.assertEqual(len(atualizacoes_leds), 1)
-        campos = {chave.value for chave in atualizacoes_leds[0].args[0].keys}
-        self.assertEqual(campos, {"maquina2_tentativas", "maquina2_verificado_em"})
+            if node.func.attr in {"insert", "update"} and ('.table("controle_busca")' in chamada or ".table('controle_busca')" in chamada):
+                gravacoes_controle.append(node)
+        self.assertEqual(len(atualizacoes_leds), 0)
+        self.assertGreaterEqual(len(gravacoes_controle), 2)
 
 if __name__ == "__main__":
     unittest.main()

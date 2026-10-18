@@ -55,21 +55,24 @@ class OperacaoNacionalTests(unittest.TestCase):
         from types import SimpleNamespace
         client = Mock()
         leads=[{'id': 1}, {'id': 2}]
-        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=leads), patch.object(e, 'processar_lead', side_effect=[e.JanelaEncerrada(), None]) as processar, patch.object(e, 'salvar_cursor_m2') as salvar_cursor, patch.dict(e.stats, {k:0 for k in e.stats}):
+        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=leads), patch.object(e, 'processar_lead', side_effect=[e.JanelaEncerrada(), None]) as processar, patch.object(e, 'salvar_cursor_m2') as salvar_cursor, patch.object(e, 'registrar_verificacao_m2') as registrar, patch.dict(e.stats, {k:0 for k in e.stats}):
             e.executar()
             self.assertEqual(processar.call_count,2)
             self.assertEqual([c.args for c in salvar_cursor.call_args_list],[(1,),(2,)])
-            client.table.assert_not_called()
+            registrar.assert_called_once_with(leads[1])
+            self.assertNotIn(unittest.mock.call('leds'), client.table.call_args_list)
 
     def test_falha_maquina2_sinalizada_apos_preservar_lote(self):
         import sys
         from types import SimpleNamespace
         client=Mock()
-        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=[{'id':1},{'id':2}]), patch.object(e, 'processar_lead', side_effect=[RuntimeError('banco'),None]) as processar, patch.object(e, 'salvar_cursor_m2') as salvar_cursor, patch.dict(e.stats, {k:0 for k in e.stats}):
+        leads=[{'id':1},{'id':2}]
+        with patch.dict(sys.modules, {'ddgs': SimpleNamespace(DDGS=MagicMock())}), patch.object(e, 'conectar_banco', return_value=client), patch.object(e, 'buscar_pendentes', return_value=leads), patch.object(e, 'processar_lead', side_effect=[RuntimeError('banco'),None]) as processar, patch.object(e, 'salvar_cursor_m2') as salvar_cursor, patch.object(e, 'registrar_verificacao_m2') as registrar, patch.dict(e.stats, {k:0 for k in e.stats}):
             with self.assertRaises(RuntimeError): e.executar()
             self.assertEqual(processar.call_count,2)
             self.assertEqual([c.args for c in salvar_cursor.call_args_list],[(1,),(2,)])
-            client.table.assert_not_called()
+            registrar.assert_called_once_with(leads[1])
+            self.assertNotIn(unittest.mock.call('leds'), client.table.call_args_list)
 
     def test_excecao_inesperada_nao_interrompe_outras_faculdades(self):
         repo=Mock(); repo.fila_nacional.return_value=[{'id':1,'instituicao':'A'},{'id':2,'instituicao':'B'}]

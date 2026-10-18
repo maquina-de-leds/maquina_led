@@ -39,6 +39,7 @@ PAUSA_MAX = 4
 
 MAX_RESULTADOS = 10
 ETAPA_CURSOR_M2 = "m2_enriquecimento_cursor_v1"
+ETAPA_VERIFICACAO_M2_PREFIX = "m2-verificado-lead:"
 
 
 stats = {
@@ -240,24 +241,63 @@ def salvar_cursor_m2(lead_id):
         supabase.table("controle_busca").insert(dados).execute()
 
 
+def ids_verificados_recentemente_m2(agora=None):
+    agora = agora or datetime.now(timezone.utc)
+    limite = (agora - timedelta(days=INTERVALO_REBUSCA_DIAS)).isoformat()
+    resposta = (
+        supabase.table("controle_busca")
+        .select("etapa")
+        .like("etapa", ETAPA_VERIFICACAO_M2_PREFIX + "%")
+        .gte("atualizado_em", limite)
+        .limit(10000)
+        .execute()
+    )
+    ids = set()
+    for registro in resposta.data or []:
+        etapa = str(registro.get("etapa") or "")
+        sufixo = etapa.removeprefix(ETAPA_VERIFICACAO_M2_PREFIX)
+        if sufixo.isdigit():
+            ids.add(int(sufixo))
+    return ids
+
+
+def registrar_verificacao_m2(lead):
+    """Registra o cooldown da Máquina 2 sem editar o registro original do lead."""
+    etapa = f"{ETAPA_VERIFICACAO_M2_PREFIX}{int(lead['id'])}"
+    existente = (
+        supabase.table("controle_busca")
+        .select("id,tentativas")
+        .eq("etapa", etapa)
+        .limit(1)
+        .execute()
+    )
+    atual = (existente.data or [None])[0]
+    agora_iso = datetime.now(timezone.utc).isoformat()
+    dados = {
+        "estado": "BR",
+        "cidade": "Nacional",
+        "instituicao": str(lead.get("nome") or f"Lead {lead['id']}")[:250],
+        "etapa": etapa,
+        "status": "verificado",
+        "tentativas": int((atual or {}).get("tentativas") or 0) + 1,
+        "atualizado_em": agora_iso,
+        "ultimo_erro": None,
+    }
+    if atual:
+        return (
+            supabase.table("controle_busca")
+            .update(dados)
+            .eq("id", atual["id"])
+            .execute()
+        )
+    dados["iniciado_em"] = agora_iso
+    return supabase.table("controle_busca").insert(dados).execute()
+
+
 def filtrar_pendentes_rebusca(consulta, agora=None):
     agora = agora or datetime.now(timezone.utc)
     limite = (agora - timedelta(days=INTERVALO_REBUSCA_DIAS)).isoformat()
     return consulta.or_(f"maquina2_verificado_em.is.null,maquina2_verificado_em.lt.{limite}")
-
-
-def registrar_verificacao_m2(lead):
-    tentativas = int(lead.get("maquina2_tentativas") or 0) + 1
-    return (
-        supabase.table("leds")
-        .update({
-            "maquina2_tentativas": tentativas,
-            "maquina2_verificado_em": datetime.now(timezone.utc).isoformat(),
-        })
-        .eq("id", lead["id"])
-        .is_("instagram", "null")
-        .execute()
-    )
 
 
 def buscar_pendentes():
@@ -272,29 +312,46 @@ def buscar_pendentes():
 
         cursor = obter_cursor_m2()
 
-        def carregar(cursor_id):
-            consulta = (
-                supabase.table("leds")
-                .select("id,nome,instagram,linkedin,whatsapp,instituicao,cidade,estado,ano_alvo,"
-                        "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,"
-                        "maquina2_tentativas,maquina2_verificado_em")
-                .eq('nao_contatar', False)
-                .eq('qualificado', True)
-                .is_('instagram', 'null')
-                .order('id')
-            )
-            consulta = filtrar_pendentes_rebusca(consulta)
-            if cursor_id:
-                consulta = consulta.gt('id', cursor_id)
-            return consulta.limit(LIMITE_LEADS_POR_EXECUCAO).execute().data or []
+        ids_verificados = ids_verificados_recentemente_m2()
 
-        registros = carregar(cursor)
-        if not registros and cursor:
+        def carregar(cursor_id):
+            encontrados = []
+            ultimo_id = cursor_id
+            while len(encontrados) < LIMITE_LEADS_POR_EXECUCAO:
+                consulta = (
+                    supabase.table("leds")
+                    .select("id,nome,instagram,linkedin,whatsapp,instituicao,cidade,estado,ano_alvo,"
+                            "periodo_alvo,proxima_acao,qualificado,nao_contatar,não_contatar,evidencia,fonte_url,"
+                            "maquina2_tentativas,maquina2_verificado_em")
+                    .eq('nao_contatar', False)
+                    .eq('qualificado', True)
+                    .is_('instagram', 'null')
+                    .order('id')
+                )
+                consulta = filtrar_pendentes_rebusca(consulta)
+                if ultimo_id:
+                    consulta = consulta.gt('id', ultimo_id)
+                pagina = consulta.limit(100).execute().data or []
+                if not pagina:
+                    return encontrados, ultimo_id, False
+                ultimo_id = int(pagina[-1]['id'])
+                encontrados.extend(
+                    lead for lead in pagina
+                    if int(lead['id']) not in ids_verificados
+                    and lead_apto_para_enriquecimento(lead)
+                )
+                if len(pagina) < 100:
+                    return encontrados, ultimo_id, False
+            return encontrados[:LIMITE_LEADS_POR_EXECUCAO], ultimo_id, True
+
+        leads, ultimo_id, mais_paginas = carregar(cursor)
+        if not leads and cursor:
             print("🔁 Fila M2 chegou ao fim; retomando do primeiro lead", flush=True)
             salvar_cursor_m2(0)
-            registros = carregar(0)
+            leads, ultimo_id, mais_paginas = carregar(0)
 
-        leads = [lead for lead in registros if lead_apto_para_enriquecimento(lead)]
+        if not leads and not mais_paginas and ultimo_id:
+            salvar_cursor_m2(0)
 
         stats["pendentes"] = len(
             leads
