@@ -117,11 +117,11 @@ def agrupar_por_busca(linhas: list[dict]) -> dict[str, list[dict]]:
 
 def handle_ja_no_cadastro(supabase, handle: str) -> bool:
     """Evita duplicar no destino um arroba já presente na tabela original."""
-    resposta = (supabase.table(LEADS_TABLE).select("instagram")
+    resposta = (supabase.table(LEADS_TABLE).select("instagram,instagram_url")
                .ilike("instagram", handle).limit(20).execute())
     for row in resposta.data or []:
         try:
-            if normalizar_handle(row.get("instagram")) == handle:
+            if any(normalizar_handle(row.get(field)) == handle for field in ("instagram", "instagram_url") if row.get(field)):
                 return True
         except ValueError:
             continue
@@ -147,15 +147,12 @@ def exportar(supabase, destino: str, limite: int = 25) -> int:
         .execute()
     )
     leads = [lead for lead in (resposta.data or []) if elegivel(lead)][:limite]
-    if not leads:
-        gravar_csv(destino, [])
-        return 0
 
     ids = [int(lead["id"]) for lead in leads]
     buscas_existentes = (
         supabase.table(QUEUE_TABLE).select("id,lead_origem_id,status")
         .in_("lead_origem_id", ids).execute().data or []
-    )
+    ) if ids else []
     por_lead = {str(row["lead_origem_id"]): row for row in buscas_existentes}
     novos = []
     for lead in leads:
@@ -170,7 +167,12 @@ def exportar(supabase, destino: str, limite: int = 25) -> int:
             "status": "pendente",
         })
     if novos:
-        supabase.table(QUEUE_TABLE).insert(novos).execute()
+        for novo in novos:
+            try:
+                supabase.table(QUEUE_TABLE).insert(novo).execute()
+            except Exception as erro:
+                if "23505" not in str(erro) and "duplicate" not in str(erro).lower():
+                    raise
 
     pendentes = (
         supabase.table(QUEUE_TABLE)
@@ -249,6 +251,7 @@ def importar(supabase, origem: str) -> dict[str, int]:
                 else:
                     raise
         status = "resultados_salvos" if any(r.get("instagram") for r in resultados) else "sem_resultado"
+        # A duplicate is a reviewed result, but not a newly captured candidate.
         supabase.table(QUEUE_TABLE).update({"status": status}).eq("id", int(busca_id)).execute()
         if status == "sem_resultado":
             sem_resultado += 1
