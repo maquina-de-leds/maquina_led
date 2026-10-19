@@ -864,9 +864,9 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
     # Prioridade operacional: descobrir arrobas públicos de Nutrição antes das fontes acadêmicas.
     # O salvamento continua sujeito à validação e deduplicação existentes.
     consultas = [
-        f'site:instagram.com/ {termos[0]} nutricionista Instagram',
-        f'site:instagram.com/ {termos[0]} nutri formanda 2026',
-        f'site:instagram.com/ {termos[0]} nutri formada 2025',
+        f'site:instagram.com/ {termos[0]} (Nutrição OR nutricionista) Instagram',
+        f'site:instagram.com/ {termos[0]} Nutrição nutri formanda 2026',
+        f'site:instagram.com/ {termos[0]} Nutrição nutri formada 2025',
         f'{termos[0]} estudantes Nutrição 2026 @ Instagram',
         f'{termos[0]} formandos Nutrição 2025 @ Instagram',
         f'site:linkedin.com/in {termos[0]} Nutrição instagram.com',
@@ -892,8 +892,8 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
     consultas += [f'site:instagram.com {termo} (nutricionista OR "estudante de Nutrição" OR graduanda OR graduando)' for termo in termos]
     consultas += [f'site:linkedin.com/in {termos[0]} Nutrição {ano} (formandos OR estudante OR nutricionista)'
                   for ano in (2025, 2026)]
-    consultas += [f'site:instagram.com {termo} Nutrição (faculdade OR turma OR formatura)'
-                  for termo in termos]
+    # As consultas sociais prioritárias já cobrem faculdade e formatura;
+    # não repetir uma variação genérica para cada alias da mesma instituição.
     return list(dict.fromkeys(consultas))
 
 
