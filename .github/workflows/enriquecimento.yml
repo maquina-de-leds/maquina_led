@@ -2,13 +2,6 @@ name: Enriquecimento de Leads
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "enriquecimento.py"
-      - "test_maquina2_instagram.py"
-      - ".github/workflows/enriquecimento.yml"
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
