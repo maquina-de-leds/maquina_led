@@ -233,6 +233,41 @@ class Maquina2InstagramTests(unittest.TestCase):
         self.assertEqual(m2.stats["erros"], 1)
 
 
+
+    def test_prazo_preserva_e_grava_candidatos_parciais(self):
+        class Busca:
+            def __init__(self): self.chamadas = 0
+            def text(self, *args, **kwargs):
+                self.chamadas += 1
+                if self.chamadas > 1:
+                    raise m2.JanelaEncerrada("prazo")
+                return [{"title": "Bia Nutricionista",
+                         "href": "https://www.instagram.com/bia.nutri/"}]
+        lead = {"id": 7, "nome": "Ana Souza Alves"}
+        with patch.object(m2, "montar_consultas_instagram", return_value=["Nutrição", "Nutricionista"]), \
+             patch.object(m2, "instagram_ja_usado", return_value=False), \
+             patch.object(m2, "pausa"), \
+             patch.object(m2, "salvar_candidato", return_value=True) as salvar:
+            with self.assertRaises(m2.JanelaEncerrada):
+                m2.processar_lead(Busca(), lead)
+        salvar.assert_called_once()
+        self.assertEqual(salvar.call_args.args[1]["instagram"], "@bia.nutri")
+        self.assertEqual(m2.stats["instagram_encontrado"], 1)
+
+    def test_prazo_nao_conta_gravacao_rejeitada_nem_ultrapassa_meta(self):
+        erro = m2.JanelaEncerrada("prazo")
+        erro.candidatos_parciais = [{"instagram": "@bia.nutri", "nome_perfil": "Bia"},
+                                    {"instagram": "@ana.nutri", "nome_perfil": "Ana"}]
+        m2.stats["instagram_encontrado"] = 49
+        with patch.object(m2, "buscar_instagram", side_effect=erro), \
+             patch.object(m2, "salvar_candidato", side_effect=[False, True]) as salvar:
+            with self.assertRaises(m2.JanelaEncerrada):
+                m2.processar_lead(object(), {"id": 7, "nome": "Ana Souza Alves"})
+        self.assertEqual(salvar.call_count, 2)
+        self.assertEqual(m2.stats["instagram_encontrado"], 50)
+        self.assertEqual(m2.stats["sem_contato"], 0)
+
+
 class CiclosMaquina2Tests(unittest.TestCase):
     def estado(self):
         return {"id": 9, "status": "processando", "indice_pesquisa": 100,

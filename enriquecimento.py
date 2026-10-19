@@ -673,46 +673,50 @@ def buscar_instagram(ddgs, lead, limite=None):
 
     candidatos = []
     vistos = set()
-    for consulta in montar_consultas_instagram(lead):
-        print(f"      🔎 {consulta}", flush=True)
-        try:
-            from scraper import buscar_web
-            resultados = buscar_web(
-                consulta + " -site:linkedin.com", max_results=MAX_RESULTADOS,
-                fetch_fn=lambda q, backend, limite: list(ddgs.text(
-                    q, backend=backend, max_results=limite
-                )),
-            )
-            if resultados is None:
-                raise RuntimeError("Google/Bing indisponíveis; consulta não concluída")
-        except Exception as erro:
-            stats["erros"] += 1
-            print(f"      ⚠️ Busca indisponível: {erro}", flush=True)
-            pausa()
-            continue
+    try:
+        for consulta in montar_consultas_instagram(lead):
+            print(f"      🔎 {consulta}", flush=True)
+            try:
+                from scraper import buscar_web
+                resultados = buscar_web(
+                    consulta + " -site:linkedin.com", max_results=MAX_RESULTADOS,
+                    fetch_fn=lambda q, backend, limite: list(ddgs.text(
+                        q, backend=backend, max_results=limite
+                    )),
+                )
+                if resultados is None:
+                    raise RuntimeError("Google/Bing indisponíveis; consulta não concluída")
+            except Exception as erro:
+                stats["erros"] += 1
+                print(f"      ⚠️ Busca indisponível: {erro}", flush=True)
+                pausa()
+                continue
 
-        for resultado in resultados:
-            if not resultado_compativel(resultado, lead):
-                continue
-            url = str(resultado.get("href") or resultado.get("url") or "")
-            if not url_permitida(url):
-                continue
-            candidato = _perfil_do_resultado(resultado)
-            if not candidato:
-                continue
-            handle = candidato["instagram"]
-            if handle in vistos:
-                continue
-            vistos.add(handle)
-            if instagram_ja_usado(handle, lead["id"]):
-                stats["instagram_repetido"] += 1
-                continue
-            candidato["consulta"] = consulta
-            candidatos.append(candidato)
-            print(f"      📸 Perfil de Nutrição encontrado: {handle}", flush=True)
-            if len(candidatos) >= limite:
-                return candidatos
-        pausa()
+            for resultado in resultados:
+                if not resultado_compativel(resultado, lead):
+                    continue
+                url = str(resultado.get("href") or resultado.get("url") or "")
+                if not url_permitida(url):
+                    continue
+                candidato = _perfil_do_resultado(resultado)
+                if not candidato:
+                    continue
+                handle = candidato["instagram"]
+                if handle in vistos:
+                    continue
+                vistos.add(handle)
+                if instagram_ja_usado(handle, lead["id"]):
+                    stats["instagram_repetido"] += 1
+                    continue
+                candidato["consulta"] = consulta
+                candidatos.append(candidato)
+                print(f"      📸 Perfil de Nutrição encontrado: {handle}", flush=True)
+                if len(candidatos) >= limite:
+                    return candidatos
+            pausa()
+    except JanelaEncerrada as erro:
+        erro.candidatos_parciais = candidatos
+        raise
     return candidatos
 
 
@@ -776,7 +780,12 @@ def processar_lead(ddgs, lead):
     stats["processados"] += 1
 
     restante = LIMITE_CANDIDATOS_POR_EXECUCAO - stats["instagram_encontrado"]
-    candidatos = buscar_instagram(ddgs, lead, limite=restante)
+    interrupcao = None
+    try:
+        candidatos = buscar_instagram(ddgs, lead, limite=restante)
+    except JanelaEncerrada as erro:
+        candidatos = getattr(erro, "candidatos_parciais", [])
+        interrupcao = erro
     salvos = 0
     for candidato in candidatos:
         if stats["instagram_encontrado"] >= LIMITE_CANDIDATOS_POR_EXECUCAO:
@@ -793,6 +802,10 @@ def processar_lead(ddgs, lead):
             stats["instagram_repetido"] += 1
             print(f"   Arroba já cadastrado: {candidato['instagram']}", flush=True)
 
+    if interrupcao is not None:
+        # O prazo interrompe a busca, não descarta resultados já encontrados.
+        # Propagar mantém o lead pendente; só gravações confirmadas contam.
+        raise interrupcao
     if salvos:
         return
 
