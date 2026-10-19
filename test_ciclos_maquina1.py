@@ -108,5 +108,25 @@ class CiclosMaquina1Tests(unittest.TestCase):
         dormir.assert_not_called()
 
 
+
+    def test_nao_repete_lote_sem_busca_fonte_ou_gravacao_real(self):
+        estado = self.estado()
+        repo = SimpleNamespace()
+        def lote(**kwargs):
+            # Visitar novamente um checkpoint em espera não é trabalho externo.
+            s.stats["instituicoes_processadas"] += 6
+        with patch.object(s.SupabaseRepo, "from_env", return_value=repo), \
+             patch.object(s, "carregar_ciclo_m1", return_value=estado), \
+             patch.object(s, "salvar_ciclo_m1"), \
+             patch.object(s, "contar_novos_leads_ciclo_m1", return_value=(0, 100)), \
+             patch.object(s, "executar", side_effect=lote) as executar, \
+             patch.object(s.time, "monotonic", return_value=0):
+            s.executar_ciclos_m1(duracao_maxima=60)
+        executar.assert_called_once()
+        self.assertEqual(estado["indice_pesquisa"], 100)
+        self.assertEqual(estado["leads_salvos"], 0)
+        self.assertEqual(estado["tentativas"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

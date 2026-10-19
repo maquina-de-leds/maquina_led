@@ -1729,6 +1729,8 @@ def executar_ciclos_m1(duracao_maxima=3000):
         repo._limite_novos_ciclo_m1 = META_CICLO_M1 - quantidade
         repo._novos_ciclo_m1 = 0
         antes = stats["instituicoes_processadas"]
+        trabalho_antes = (quantidade, stats["fontes_visitadas"],
+                          sum(item.get("consultas", 0) for item in RENDIMENTO_BUSCAS.values()))
         print(f"M1 CICLO: {quantidade}/50 novos leads qualificados confirmados no banco", flush=True)
         try:
             executar(repo=repo, duracao_maxima=max(0, prazo-time.monotonic()))
@@ -1738,7 +1740,11 @@ def executar_ciclos_m1(duracao_maxima=3000):
             quantidade, ultimo = contar_novos_leads_ciclo_m1(repo, estado)
             registrar_progresso_ciclo_m1(estado, quantidade, ultimo)
             salvar_ciclo_m1(repo, estado)
-        if estado["status"] != "pausa" and stats["instituicoes_processadas"] == antes:
+        trabalho_depois = (quantidade, stats["fontes_visitadas"],
+                           sum(item.get("consultas", 0) for item in RENDIMENTO_BUSCAS.values()))
+        if estado["status"] != "pausa" and (
+            stats["instituicoes_processadas"] == antes or trabalho_depois == trabalho_antes
+        ):
             print("M1 CICLO: sem avanço na fila; meta parcial preservada para próxima execução", flush=True)
             return
 
