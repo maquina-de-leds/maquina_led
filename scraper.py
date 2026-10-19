@@ -861,7 +861,16 @@ def consultas_leads(instituicao, alias=None, cidade=None, uf=None, adaptar=True)
             list(familias).index(familia),
         ))
     ORDEM_CONSULTAS_POR_INSTITUICAO.setdefault(chave, ordem_padrao.copy())
-    consultas = []
+    # Prioridade operacional: descobrir arrobas públicos de Nutrição antes das fontes acadêmicas.
+    # O salvamento continua sujeito à validação e deduplicação existentes.
+    consultas = [
+        f'site:instagram.com/ {termos[0]} nutricionista Instagram',
+        f'site:instagram.com/ {termos[0]} nutri formanda 2026',
+        f'site:instagram.com/ {termos[0]} nutri formada 2025',
+        f'{termos[0]} estudantes Nutrição 2026 @ Instagram',
+        f'{termos[0]} formandos Nutrição 2025 @ Instagram',
+        f'site:linkedin.com/in {termos[0]} Nutrição instagram.com',
+    ]
     for familia in ordem_padrao:
         for ano in (2025, 2026):
             for termo in termos:
