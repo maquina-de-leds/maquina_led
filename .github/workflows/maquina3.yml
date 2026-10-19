@@ -1,19 +1,7 @@
 name: Maquina 3 - listas publicas de formandos
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "maquina3.py"
-      - "test_maquina3.py"
-      - "test_*.py"
-      - "fontes_academicas.py"
-      - "scraper.py"
-      - ".github/workflows/maquina3.yml"
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
@@ -32,7 +20,7 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
       - name: Instalar dependencias
         run: pip install -r requirements.txt
       - name: Testar filtros, limite e isolamento de fontes
