@@ -1449,6 +1449,23 @@ def recuperar_pendencias_registradas(repo, fila):
     print("PENDÊNCIAS DOS LOGS PRESERVADAS: retentar as fontes sem reiniciar a faculdade",flush=True)
 
 
+def erro_pronto_para_retentativa(item, instante=None):
+    """Falhas não bloqueiam a fila; retentativas persistentes aguardam uma hora."""
+    if item.get("_status_checkpoint") != "erro":
+        return False
+    atualizado = item.get("_ultimo_checkpoint")
+    if not atualizado:
+        return True
+    try:
+        marcado = datetime.fromisoformat(str(atualizado).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return True
+    if marcado.tzinfo is None:
+        marcado = marcado.replace(tzinfo=timezone.utc)
+    instante = instante or datetime.now(timezone.utc)
+    return instante - marcado >= timedelta(hours=1)
+
+
 def fila_estado_atual(repo, fila):
     """Cursor persistente: ao esgotar um estado, avança sem voltar aos anteriores."""
     estados_presentes = {str(item.get("estado") or "").upper() for item in fila}
@@ -1460,17 +1477,27 @@ def fila_estado_atual(repo, fila):
     roteiro = ["SP"] + [sigla for sigla, _ in ESTADOS if sigla != "SP"]
     checkpoint = repo.controle_get(ETAPA_ROTEIRO_ESTADUAL)
     if checkpoint and checkpoint.get("status") == "concluido":
-        return []
-
-    estado = (checkpoint or {}).get("estado")
-    if estado not in roteiro:
-        estado = "SP"
-    indice = roteiro.index(estado)
+        erros_prontos = [item for item in fila if erro_pronto_para_retentativa(item)]
+        if not erros_prontos:
+            return []
+        estado = min((str(item.get("estado") or "").upper() for item in erros_prontos),
+                     key=ordem_estado)
+        print(f"RETRY DE FALHAS: retomando {estado}; tentativas com intervalo mínimo de 1 hora", flush=True)
+        indice = roteiro.index(estado)
+    else:
+        estado = (checkpoint or {}).get("estado")
+        if estado not in roteiro:
+            estado = "SP"
+        indice = roteiro.index(estado)
 
     while indice < len(roteiro):
         estado = roteiro[indice]
-        pendentes = [item for item in fila
-                     if str(item.get("estado") or "").upper() == estado]
+        itens_estado = [item for item in fila
+                        if str(item.get("estado") or "").upper() == estado]
+        novas_ou_retomas = [item for item in itens_estado
+                            if item.get("_status_checkpoint") != "erro"]
+        erros_prontos = [item for item in itens_estado if erro_pronto_para_retentativa(item)]
+        pendentes = novas_ou_retomas or erros_prontos
         repo.controle_salvar(ETAPA_ROTEIRO_ESTADUAL, {
             "estado": estado,
             "cidade": "Nacional",
@@ -1481,6 +1508,8 @@ def fila_estado_atual(repo, fila):
         })
         if pendentes:
             return pendentes
+        if itens_estado:
+            print(f"ESTADO AVANÇADO: {estado}; {len(itens_estado)} faculdade(s) com falha adiadas para a rodada de retentativa", flush=True)
         indice += 1
 
     repo.controle_salvar(ETAPA_ROTEIRO_ESTADUAL, {
@@ -1492,6 +1521,7 @@ def fila_estado_atual(repo, fila):
         "ultimo_erro": None,
     })
     return []
+
 
 
 def filtrar_fila_piloto_ufba(fila, instituicao="UFBA"):
